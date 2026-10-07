@@ -106,8 +106,8 @@ class Integrations:
             'ANTHROPIC_AUTH_TOKEN': key, 'ANTHROPIC_API_KEY': '',
             'ANTHROPIC_MODEL': 'claude-sonnet-4-5',
             'ANTHROPIC_DEFAULT_SONNET_MODEL': 'claude-sonnet-4-5',
-            'ANTHROPIC_DEFAULT_HAIKU_MODEL': 'claude-haiku-4-5',
-            'ANTHROPIC_DEFAULT_OPUS_MODEL': 'claude-opus-4-6-thinking',
+            'ANTHROPIC_DEFAULT_HAIKU_MODEL': 'claude-selected' if self.controller.preferences.get('claude-model') else 'claude-haiku-4-5',
+            'ANTHROPIC_DEFAULT_OPUS_MODEL': 'claude-selected' if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
             'API_TIMEOUT_MS': '604800000', 'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
         })
         self.write_json(path, settings)
@@ -131,7 +131,7 @@ class Integrations:
         split = re.search(r'^\s*\[', text, re.M)
         root, tables = (text[:split.start()], text[split.start():]) if split else (text, '')
         root = re.sub(r'^\s*(model|model_provider)\s*=.*\n?', '', root, flags=re.M)
-        model = self.controller.preferences.get('pro-model') or self.controller.model_aliases().get('claude-sonnet-4-5', 'gemini-3.1-pro-low')
+        model = 'gemini-selected' if self.controller.preferences.get('gemini-model') else self.controller.preferences.get('pro-model') or self.controller.model_aliases().get('claude-sonnet-4-5', 'gemini-3.1-pro-low')
         defaults = 'model = ' + json.dumps(model) + '\nmodel_provider = "gemini_accounts"\n'
         updated = defaults + root + '\n' + tables.rstrip() + '\n\n' + BEGIN + '\n' + self.provider_toml(key) + END + '\n'
         tomllib.loads(updated)
@@ -141,6 +141,11 @@ class Integrations:
 
     def configure_claude_desktop(self, key):
         desktop, meta_path, preset = self.paths()['claude_desktop']
+        family_models = self.controller.selected_family_models()
+        from model_names import model_name
+        models = [('claude-sonnet-4-5', 'Gemini · ' + model_name(family_models['gemini'], {}), 'sonnet', True),
+                  ('claude-selected' if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
+                   'Claude · ' + model_name(family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking', {}), 'opus', True)]
         self.write_json(preset, {
             'deploymentDisplayName': 'Gemini Accounts', 'inferenceCredentialKind': 'static',
             'modelDiscoveryEnabled': False, 'inferenceGatewayAuthScheme': 'bearer',
@@ -149,11 +154,7 @@ class Integrations:
             'claudeAiImport': {'bannerBehavior': 'detect', 'exportEnabled': True, 'enabled': True},
             'inferenceModels': [
                 {'name': name, 'labelOverride': label, 'anthropicFamilyTier': tier, 'isFamilyDefault': default}
-                for name, label, tier, default in (
-                    ('claude-sonnet-4-5', 'Gemini Pro', 'sonnet', True),
-                    ('claude-haiku-4-5', 'Gemini Flash', 'haiku', True),
-                    ('claude-sonnet-4-6', 'Claude Sonnet 4.6', 'sonnet', False),
-                    ('claude-opus-4-6-thinking', 'Claude Opus 4.6', 'opus', True))],
+                for name, label, tier, default in models],
         })
         meta = self.read_json(meta_path)
         entries = meta.setdefault('entries', [])

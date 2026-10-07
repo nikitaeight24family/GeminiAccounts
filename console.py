@@ -26,7 +26,7 @@ def confirm(prompt, yes=False):
 
 
 def family(model):
-    if model.startswith('gemini') or model in ('claude-sonnet-4-5', 'claude-haiku-4-5'):
+    if model.startswith('gemini') or model == 'claude-sonnet-4-5':
         return 'gemini'
     if model.startswith(('claude', 'gpt')):
         return 'claude'
@@ -207,26 +207,26 @@ class Terminal:
             time.sleep(2)
         raise AccountError('Google sign-in timed out. Run login again.')
 
-    def models(self, default=None, fast=None, interactive=False):
-        choices = self.controller.model_choices()
-        current = self.controller.model_aliases()
-        available = sorted(set(choices['pro'] + choices['flash']))
-        for index, model in enumerate(available, 1):
-            print(f'{index}. {model_name(model)}  [{model}]')
+    def models(self, gemini=None, claude=None, interactive=False):
+        choices = self.controller.family_model_choices()
+        current = self.controller.selected_family_models()
+        for group in ('claude', 'gemini'):
+            print('\nClaude (Antigravity)' if group == 'claude' else '\nGemini')
+            for index, model in enumerate(choices[group], 1):
+                print(f'{index}. {model_name(model, {})}  [{model}]')
         if interactive:
             try:
-                value = input('Default / Sonnet model number (Enter keeps current): ').strip()
-                if value and not 1 <= int(value) <= len(available):
-                    raise ValueError()
-                default = available[int(value) - 1] if value else None
-                value = input('Fast / Haiku model number (Enter keeps current): ').strip()
-                if value and not 1 <= int(value) <= len(available):
-                    raise ValueError()
-                fast = available[int(value) - 1] if value else None
+                selected = {}
+                for group in ('claude', 'gemini'):
+                    value = input(group.title() + ' model number (Enter keeps current): ').strip()
+                    if value and not 1 <= int(value) <= len(choices[group]):
+                        raise ValueError()
+                    selected[group] = choices[group][int(value) - 1] if value else current[group]
+                gemini, claude = selected['gemini'], selected['claude']
             except (ValueError, IndexError):
                 raise AccountError('Choose a model number from the list.') from None
-        if default or fast:
-            self.controller.set_model_choices(default or current['claude-sonnet-4-5'], fast or current['claude-haiku-4-5'])
+        if gemini or claude:
+            self.controller.set_family_models(gemini or current['gemini'], claude or current['claude'])
             print('Model aliases updated for new requests. To update the Codex default, run configure --clients codex (asks permission).')
 
     @staticmethod
@@ -246,9 +246,9 @@ def parser():
     commands.add_parser('serve', help='run gateway and quota monitoring; Ctrl+C stops services started here')
     commands.add_parser('status', help='show accounts, quotas, resets and last models')
     commands.add_parser('login', help='add a Google account through browser sign-in')
-    models = commands.add_parser('models', help='list available models or choose default / fast model aliases')
-    models.add_argument('--default', help='upstream model ID for Sonnet / Pro requests')
-    models.add_argument('--fast', help='upstream model ID for Haiku / Flash requests')
+    models = commands.add_parser('models', help='list or independently choose Claude and Gemini models')
+    models.add_argument('--gemini', help='Gemini model ID')
+    models.add_argument('--claude', help='Claude model ID in Antigravity')
     verify = commands.add_parser('verify', help='check verification after completing Google confirmation')
     verify.add_argument('account')
     verify.add_argument('--refresh-link', action='store_true', help='request and open a fresh verification URL')
@@ -280,7 +280,7 @@ def main(argv=None):
         elif command == 'login':
             terminal.login()
         elif command == 'models':
-            terminal.models(args.default, args.fast)
+            terminal.models(args.gemini, args.claude)
         elif command == 'configure':
             return 0 if terminal.configure(args.clients, args.yes) else 1
         elif command == 'verify':

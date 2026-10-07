@@ -372,7 +372,7 @@ class App(ctk.CTk):
         latest = sorted(self.activity_state['latest'].values(), key=lambda e: e['at'], reverse=True)
         if latest:
             model = latest[0].get('upstream_model') or self.model_aliases.get(latest[0]['model'], latest[0]['model'])
-            if model in ('claude-sonnet-4-5', 'claude-haiku-4-5') or model.startswith('gemini'):
+            if model == 'claude-sonnet-4-5' or model.startswith('gemini'):
                 return 'gemini'
             if model.startswith(('claude', 'gpt')):
                 return 'claude'
@@ -939,7 +939,7 @@ class App(ctk.CTk):
     @staticmethod
     def model_family(model):
         # These Claude-compatible aliases actually route to Gemini subscriptions.
-        if model in ('claude-sonnet-4-5', 'claude-haiku-4-5') or model.startswith('gemini'):
+        if model == 'claude-sonnet-4-5' or model.startswith('gemini'):
             return 'gemini'
         if model.startswith(('claude', 'gpt', 'o1', 'o3', 'o4')):
             return 'claude'
@@ -1303,15 +1303,15 @@ class App(ctk.CTk):
         window.configure(fg_color=PANEL)
         window.transient(self)
         self.label(window, 'Choose models', 23, bold=True).pack_configure(padx=24, pady=(20, 8))
-        self.label(window, 'Choose any available text model for each client slot.\nNew requests use your choice. Ongoing responses keep their model.', 12, MUTED).pack_configure(padx=24, pady=(0, 15))
+        self.label(window, 'Choose Claude and Gemini models independently.\nNew requests use your choice. Ongoing responses keep their model.', 12, MUTED).pack_configure(padx=24, pady=(0, 15))
         controls = ctk.CTkFrame(window, fg_color='transparent')
         controls.pack(fill='x', padx=24)
         controls.grid_columnconfigure(1, weight=1)
         selectors = {}
         options = {}
-        current = self.controller.model_aliases()
-        for row, (group, alias) in enumerate([('pro', 'claude-sonnet-4-5'), ('flash', 'claude-haiku-4-5')]):
-            ctk.CTkLabel(controls, text='Default / Sonnet' if group == 'pro' else 'Fast / Haiku', text_color=TEXT, width=120, anchor='w').grid(row=row, column=0, pady=7)
+        current = self.controller.selected_family_models()
+        for row, group in enumerate(('claude', 'gemini')):
+            ctk.CTkLabel(controls, text='Claude (Antigravity)' if group == 'claude' else 'Gemini', text_color=TEXT, width=145, anchor='w').grid(row=row, column=0, pady=7)
             selector = ctk.CTkOptionMenu(controls, values=['Loading…'], state='disabled', fg_color=CARD)
             selector.grid(row=row, column=1, sticky='ew', pady=7)
             selectors[group] = selector
@@ -1320,38 +1320,46 @@ class App(ctk.CTk):
             managed_codex = '# BEGIN Gemini Accounts managed provider' in codex_path.read_text('utf-8-sig')
         except OSError:
             managed_codex = False
-        update_codex = ctk.BooleanVar(value=managed_codex)
-        ctk.CTkCheckBox(window, text='Also update the Codex default model (asks permission)',
-            variable=update_codex).pack(anchor='w', padx=24, pady=(16, 10))
+        backups = self.integrations.backups()
+        managed_clients = [client for client, paths in self.integrations.paths().items()
+                           if any(str(path.resolve()) in backups for path in paths)]
+        if managed_codex and 'codex' not in managed_clients:
+            managed_clients.append('codex')
+        update_codex = ctk.BooleanVar(value=bool(managed_clients))
+        ctk.CTkCheckBox(window, text='Update connected client model menus (asks permission)',
+            variable=update_codex, state='normal' if managed_clients else 'disabled').pack(anchor='w', padx=24, pady=(16, 10))
         status = ctk.CTkLabel(window, text='Loading the account model catalog…', text_color=MUTED, wraplength=500, justify='left')
         status.pack(anchor='w', padx=24, pady=(0, 10))
 
         def apply():
             selected = {group: options[group][selector.get()] for group, selector in selectors.items()}
             if update_codex.get():
-                paths = '\n'.join(str(p) for p in self.integrations.paths()['codex'])
-                if not messagebox.askyesno('Update Codex configuration?',
-                    'The gateway model aliases will change, and these Codex files will be configured:\n\n' + paths +
+                paths = '\n'.join(str(p) for client in managed_clients for p in self.integrations.paths()[client])
+                if not messagebox.askyesno('Update connected client configurations?',
+                    'Model choices will change, and these client files will be configured:\n\n' + paths +
                     '\n\nThe default model and connection settings will change. Original files are backed up. '
-                    'Restart Codex to apply its new default. Allow these changes?', parent=window):
+                    'Restart clients to apply their updated menus and defaults. Allow these changes?', parent=window):
                     return
             apply_button.configure(state='disabled')
             update_client = bool(update_codex.get())
-            previous = self.controller.model_aliases()
             def change():
                 changed = False
                 try:
-                    aliases = self.controller.set_model_choices(selected['pro'], selected['flash'])
+                    previous_entries = self.controller.request('/oauth-model-alias').get('oauth-model-alias', {}).get('antigravity', [])
+                    previous_preferences = copy.deepcopy(self.controller.preferences)
+                    aliases = self.controller.set_family_models(selected['gemini'], selected['claude'])
                     changed = True
                     if update_client:
-                        self.integrations.apply(['codex'])
+                        self.integrations.apply(managed_clients)
                     return aliases, None
                 except Exception as error:
                     if changed:
                         try:
-                            self.controller.set_model_choices(previous['claude-sonnet-4-5'], previous['claude-haiku-4-5'])
+                            self.controller.request('/oauth-model-alias', 'PATCH', {'provider': 'antigravity', 'aliases': previous_entries})
+                            self.controller.preferences = previous_preferences
+                            self.controller.save()
                         except Exception:
-                            return None, 'Codex setup failed and model rollback failed. Reopen model selection and check the gateway.'
+                            return None, 'Client setup failed and model rollback failed. Reopen model selection and check the gateway.'
                     return None, str(error)
             def done(result):
                 aliases, error = result
@@ -1364,7 +1372,7 @@ class App(ctk.CTk):
                 self.model_aliases = aliases
                 self.activity = Activity(self.controller.data_dir / 'activity.json')
                 self.activity_state = copy.deepcopy(self.activity.state)
-                status.configure(text='Applied to new gateway requests.' + (' Restart Codex to use its new default.' if update_client else ''), text_color=GREEN)
+                status.configure(text='Applied to new gateway requests.' + (' Restart clients for updated menus and defaults.' if update_client else ''), text_color=GREEN)
                 self.render_activity()
             self.work(change, done)
 
@@ -1373,7 +1381,7 @@ class App(ctk.CTk):
         apply_button.pack(fill='x', padx=24)
         def load():
             try:
-                return self.controller.model_choices(), None
+                return self.controller.family_model_choices(), None
             except Exception as error:
                 return None, str(error)
         def loaded(result):
@@ -1383,18 +1391,21 @@ class App(ctk.CTk):
             if error:
                 status.configure(text=error, text_color='#ffbd93')
                 return
-            for group, alias in [('pro', 'claude-sonnet-4-5'), ('flash', 'claude-haiku-4-5')]:
+            if not choices['claude'] or not choices['gemini']:
+                status.configure(text='The account catalog must include both Claude and Gemini models.', text_color='#ffbd93')
+                return
+            for group in ('claude', 'gemini'):
                 options[group] = {}
                 for model in choices[group]:
-                    label = model_name(model)
+                    label = model_name(model, {})
                     if label in options[group]:
                         label += ' (' + model + ')'
                     options[group][label] = model
                 selectors[group].configure(values=list(options[group]), state='normal')
-                selected_label = next((label for label, model in options[group].items() if model == current.get(alias)), next(iter(options[group])))
+                selected_label = next((label for label, model in options[group].items() if model == current.get(group)), next(iter(options[group])))
                 selectors[group].set(selected_label)
             apply_button.configure(state='normal')
-            status.configure(text='Available text models: Pro Low / High, Flash, Lite, Claude and GPT. Availability depends on your accounts.', text_color=MUTED)
+            status.configure(text='Claude uses the Antigravity Claude quota. Gemini uses the Gemini quota.', text_color=MUTED)
         self.work(load, loaded)
 
     def connection_settings(self):

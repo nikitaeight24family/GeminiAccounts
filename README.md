@@ -43,7 +43,7 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 
 ## Features
 
-- **⚙ next to Gemini Accounts → Choose models:** choose any available text model independently for the Default / Sonnet and Fast / Haiku slots, including Pro Low / High, Flash, Lite, Sonnet, Opus and GPT-OSS. Applies to new gateway requests without restarting clients. Updating Codex's explicit default is optional and asks permission; restart Codex afterward. Availability follows your account catalog.
+- **⚙ next to Gemini Accounts → Choose models:** two independent lists: **Claude (Antigravity)** with available Haiku / Sonnet / Opus models, and **Gemini** with Pro Low / High, Flash and Lite. Applies to new gateway requests. Updating connected client menus and defaults is optional and asks permission; restart clients afterward. Availability follows your account catalog. Explicit Gemini Flash requests remain unchanged so quota pings stay cheap.
 - Four account quota bars: Gemini / Claude, **5h / 1w**, with reset countdowns and time-based colors.
 - Compact cards, sorted by Gemini's five-hour reset, with verification accounts pinned separately.
 - Pooled Gemini 5h / 1w bars with vertical markers for projected quota after exhausted windows reset.

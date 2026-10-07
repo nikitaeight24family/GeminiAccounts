@@ -6,6 +6,7 @@ def model_name(model, aliases=None):
     model = (DEFAULT_ALIASES if aliases is None else aliases).get(model, model)
     known = {
         'gemini-pro-agent': '3.1 Pro High',
+        'claude-haiku-4-5': 'Haiku 4.5',
         'claude-sonnet-4-6': 'Sonnet 4.6',
         'claude-opus-4-6-thinking': 'Opus 4.6 Thinking',
     }

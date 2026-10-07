@@ -321,6 +321,53 @@ class Controller:
         except (OSError, ValueError, yaml.YAMLError):
             return dict(DEFAULT_ALIASES)
 
+    def family_model_choices(self):
+        available = set()
+        for account in self.accounts():
+            if not account.get('access_issue'):
+                available.update(self.models(account))
+        choices = {
+            'gemini': sorted(m for m in available if m.startswith('gemini-') and m != 'gemini-selected' and 'image' not in m),
+            'claude': sorted(m for m in available if m.startswith(('claude-sonnet-', 'claude-opus-', 'claude-haiku-')) and m != 'claude-sonnet-4-5'),
+        }
+        for group, model in self.selected_family_models().items():
+            saved = self.preferences.get(group + '-model') or self.model_aliases().get(group + '-selected')
+            if saved and model.startswith(group + '-') and model not in choices[group]:
+                choices[group].append(model)
+                choices[group].sort()
+        return choices
+
+    def selected_family_models(self):
+        aliases = self.model_aliases()
+        gemini = self.preferences.get('gemini-model') or aliases.get('claude-sonnet-4-5', '')
+        claude = self.preferences.get('claude-model') or aliases.get('claude-selected', '')
+        return {'gemini': gemini if gemini.startswith('gemini-') else 'gemini-3.1-pro-low',
+                'claude': claude if claude.startswith('claude-') else 'claude-sonnet-4-6'}
+
+    def set_family_models(self, gemini, claude):
+        choices = self.family_model_choices()
+        if gemini not in choices['gemini'] or claude not in choices['claude']:
+            raise AccountError('Choose a Gemini model and a Claude model from the available account catalog.')
+        payload = self.request('/oauth-model-alias').get('oauth-model-alias') or {}
+        entries = [dict(item) for item in payload.get('antigravity', [])]
+        activity_path = self.data_dir / 'activity.json'
+        if activity_path.exists():
+            from activity import Activity
+            Activity(activity_path).pin_model_aliases({entry['alias']: entry['name'] for entry in entries})
+        targets = {model: claude for model in choices['claude']}
+        targets.update({'claude-sonnet-4-5': gemini, 'gemini-selected': gemini, 'claude-selected': claude})
+        # A model must resolve directly to itself, never through a self-alias.
+        entries = [entry for entry in entries if entry['alias'] not in targets]
+        from model_names import model_name
+        for alias, target in targets.items():
+            if alias != target:
+                entries.append({'alias': alias, 'name': target, 'fork': True,
+                                'force-mapping': True, 'display-name': model_name(target, {})})
+        self.request('/oauth-model-alias', 'PATCH', {'provider': 'antigravity', 'aliases': entries})
+        self.preferences.update({'gemini-model': gemini, 'claude-model': claude, 'pro-model': gemini})
+        self.save()
+        return {entry['alias']: entry['name'] for entry in entries}
+
     def model_choices(self):
         aliases = self.model_aliases()
         available = set()

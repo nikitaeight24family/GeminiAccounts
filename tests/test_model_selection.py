@@ -47,6 +47,39 @@ class ModelSelectionTests(unittest.TestCase):
         self.assertTrue(self.entries[0]['force-mapping'])
         self.assertEqual(self.controller.model_aliases()['claude-sonnet-4-5'], 'gemini-pro-agent')
 
+    def test_family_choices_are_separate_and_do_not_offer_router_aliases(self):
+        original = self.controller.models
+        self.controller.models = lambda account: original(account) + ['claude-haiku-4-5', 'claude-selected', 'gemini-selected']
+        choices = self.controller.family_model_choices()
+        self.assertIn('claude-haiku-4-5', choices['claude'])
+        self.assertIn('gemini-pro-agent', choices['gemini'])
+        self.assertTrue(all(m.startswith('claude-') for m in choices['claude']))
+        self.assertTrue(all(m.startswith('gemini-') for m in choices['gemini']))
+        self.assertNotIn('claude-selected', choices['claude'])
+        self.assertNotIn('gemini-selected', choices['gemini'])
+        self.assertNotIn('gemini-3.1-flash-image', choices['gemini'])
+
+    def test_family_selection_routes_claude_and_gemini_independently(self):
+        result = self.controller.set_family_models('gemini-pro-agent', 'claude-opus-4-6-thinking')
+        self.assertEqual(result['claude-sonnet-4-5'], 'gemini-pro-agent')
+        self.assertEqual(result['claude-sonnet-4-6'], 'claude-opus-4-6-thinking')
+        self.assertEqual(result['claude-selected'], 'claude-opus-4-6-thinking')
+        self.assertEqual(result['gemini-selected'], 'gemini-pro-agent')
+        self.assertNotIn('claude-opus-4-6-thinking', result)
+        self.assertNotIn('gemini-3-flash', result)  # Cheap quota pings stay cheap.
+        self.assertEqual(result['custom'], 'gemini-3-flash')
+        self.assertEqual(self.controller.selected_family_models(), {'gemini': 'gemini-pro-agent', 'claude': 'claude-opus-4-6-thinking'})
+        with self.assertRaises(AccountError):
+            self.controller.set_family_models('claude-opus-4-6-thinking', 'gemini-pro-agent')
+
+    def test_family_codex_setup_uses_live_gemini_selection(self):
+        self.controller.set_family_models('gemini-pro-agent', 'claude-opus-4-6-thinking')
+        client = Integrations(self.controller, Path(self.temp.name) / 'home', Path(self.temp.name) / 'local')
+        (self.controller.proxy_dir / 'client-key.txt').write_text('test-key')
+        client.apply(['codex'])
+        import tomllib
+        self.assertEqual(tomllib.loads(client.paths()['codex'][0].read_text())['model'], 'gemini-selected')
+
     def test_unknown_models_are_not_silently_applied(self):
         with self.assertRaises(AccountError):
             self.controller.set_model_choices('gemini-3.1-pro-high-does-not-exist', 'gemini-3-flash')
