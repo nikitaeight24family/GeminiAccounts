@@ -9,7 +9,7 @@ import threading
 import tomllib
 from pathlib import Path
 
-from backend import atomic_write, dpapi, AccountError
+from backend import atomic_write, dpapi, AccountError, storage_root
 
 PRESET_ID = '228c90e2-d605-4ba1-b695-12a49c93a766'
 BEGIN = '# BEGIN Gemini Accounts managed provider'
@@ -20,13 +20,14 @@ class Integrations:
     def __init__(self, controller, home=None, local=None):
         self.controller = controller
         self.home = Path(home or Path.home())
-        self.local = Path(local or os.environ['LOCALAPPDATA'])
+        self.local = Path(local or os.environ.get('LOCALAPPDATA', storage_root()))
+        self.windows_desktop = os.name == 'nt' or local is not None
         self.backup_path = controller.data_dir / 'client-config-backups.dpapi'
         self.lock = threading.RLock()
 
     def detected(self):
         return {
-            'claude_desktop': any((self.local / p).exists() for p in ('AnthropicClaude', 'Claude-3p', 'Claude')),
+            'claude_desktop': self.windows_desktop and any((self.local / p).exists() for p in ('AnthropicClaude', 'Claude-3p', 'Claude')),
             'claude_cli': bool(shutil.which('claude') or (self.home / '.claude').exists()),
             'codex': bool(shutil.which('codex') or (self.home / '.codex').exists()),
         }
@@ -46,7 +47,7 @@ class Integrations:
         try:
             return json.loads(dpapi(self.backup_path.read_bytes(), decrypt=True))
         except (OSError, ValueError) as error:
-            raise AccountError('Не удалось открыть резервную копию конфигураций.') from error
+            raise AccountError('Could not unlock the configuration backup.') from error
 
     def remember(self, paths):
         saved = self.backups()
@@ -68,10 +69,12 @@ class Integrations:
     def apply(self, clients):
         clients = list(dict.fromkeys(clients))
         if not clients or any(client not in self.paths() for client in clients):
-            raise AccountError('Выбери приложения для подключения.')
+            raise AccountError('Choose applications to connect.')
+        if 'claude_desktop' in clients and not self.windows_desktop:
+            raise AccountError('Automatic Claude Desktop setup is available on Windows. Use Claude Code CLI on this platform.')
         key = (self.controller.proxy_dir / 'client-key.txt').read_text('utf-8-sig').strip()
         if not key:
-            raise AccountError('Не найден локальный ключ подключения.')
+            raise AccountError('Local connection key not found.')
         # Validate existing documents before making any changes.
         paths = [p for client in clients for p in self.paths()[client]]
         for path in paths:
@@ -124,7 +127,7 @@ class Integrations:
         text = re.sub(re.escape(BEGIN) + r'.*?' + re.escape(END) + r'\s*', '', text, flags=re.S)
         config = tomllib.loads(text)
         if 'gemini_accounts' in config.get('model_providers', {}):
-            raise AccountError('Имя провайдера gemini_accounts уже занято другой конфигурацией.')
+            raise AccountError('The gemini_accounts provider name is already used by another configuration.')
         split = re.search(r'^\s*\[', text, re.M)
         root, tables = (text[:split.start()], text[split.start():]) if split else (text, '')
         root = re.sub(r'^\s*(model|model_provider)\s*=.*\n?', '', root, flags=re.M)
@@ -166,7 +169,7 @@ class Integrations:
             saved = self.backups()
             allowed = {str(p.resolve()) for group in self.paths().values() for p in group}
             if any(path not in allowed for path in saved):
-                raise AccountError('Резервная копия содержит неожиданный путь. Восстановление отменено.')
+                raise AccountError('The backup contains an unexpected path. Restoration cancelled.')
             for name, data in saved.items():
                 path = Path(name)
                 if data is None:
@@ -180,6 +183,8 @@ class Integrations:
     @staticmethod
     def restart_desktop(clients):
         """Called only after separate, explicit consent to interrupt running clients."""
+        if os.name != 'nt':
+            raise AccountError('Restart desktop clients manually on this platform.')
         env = os.environ.copy()
         env['GEMINI_ACCOUNTS_RESTART_CLIENTS'] = json.dumps(clients)
         script = r'''

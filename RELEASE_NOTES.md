@@ -1,15 +1,15 @@
-# Gemini Accounts 1.0.0 · Windows x64
+# Gemini Accounts 1.1.0 — English + terminal editions
 
-Установщик с готовым локальным сервисом и автоматической настройкой клиентов.
+The desktop interface, installer, messages and documentation are fully in English. Existing accounts and backups are preserved.
 
-**Начать:** скачать `GeminiAccounts-Setup.exe` → установить → добавить Google-аккаунт → разрешить настройку найденных приложений.
+**Windows desktop:** download `GeminiAccounts-Setup.exe` → **Install** → **Add Google account** → approve **Connect applications**.
 
-Приложение само готовит подключения Claude Desktop (Code), Claude Code CLI и Codex Desktop / CLI. Перед изменением конфигов показывает предупреждение и сохраняет защищённые резервные копии. После отдельного согласия перезапускает открытые настольные клиенты.
+**Terminal:** download the CLI archive for Windows x64, Mac Apple Silicon / Intel, or Linux x64 → extract → run `GeminiAccounts-CLI.exe` on Windows or `./gemini-accounts` on Mac / Linux. Python is included. First launch downloads a checksum-verified native service. Use the menu to sign in and approve setup; keep it open while working.
 
-**Вернуть как было:** ☰ → Подключить приложения → Вернуть как было · заводские настройки. Исходные конфиги восстанавливаются, Google-входы сохраняются.
+Includes account and pooled 5h / 1w quotas, forecasts, reset countdowns, independent Gemini / Claude subscriptions, last requested models, verification controls, native failover and streaming quota waits.
 
-Также включены четыре полоски квоты на аккаунт, общие шкалы 5h / 1w, подтверждение Google, переключение аккаунтов, ожидание восстановления квоты, журнал запросов и название последней модели в карточке.
+Setup always requires consent. Desktop **Restore previous settings / reset preferences** or terminal `restore` returns original client configs and preserves Google sign-ins. Later config edits are replaced by the backup after confirmation.
 
-Проверены 50 автоматических проверок, точный откат конфигов, живой Responses API и Codex CLI через локальный провайдер. Доступность моделей и лимиты зависят от Google Antigravity; клиенты устанавливаются отдельно.
+Windows supports Claude Desktop Code, Claude Code CLI and Codex Desktop / CLI. Mac terminal mode supports Claude Code CLI and Codex CLI. Mac executables are not notarized; macOS may require approval in Privacy & Security. Source mode is also available.
 
-`SHA256SUMS.txt` содержит контрольную сумму установщика. Исходный код и инструкция находятся в репозитории.
+See the English [quick start](https://github.com/nikitaeight24family/GeminiAccounts#readme) and [terminal guide](https://github.com/nikitaeight24family/GeminiAccounts/blob/main/CLI.md). Google Antigravity determines eligibility, models and quotas. Clients are installed separately. `SHA256SUMS.txt` lists release checksums.

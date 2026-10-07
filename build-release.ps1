@@ -11,6 +11,9 @@ if ($LASTEXITCODE -ne 0) {throw 'Dependency installation failed'}
 if ($LASTEXITCODE -ne 0) {throw 'Manager build failed'}
 & $Python -m PyInstaller --noconfirm --onefile --windowed --name GeminiQuotaQueue --collect-all tzdata --distpath $payload --workpath (Join-Path $build 'queue') --specpath $build quota_queue.py
 if ($LASTEXITCODE -ne 0) {throw 'Queue build failed'}
+& $Python -m PyInstaller --noconfirm --onefile --name GeminiAccounts-CLI --collect-all tzdata --distpath dist --workpath (Join-Path $build 'console') --specpath $build console.py
+if ($LASTEXITCODE -ne 0) {throw 'Terminal build failed'}
+Compress-Archive -LiteralPath 'dist/GeminiAccounts-CLI.exe','CLI.md','LICENSE','THIRD_PARTY.md' -DestinationPath 'dist/GeminiAccounts-CLI-windows-x64.zip' -Force
 $archive=Join-Path $build 'CLIProxyAPI_8.0.16_windows_amd64.zip'
 if (-not (Test-Path -LiteralPath $archive)) {
     Invoke-WebRequest 'https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.16/CLIProxyAPI_8.0.16_windows_amd64.zip' -OutFile $archive

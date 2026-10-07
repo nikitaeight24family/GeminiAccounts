@@ -1,6 +1,4 @@
 customtkinter==5.2.2
-PyYAML>=6,<7
-bcrypt>=4,<6
+-r requirements-cli.txt
 pyinstaller>=6,<7
 Pillow>=11,<13
-tzdata>=2025

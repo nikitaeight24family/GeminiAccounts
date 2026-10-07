@@ -1,0 +1,4 @@
+PyYAML>=6,<7
+bcrypt>=4,<6
+cryptography>=44,<51
+tzdata>=2025

@@ -25,7 +25,7 @@ def prepare_update(root):
         try:
             with urllib.request.urlopen(request, timeout=3) as response:
                 if json.load(response).get('jobs'):
-                    raise RuntimeError('Есть активные запросы. Дождись их завершения перед обновлением.')
+                    raise RuntimeError('Requests are running. Wait for them to finish before updating.')
         except OSError:
             pass
     env = os.environ.copy()
@@ -70,7 +70,7 @@ def install(payload, root, shortcuts=True):
             'requests': {'streaming': {'keepalive-seconds': 5}},
         }
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    atomic_write(manager / 'installation.json', json.dumps({'version': '1.0.0'}).encode())
+    atomic_write(manager / 'installation.json', json.dumps({'version': '1.1.0'}).encode())
     if shortcuts:
         # PowerShell receives paths as environment data, never executable interpolation.
         env = os.environ.copy()
@@ -85,22 +85,22 @@ def main():
     payload = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'payload'
     root = Controller().data_dir.parent
     window = tk.Tk()
-    window.title('Установка Gemini Accounts')
+    window.title('Install Gemini Accounts')
     window.geometry('510x270')
     window.configure(bg='#191f2b')
     tk.Label(window, text='Gemini Accounts', font=('Segoe UI', 24, 'bold'), bg='#191f2b', fg='#edf2fa').pack(pady=(25, 15))
-    tk.Label(window, text='Менеджер аккаунтов и подключение Claude / Codex.\nНастройка клиентов — только с твоего согласия.\nПри обновлении службы Gemini Accounts перезапустятся.\nВходы и конфигурации сохраняются.', font=('Segoe UI', 11), bg='#191f2b', fg='#9daec4').pack()
+    tk.Label(window, text='Account manager and local Claude / Codex connection.\nClient settings are changed only with your consent.\nUpdating restarts Gemini Accounts services.\nSaved sign-ins and configurations are preserved.', font=('Segoe UI', 11), bg='#191f2b', fg='#9daec4').pack()
     def perform():
-        button.configure(state='disabled', text='Устанавливаем…')
+        button.configure(state='disabled', text='Installing…')
         window.update_idletasks()
         try:
             executable = install(payload, root)
             subprocess.Popen([str(executable)], creationflags=subprocess.CREATE_NO_WINDOW)
             window.destroy()
         except Exception as error:
-            button.configure(state='normal', text='Установить')
-            messagebox.showerror('Не удалось установить', 'Закрой Gemini Accounts перед обновлением.\n' + str(error), parent=window)
-    button = tk.Button(window, text='Установить', command=perform, font=('Segoe UI', 13, 'bold'), bg='#739aff', fg='#10141d', relief='flat', padx=45, pady=8)
+            button.configure(state='normal', text='Install')
+            messagebox.showerror('Installation failed', 'Close Gemini Accounts before updating.\n' + str(error), parent=window)
+    button = tk.Button(window, text='Install', command=perform, font=('Segoe UI', 13, 'bold'), bg='#739aff', fg='#10141d', relief='flat', padx=45, pady=8)
     button.pack(pady=24)
     window.mainloop()
 

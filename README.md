@@ -1,52 +1,74 @@
 # Gemini Accounts
 
-Windows-приложение для Google-аккаунтов Antigravity: сохранённые входы, четыре полоски квоты, выбор аккаунта и локальное подключение Claude / Codex.
+Google Antigravity account manager with Gemini / Claude quota monitoring and a local gateway for Claude Code and Codex. English interface and documentation. Available as a **Windows desktop app** and a **terminal app for Windows, macOS and Linux**.
 
-## Начать за три шага
+## Windows desktop: three steps
 
-1. [Скачать установщик](https://github.com/nikitaeight24family/GeminiAccounts/releases/latest/download/GeminiAccounts-Setup.exe) и нажать **Установить**. Python и ручное редактирование файлов для менеджера не нужны.
-2. Нажать **Добавить Google-аккаунт** и завершить вход. Если нужна дополнительная проверка Google, откроется страница подтверждения; аккаунт закрепится наверху и включится после успешной проверки.
-3. В окне **Подключить приложения** разрешить настройку найденных клиентов. Приложение само сохранит исходные конфиги, внесёт настройки и предложит перезапуск.
+1. [Download GeminiAccounts-Setup.exe](https://github.com/nikitaeight24family/GeminiAccounts/releases/latest/download/GeminiAccounts-Setup.exe) and click **Install**. No Python or administrator access required.
+2. Click **Add Google account** and complete browser sign-in. If Google requires verification, its page opens and the account stays pinned above ready accounts until verification succeeds.
+3. Open **Connect applications** and approve setup of installed clients. Original configs are backed up. Restarting running clients requires separate consent.
 
-Клиенты должны быть установлены отдельно. После настройки запускайте их как обычно. На рабочем столе появится ярлык Gemini Accounts. Повторная установка сохраняет входы; активные запросы блокируют обновление.
+A desktop shortcut is created. Updates preserve accounts and configurations; active requests block an update. Install Claude / Codex clients separately.
 
-## Подключения
+## Terminal: Windows, macOS and Linux
 
-| Клиент | Что настраивается |
-|---|---|
-| Claude Desktop | Преднастройка локального gateway во вкладке Code. Gemini Pro / Flash и доступные Claude-модели. Обычные веб-чаты Claude этим подключением не заменяются. |
-| Claude Code CLI | Существующий settings.json: адрес, локальный ключ, модели и ожидание квоты. Запуск обычной командой claude, продолжение через claude --resume. |
-| Codex Desktop / CLI | Провайдер Responses API в config.toml и модель по умолчанию. Отдельный gemini-accounts.config.toml для codex --profile gemini-accounts в современных версиях CLI. |
+Download the matching CLI archive from [Releases](https://github.com/nikitaeight24family/GeminiAccounts/releases/latest), extract it and open a terminal in that folder. Python is included. The first run downloads a checksum-verified native service.
 
-Все изменения — после предупреждения с перечнем файлов. Перезапуск с прерыванием текущей работы требует отдельного согласия. Проекты, история и файлы авторизации клиентов не удаляются. История между разными приложениями не переносится. Организационные политики могут запретить сторонний провайдер.
+| Platform | Archive | Start |
+| --- | --- | --- |
+| Windows x64 | `GeminiAccounts-CLI-windows-x64.zip` | `.\GeminiAccounts-CLI.exe` |
+| Mac with Apple Silicon | `GeminiAccounts-CLI-macos-arm64.tar.gz` | `./gemini-accounts` |
+| Mac with Intel | `GeminiAccounts-CLI-macos-x64.tar.gz` | `./gemini-accounts` |
+| Linux x64 | `GeminiAccounts-CLI-linux-x64.tar.gz` | `./gemini-accounts` |
 
-## Вернуть как было
+Use the interactive menu for sign-in, quotas, verification, client setup and restoration. Keep it open while using clients. **Ctrl+C / Exit** stops services started by that terminal and preserves accounts. Services already running from another instance are reused and are not stopped on exit.
 
-**☰ → Подключить приложения → Вернуть как было · заводские настройки**. Подтвердите восстановление. Приложение вернёт точные исходные конфиги до первого подключения и удалит созданные им файлы, которых раньше не было. Позднейшие изменения этих конфигов заменятся резервной копией — об этом есть предупреждение. Google-входы сохраняются. Затем можно согласиться на перезапуск клиентов.
+Mac executables are not notarized. macOS may require approval in **System Settings → Privacy & Security**. Source launch is also available. See the [terminal guide](CLI.md).
 
-## Возможности
+## Connections and restoration
 
-- Gemini и Claude/GPT: 5h и 1w, время до восстановления, цвет по близости сброса.
-- Компактные карточки, сортировка по пятичасовому сбросу Gemini, две общие полоски с отметками будущего остатка.
-- Приоритет доступных аккаунтов с ближайшим сбросом и переключение при исчерпании квоты. Gemini и Claude могут работать на разных аккаунтах одновременно.
-- Отдельные значки и переливающиеся рамки последних успешно использованных аккаунтов каждой группы.
-- Статистика запросов, переключений, ошибок и причин.
-- Ожидание квоты через SSE keep-alive, затем настоящий ответ. Отмена клиента отменяет ожидание; незавершённые запросы не сохраняются на диск.
-- Через три минуты после обнаружения полного 5h окна — минимальный «Привет» с одним выходным токеном через Gemini Flash / GPT-OSS, если работа сама не начала расход. При исчерпанной недельной квоте пинг пропускается.
-- Данные обновляются раз в минуту, отсчёты — раз в 15 секунд. ☰ скрывает подробности без повторной загрузки интерфейса.
+| Client | Changes after approval |
+| --- | --- |
+| Claude Desktop on Windows | Local gateway preset for the **Code** tab; Gemini Pro / Flash aliases and available Claude models. Ordinary web chats retain their own connection. |
+| Claude Code CLI, all supported platforms | Gateway URL, local key, model defaults and quota-wait settings merged into `~/.claude/settings.json`. Start with `claude`; continue with `claude --resume`. |
+| Codex Desktop on Windows / Codex CLI | Responses API provider and default model in `~/.codex/config.toml`; separate `gemini-accounts.config.toml` for modern `codex --profile gemini-accounts`. |
 
-## Доступ и хранение
+Before any changes, the app lists affected files and asks for consent. Projects, sign-ins and session history are preserved. History is not transferred between applications. Organizational policies may prevent third-party providers. Automatic Claude Desktop setup and desktop client restarting are Windows-only; Mac terminal mode configures Claude Code CLI and Codex CLI.
 
-Доступность моделей и квоты определяет Google Antigravity для конкретного аккаунта. Подписка веб-сайта Gemini сама по себе не гарантирует доступ к Claude или ко всем моделям. Это не официальное приложение Google, Anthropic или OpenAI.
+**Restore:** desktop **☰ → Connect applications → Restore previous settings / reset preferences**, or terminal `./gemini-accounts restore`. After confirmation, exact original configs are restored and files that did not exist before setup are removed. Later edits to those files are replaced by their original backups. App preferences return to defaults. **Google sign-ins are kept.** Restart clients afterward.
 
-Входы хранит CLIProxyAPI в локальной папке ClaudeGemini/auth. Установка — в LocalAppData, без прав администратора; при существующей установке через Codex может использоваться каталог LocalCache. В релизе нет чужих Google-входов, API-ключей и истории. Каждый компьютер получает собственные случайные ключи.
+## Features
 
-Внешний API: http://127.0.0.1:8317; внутренний сервис: 127.0.0.1:8318. Оба доступны только на этом компьютере. Ключ управления и резервные копии защищены Windows DPAPI. Не публикуйте установленную папку auth, локальные ключи и конфиги клиентов.
+- Four account quota bars: Gemini / Claude, **5h / 1w**, with reset countdowns and time-based colors.
+- Compact cards, sorted by Gemini's five-hour reset, with verification accounts pinned separately.
+- Pooled Gemini 5h / 1w bars with vertical markers for projected quota after exhausted windows reset.
+- Last requested model in card headers; independent last-used Gemini and Claude subscription badges.
+- Prioritizes available accounts with the earliest reset. Native failover switches exhausted accounts. Gemini and Claude can use different accounts simultaneously.
+- Request, failure and switch statistics with reasons.
+- Streaming keep-alives while waiting for genuine quota blocks; the real response follows when quota is available. Client cancellation cancels the wait. Pending requests are not saved to disk.
+- Waits three minutes after detecting a full 5h quota before a minimal `Hi` request with one output token through Gemini Flash / GPT-OSS, unless client work already starts the window. Exhausted weekly quotas are skipped.
+- Quotas update every minute. Desktop countdowns update every 15 seconds. Terminal monitoring runs while the menu / `serve` is open.
 
-## Разработка
+## Availability and storage
 
-Python 3.12, зависимости requirements.txt; сборка Windows x64 — build-release.ps1. CLIProxyAPI 8.0.16 включён в установщик под MIT; его лицензия устанавливается рядом с сервисом.
+Google Antigravity determines account eligibility, models and quotas. A Gemini web subscription alone does not guarantee access to Claude or every model. This is an independent project, not an official Google, Anthropic or OpenAI application.
 
-Проверены установка в отдельный каталог, уникальные ключи, сохранение конфигурации при обновлении, повторная настройка, точный откат, интерфейс, очередь Messages / Responses и живой поток Responses API. Интерфейсы настройки клиентов могут меняться с обновлениями.
+Gateway: `127.0.0.1:8317`; native service: `127.0.0.1:8318`. Both are local-only. Each installation receives random keys. Releases contain no personal sign-ins, private keys or history.
 
-Документация: [Codex](https://learn.chatgpt.com/docs/config-file/config-advanced), [Claude Code](https://code.claude.com/docs/en/env-vars), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
+Windows uses LocalAppData, or an existing Codex LocalCache installation. macOS uses `~/Library/Application Support/GeminiAccounts`; Linux uses `$XDG_DATA_HOME/GeminiAccounts` or `~/.local/share/GeminiAccounts`. `GEMINI_ACCOUNTS_HOME` selects an explicit runtime root. Google sign-ins are in `ClaudeGemini/auth/`.
+
+Windows protects management keys, verification state and backups with **DPAPI**. Mac / Linux encrypt these files with **Fernet** and a user-only local storage key; this is file-permission protection, not Keychain integration. Keep the storage key with the protected data. Never publish installed auth folders, keys or client configs.
+
+## Development
+
+Python 3.12+. Desktop: `requirements.txt`; terminal-only: `requirements-cli.txt` (no Tk or GUI dependencies).
+
+```sh
+python -m pip install -r requirements-cli.txt
+python console.py --help
+python -m unittest tests.test_console tests.test_accounts tests.test_activity tests.test_quota_queue tests.test_quota_starts tests.test_routing
+```
+
+Windows build: `build-release.ps1`. Terminal binary: `python -m PyInstaller --onefile --name gemini-accounts --collect-all tzdata console.py`. GitHub Actions builds and tests Windows, Mac Apple Silicon / Intel and Linux editions. Native CLIProxyAPI is pinned to **8.0.16**, with committed SHA-256 checksums and its license included. Client configuration interfaces may change with client updates.
+
+Documentation: [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-advanced), [Claude Code environment variables](https://code.claude.com/docs/en/env-vars), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).

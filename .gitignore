@@ -13,3 +13,4 @@ preferences.json
 activity.json
 quota-starts.json
 *.log
+/.venv/

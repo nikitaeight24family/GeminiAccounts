@@ -18,9 +18,9 @@ class ProviderHighlightTests(unittest.TestCase):
 
     def test_wait_caption_is_short_and_names_actual_provider(self):
         jobs = [{'model': 'claude-opus-4-6-thinking', 'retry_at': 1000 + 151 * 3600}]
-        self.assertEqual(App.quota_wait_text(jobs, now=1000), 'до Claude · 151ч 00м')
+        self.assertEqual(App.quota_wait_text(jobs, now=1000), 'until Claude · 151h 00m')
         jobs.append({'model': 'claude-sonnet-4-5', 'retry_at': 1000 + 22 * 60})
-        self.assertEqual(App.quota_wait_text(jobs, now=1000), 'до Claude · 151ч 00м  /  до Gemini · 22м')
+        self.assertEqual(App.quota_wait_text(jobs, now=1000), 'until Claude · 151h 00m  /  until Gemini · 22m')
 
     def test_independent_selections_aliases_and_disabled_latest(self):
         state = {'latest': {

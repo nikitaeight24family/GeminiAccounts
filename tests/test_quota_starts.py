@@ -28,7 +28,7 @@ class QuotaStartTests(unittest.TestCase):
             self.assertEqual(call[2]['url'], 'https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent')
             self.assertEqual(call[2]['auth_index'], 'idx')
             self.assertEqual(json.loads(call[2]['data'])['request']['generationConfig']['maxOutputTokens'], 1)
-            self.assertEqual(json.loads(call[2]['data'])['request']['contents'][0]['parts'][0]['text'], 'Привет')
+            self.assertEqual(json.loads(call[2]['data'])['request']['contents'][0]['parts'][0]['text'], 'Hi')
             self.assertIn(json.loads(call[2]['data'])['model'], ('gemini-3-flash', 'gpt-oss-120b-medium'))
         self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=1100), [])
         restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request

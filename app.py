@@ -89,19 +89,19 @@ class App(ctk.CTk):
         self.details_toggle = self.button(sidebar_header, '☰', self.toggle_details)
         self.details_toggle.configure(height=26, width=28, font=('Segoe UI', 20), fg_color='transparent')
         self.details_toggle.pack(side='right')
-        self.add_button = self.button(self.sidebar, '+  Добавить Google-аккаунт', self.add_account, primary=True)
+        self.add_button = self.button(self.sidebar, '+  Add Google account', self.add_account, primary=True)
         self.add_button.configure(height=30)
         self.add_button.pack(fill='x', padx=16, pady=(0, 6))
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
         self.account_list.pack(fill='both', expand=True, padx=12)
         self.account_list._scrollbar.grid_remove()
-        self.service = ctk.CTkLabel(self.sidebar, text='Подключение…', text_color=MUTED, font=('Segoe UI', 10), height=14)
+        self.service = ctk.CTkLabel(self.sidebar, text='Connecting…', text_color=MUTED, font=('Segoe UI', 10), height=14)
         self.service.pack(anchor='w', padx=18)
         self.total_quota_frame = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.total_quota_frame.pack(fill='x', padx=18, pady=(0, 5))
         total_header = ctk.CTkFrame(self.total_quota_frame, fg_color='transparent')
         total_header.pack(fill='x')
-        self.total_quota_title = ctk.CTkLabel(total_header, text='Gemini · 5h · общий остаток', height=18, font=('Segoe UI', 11), text_color=TEXT)
+        self.total_quota_title = ctk.CTkLabel(total_header, text='Gemini · 5h · pooled remaining', height=18, font=('Segoe UI', 11), text_color=TEXT)
         self.total_quota_title.pack(side='left')
         self.total_quota_value = ctk.CTkLabel(total_header, text='—', height=18, font=('Segoe UI', 12, 'bold'), text_color=MUTED)
         self.total_quota_value.pack(side='right')
@@ -119,7 +119,7 @@ class App(ctk.CTk):
         weekly_frame.pack(fill='x', padx=18, pady=(0, 6))
         weekly_header = ctk.CTkFrame(weekly_frame, fg_color='transparent')
         weekly_header.pack(fill='x')
-        self.total_weekly_title = ctk.CTkLabel(weekly_header, text='Gemini · 1w · общий остаток',
+        self.total_weekly_title = ctk.CTkLabel(weekly_header, text='Gemini · 1w · pooled remaining',
             height=18, font=('Segoe UI', 11), text_color=TEXT)
         self.total_weekly_title.pack(side='left')
         self.total_weekly_value = ctk.CTkLabel(weekly_header, text='—', height=18,
@@ -138,47 +138,47 @@ class App(ctk.CTk):
         self.body.grid(row=0, column=1, sticky='nsew', padx=32, pady=28)
         body_header = ctk.CTkFrame(self.body, fg_color='transparent')
         body_header.pack(fill='x')
-        ctk.CTkLabel(body_header, text='Сохранённые входы', font=('Segoe UI', 30, 'bold'), text_color=TEXT).pack(side='left')
-        self.button(body_header, 'Подключить приложения', self.connection_settings).pack(side='right')
-        ctk.CTkLabel(self.body, text='Переключай аккаунты, продолжая те же сессии Claude.', text_color=MUTED, font=('Segoe UI', 14)).pack(anchor='w', pady=(4, 24))
+        ctk.CTkLabel(body_header, text='Saved accounts', font=('Segoe UI', 30, 'bold'), text_color=TEXT).pack(side='left')
+        self.button(body_header, 'Connect applications', self.connection_settings).pack(side='right')
+        ctk.CTkLabel(self.body, text='Switch accounts while continuing your Claude sessions.', text_color=MUTED, font=('Segoe UI', 14)).pack(anchor='w', pady=(4, 24))
         self.mode_frame = ctk.CTkFrame(self.body, fg_color=CARD, corner_radius=14)
         self.mode_frame.pack(fill='x', pady=(0, 18))
-        self.mode_label = ctk.CTkLabel(self.mode_frame, text='Загружаем аккаунты…', font=('Segoe UI', 14, 'bold'), text_color=TEXT)
+        self.mode_label = ctk.CTkLabel(self.mode_frame, text='Loading accounts…', font=('Segoe UI', 14, 'bold'), text_color=TEXT)
         self.mode_label.pack(anchor='w', padx=18, pady=(15, 4))
-        self.mode_note = ctk.CTkLabel(self.mode_frame, text='Выбранные аккаунты используются в подключённом Claude.', text_color=MUTED, font=('Segoe UI', 12))
+        self.mode_note = ctk.CTkLabel(self.mode_frame, text='Connected clients use the selected accounts.', text_color=MUTED, font=('Segoe UI', 12))
         self.mode_note.pack(anchor='w', padx=18, pady=(0, 12))
-        self.pool_button = self.button(self.mode_frame, 'Использовать все • автоподбор', lambda: self.action(lambda: self.controller.route(), 'Автоподбор включён.'))
+        self.pool_button = self.button(self.mode_frame, 'Use all • automatic routing', lambda: self.action(lambda: self.controller.route(), 'Automatic routing enabled.'))
         self.pool_button.pack(anchor='w', padx=18, pady=(0, 15))
-        self.mode_activity = ctk.CTkLabel(self.mode_frame, text='Последний запрос: ждём данные прокси', text_color=MUTED, font=('Segoe UI', 12), anchor='w')
+        self.mode_activity = ctk.CTkLabel(self.mode_frame, text='Last request: waiting for proxy data', text_color=MUTED, font=('Segoe UI', 12), anchor='w')
         self.mode_activity.pack(fill='x', padx=18, pady=(0, 10), before=self.pool_button)
         self.detail = ctk.CTkScrollableFrame(self.body, fg_color='transparent')
         self.detail.pack(fill='both', expand=True)
         self.stats_view = ctk.CTkScrollableFrame(self.body, fg_color='transparent')
-        self.stats_title = self.label(self.stats_view, 'Работа автоподбора', 22, bold=True)
-        self.stats_strategy = self.label(self.stats_view, 'Подключаем наблюдение…', 13, MUTED)
-        self.label(self.stats_view, 'Приоритет: ближайший сброс доступной квоты', 15, bold=True)
-        self.policy_control = ctk.CTkSegmentedButton(self.stats_view, values=['Текущая модель', 'Gemini', 'Claude / GPT'], command=self.set_policy_group)
-        self.policy_control.set({'gemini': 'Gemini', 'claude': 'Claude / GPT'}.get(self.controller.preferences.get('reset-group'), 'Текущая модель'))
+        self.stats_title = self.label(self.stats_view, 'Automatic routing', 22, bold=True)
+        self.stats_strategy = self.label(self.stats_view, 'Starting monitoring…', 13, MUTED)
+        self.label(self.stats_view, 'Priority: earliest reset among available accounts', 15, bold=True)
+        self.policy_control = ctk.CTkSegmentedButton(self.stats_view, values=['Current model', 'Gemini', 'Claude / GPT'], command=self.set_policy_group)
+        self.policy_control.set({'gemini': 'Gemini', 'claude': 'Claude / GPT'}.get(self.controller.preferences.get('reset-group'), 'Current model'))
         self.policy_control.pack(anchor='w', pady=(0, 6))
-        self.policy_label = self.label(self.stats_view, 'Получаем лимиты для расчёта очереди…', 12, MUTED)
-        self.stats_latest = self.label(self.stats_view, 'Последний успешный запрос: пока нет данных', 16, bold=True)
-        self.stats_note = self.label(self.stats_view, 'Аккаунт определяется по завершённым запросам. Во время генерации прокси не сообщает текущий аккаунт. Для разных моделей аккаунты могут отличаться.', 12, MUTED)
+        self.policy_label = self.label(self.stats_view, 'Loading quotas to rank accounts…', 12, MUTED)
+        self.stats_latest = self.label(self.stats_view, 'Last successful request: no data yet', 16, bold=True)
+        self.stats_note = self.label(self.stats_view, 'Accounts are identified from completed requests. The proxy does not report the account during generation. Different models may use different accounts.', 12, MUTED)
         self.stats_totals = self.label(self.stats_view, '', 13)
         self.stats_accounts = ctk.CTkFrame(self.stats_view, fg_color='transparent')
         self.stats_accounts.pack(fill='x', pady=(0, 12))
         controls = ctk.CTkFrame(self.stats_view, fg_color='transparent')
         controls.pack(fill='x', pady=(8, 6))
-        self.label(controls, 'Журнал запросов и переключений', 16, bold=True)
-        self.journal_filter = ctk.CTkSegmentedButton(controls, values=['Все события', 'Переключения', 'Ошибки'], command=lambda _: self.render_activity())
-        self.journal_filter.set('Все события')
+        self.label(controls, 'Requests and account switches', 16, bold=True)
+        self.journal_filter = ctk.CTkSegmentedButton(controls, values=['All events', 'Switches', 'Errors'], command=lambda _: self.render_activity())
+        self.journal_filter.set('All events')
         self.journal_filter.pack(anchor='w', pady=(0, 8))
         self.stats_journal = ctk.CTkTextbox(self.stats_view, height=300, fg_color=CARD, text_color=TEXT, font=('Segoe UI', 12), wrap='word')
         self.stats_journal.pack(fill='x')
         self.stats_observed = self.label(self.stats_view, '', 12, MUTED)
-        self.view_switch = ctk.CTkSegmentedButton(self.body, values=['Аккаунт и лимиты', 'Статистика автоподбора'], command=self.change_view)
-        self.view_switch.set('Аккаунт и лимиты')
+        self.view_switch = ctk.CTkSegmentedButton(self.body, values=['Account and quotas', 'Routing statistics'], command=self.change_view)
+        self.view_switch.set('Account and quotas')
         self.view_switch.pack(before=self.detail._parent_frame, anchor='w', pady=(0, 10))
-        self.notice = ctk.CTkLabel(self.body, text='Входы сохраняются после закрытия приложения.', text_color=MUTED, font=('Segoe UI', 12), wraplength=660, justify='left')
+        self.notice = ctk.CTkLabel(self.body, text='Sign-ins are preserved when the application closes.', text_color=MUTED, font=('Segoe UI', 12), wraplength=660, justify='left')
         self.notice.pack(anchor='w', pady=(12, 0))
         self.protocol('WM_DELETE_WINDOW', self.close)
         self.after(100, self.consume)
@@ -241,7 +241,7 @@ class App(ctk.CTk):
                 result = fn()
                 self.mailbox.put((done, result, None, mutation))
             except Exception as exc:
-                error = str(exc) if isinstance(exc, AccountError) else 'Не удалось выполнить действие. Попробуй обновить список.'
+                error = str(exc) if isinstance(exc, AccountError) else 'Could not complete this action. Try reloading the list.'
                 self.mailbox.put((done, None, error, mutation))
         threading.Thread(target=run, daemon=True).start()
 
@@ -254,7 +254,7 @@ class App(ctk.CTk):
                 self.pool_button.configure(state='normal')
             if error:
                 self.notice.configure(text=error, text_color='#ffbd93')
-                self.service.configure(text='●  Требуется внимание', text_color='#ffbd93')
+                self.service.configure(text='●  Needs attention', text_color='#ffbd93')
             else:
                 done(result)
         if not self.closed:
@@ -277,18 +277,18 @@ class App(ctk.CTk):
             self.controller.save()
             self.after(500, self.connection_settings)
         self.items = items
-        self.service.configure(text='●  Подключение работает', text_color=GREEN)
+        self.service.configure(text='●  Connected', text_color=GREEN)
         if self.selected not in {a['name'] for a in items}:
             self.selected = items[0]['name'] if items else None
         enabled = [a for a in items if not a['disabled']]
         if not enabled:
-            mode = 'Ни один аккаунт не используется'
+            mode = 'No accounts enabled'
         elif len(enabled) == len(items) and self.controller.preferences.get('mode') != 'single':
-            mode = f'Автоподбор • активных аккаунтов: {len(enabled)}'
+            mode = f'Automatic routing • enabled accounts: {len(enabled)}'
         elif len(enabled) == 1:
-            mode = 'Для Claude: ' + self.display_name(enabled[0])
+            mode = 'For Claude: ' + self.display_name(enabled[0])
         else:
-            mode = f'Активных аккаунтов: {len(enabled)} из {len(items)}'
+            mode = f'Enabled accounts: {len(enabled)} of {len(items)}'
         self.mode_label.configure(text=mode)
         self.draw_account_list()
         if self.detail_account != self.selected:
@@ -305,7 +305,7 @@ class App(ctk.CTk):
     def change_view(self, value):
         self.detail.pack_forget()
         self.stats_view.pack_forget()
-        view = self.stats_view if value == 'Статистика автоподбора' else self.detail
+        view = self.stats_view if value == 'Routing statistics' else self.detail
         view.pack(fill='both', expand=True, before=self.notice)
 
     def start_activity(self):
@@ -325,7 +325,7 @@ class App(ctk.CTk):
                 accounts, records, strategy = self.controller.activity_snapshot()
                 return accounts, copy.deepcopy(self.activity.ingest(records, accounts)), strategy, None, self.controller.quota_wait_status()
             except Exception:
-                return None, None, None, 'Нет связи с прокси. Показаны последние данные.', {'jobs': []}
+                return None, None, None, 'Cannot reach the proxy. Showing cached data.', {'jobs': []}
         def done(result):
             self.activity_busy = False
             accounts, state, strategy, error, quota_wait = result
@@ -341,7 +341,7 @@ class App(ctk.CTk):
                 if waiting:
                     self.service.configure(text=self.quota_wait_text(waiting), text_color='#f7ca70')
                 else:
-                    self.service.configure(text='●  Подключение работает', text_color=GREEN)
+                    self.service.configure(text='●  Connected', text_color=GREEN)
                 latest = max(state['latest'].values(), key=lambda e: e['at'], default=None)
                 if latest:
                     try:
@@ -386,13 +386,13 @@ class App(ctk.CTk):
             self.queue_policy()
             return
         if self.controller.preferences.get('mode') == 'single':
-            self.policy_label.configure(text='Выбран один аккаунт вручную. Автоматическая очередь приостановлена.')
+            self.policy_label.configure(text='One account is selected manually. Automatic ranking is paused.')
             return
         group = self.target_policy_group()
         rows = rank_accounts(self.items, self.quota_cache, group)
         title = 'Gemini' if group == 'gemini' else 'Claude / GPT'
         if not rows or all(r['tier'] == 2 for r in rows):
-            self.policy_label.configure(text=f'Очередь для {title}: ждём свежие лимиты Google.')
+            self.policy_label.configure(text=f'Account ranking for {title}: waiting for fresh Google quota data.')
             return
         if self.policy_rows == rows and self.policy_group == group:
             actual = {a['name']: a.get('priority') for a in self.items}
@@ -403,7 +403,7 @@ class App(ctk.CTk):
             try:
                 return self.controller.apply_reset_priority(rows), None
             except Exception as exc:
-                return False, str(exc) if isinstance(exc, AccountError) else 'Не удалось применить приоритет.'
+                return False, str(exc) if isinstance(exc, AccountError) else 'Could not apply account priorities.'
         def done(result):
             self.policy_busy = False
             applied, error = result
@@ -411,47 +411,47 @@ class App(ctk.CTk):
                 self.policy_label.configure(text=error, text_color='#ffbd93')
                 return
             if not applied:
-                self.policy_label.configure(text='Состав активных аккаунтов изменился. Пересчитываем очередь.')
+                self.policy_label.configure(text='Enabled accounts changed. Recalculating priorities.')
                 self.queue_policy()
                 return
             self.policy_rows, self.policy_group = rows, group
             names = {a['name']: self.display_name(a) for a in self.items}
-            lines = [f'Очередь для {title} • пересчёт после обновления лимитов.']
+            lines = [f'Account ranking for {title} • recalculated after quota updates.']
             for index, row in enumerate(rows, 1):
                 reset = ' • ' + self.activity_time(row['reset']) if row['reset'] else ''
                 lines.append(f"{index}. {names.get(row['name'], row['name'])} — {row['reason']}{reset}")
-            lines.append('Общий приоритет прокси рассчитан для этой группы. Последняя очередь действует и после закрытия приложения.')
+            lines.append('Proxy priorities are calculated for this group. The last ranking remains active after the application closes.')
             self.policy_label.configure(text='\n'.join(lines), text_color=MUTED)
-            self.mode_note.configure(text=f'Приоритет по ближайшему сбросу • {title}. Квота и ошибки учитываются автоматически.')
+            self.mode_note.configure(text=f'Earliest-reset priority • {title}. Quotas and errors are handled automatically.')
         self.work(apply, done)
 
     @staticmethod
     def activity_time(value):
         try:
-            return datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone(ZoneInfo('Asia/Bangkok')).strftime('%d.%m %H:%M:%S')
+            return datetime.fromisoformat(value.replace('Z', '+00:00')).astimezone().strftime('%d.%m %H:%M:%S')
         except (ValueError, AttributeError):
-            return 'Время неизвестно'
+            return 'Time unknown'
 
     def render_activity(self):
         state = self.activity_state
         by_name = {a['name']: a for a in self.items}
         def name(key):
-            return self.display_name(by_name[key]) if key in by_name else key or 'Неизвестный аккаунт'
+            return self.display_name(by_name[key]) if key in by_name else key or 'Unknown account'
         strategy = getattr(self, 'activity_strategy', 'unknown')
-        text = ('Приоритет по ближайшему сбросу • ' + ('Gemini' if self.policy_group == 'gemini' else 'Claude / GPT')) if self.policy_rows else 'Сначала один аккаунт → при недоступности другой' if strategy == 'fill-first' else 'Аккаунты по кругу' if strategy == 'round-robin' else 'Стратегия: ' + strategy
+        text = ('Earliest-reset priority • ' + ('Gemini' if self.policy_group == 'gemini' else 'Claude / GPT')) if self.policy_rows else 'Fill one account first → switch when unavailable' if strategy == 'fill-first' else 'Round-robin accounts' if strategy == 'round-robin' else 'Strategy: ' + strategy
         enabled = sum(not a['disabled'] for a in self.items)
-        self.stats_strategy.configure(text=f'{text} • включено аккаунтов: {enabled} • обновление каждые 5 секунд', text_color=MUTED)
+        self.stats_strategy.configure(text=f'{text} • enabled accounts: {enabled} • updated every 5 seconds', text_color=MUTED)
         latest = sorted(state['latest'].values(), key=lambda e: e['at'], reverse=True)
         if latest:
             last = latest[0]
-            self.stats_latest.configure(text='Последний успешный запрос: ' + name(last['name']) + '\n' + MODEL_LABELS.get(last['model'], last['model']) + ' • ' + self.activity_time(last['at']))
-            self.mode_activity.configure(text='Последний ответ: ' + name(last['name']) + ' • ' + self.activity_time(last['at']))
+            self.stats_latest.configure(text='Last successful request: ' + name(last['name']) + '\n' + MODEL_LABELS.get(last['model'], last['model']) + ' • ' + self.activity_time(last['at']))
+            self.mode_activity.configure(text='Last response: ' + name(last['name']) + ' • ' + self.activity_time(last['at']))
         stats = state['stats']
         success = sum(v['success'] for v in stats.values())
         failed = sum(v['failed'] for v in stats.values())
         tokens = sum(v['tokens'] for v in stats.values())
         switches = sum(bool(e['switch']) for e in state['events'])
-        self.stats_totals.configure(text=f'За время наблюдения: {success} ответов • {failed} ошибок • {switches} переключений в журнале • {tokens:,} токенов')
+        self.stats_totals.configure(text=f'Since monitoring started: {success} responses • {failed} errors • {switches} switches in the log • {tokens:,} tokens')
         for key in list(self.activity_rows):
             if key not in by_name:
                 self.activity_rows.pop(key).destroy()
@@ -462,16 +462,16 @@ class App(ctk.CTk):
             own = stats.get(key, {})
             count = own.get('success', 0) + own.get('failed', 0)
             average = own.get('latency_ms', 0) / count / 1000 if count else 0
-            status = 'Приостановлен' if account['disabled'] else 'Ожидание / ограничение' if account.get('unavailable') or account.get('cooldowns') else 'Доступен'
-            self.activity_rows[key].configure(text=f"{name(key)} • {status}\nПрокси с запуска: {account.get('success') or 0} успешных / {account.get('failed') or 0} ошибок\nНаблюдение: {count} попыток • {own.get('tokens', 0):,} токенов • среднее {average:.1f} с" + (' • последний ' + self.activity_time(own['last']) if own.get('last') else ''))
+            status = 'Paused' if account['disabled'] else 'Waiting / restricted' if account.get('unavailable') or account.get('cooldowns') else 'Available'
+            self.activity_rows[key].configure(text=f"{name(key)} • {status}\nProxy since startup: {account.get('success') or 0} successful / {account.get('failed') or 0} errors\nObserved: {count} attempts • {own.get('tokens', 0):,} tokens • average {average:.1f} s" + (' • last ' + self.activity_time(own['last']) if own.get('last') else ''))
         mode = self.journal_filter.get()
-        events = [e for e in state['events'] if mode == 'Все события' or (mode == 'Переключения' and e['switch']) or (mode == 'Ошибки' and e['failed'])]
+        events = [e for e in state['events'] if mode == 'All events' or (mode == 'Switches' and e['switch']) or (mode == 'Errors' and e['failed'])]
         lines = []
         for e in reversed(events[-100:]):
-            title = 'ПЕРЕКЛЮЧЕНИЕ' if e['switch'] else 'ОШИБКА' if e['failed'] else 'ОТВЕТ'
+            title = 'SWITCH' if e['switch'] else 'ERROR' if e['failed'] else 'RESPONSE'
             route = (name(e['from']) + ' → ' if e['from'] else '') + name(e['name'])
-            lines.append(f"{self.activity_time(e['at'])} • {title}\n{route} • {MODEL_LABELS.get(e['model'], e['model'])}\n{e['reason']} • {e['latency_ms'] / 1000:.1f} с • {e['tokens']:,} токенов\n")
-        content = '\n'.join(lines) or 'Событий пока нет. Новые запросы появятся автоматически.'
+            lines.append(f"{self.activity_time(e['at'])} • {title}\n{route} • {MODEL_LABELS.get(e['model'], e['model'])}\n{e['reason']} • {e['latency_ms'] / 1000:.1f} s • {e['tokens']:,} tokens\n")
+        content = '\n'.join(lines) or 'No events yet. New requests will appear automatically.'
         if getattr(self, 'journal_content', None) != content:
             scroll = self.stats_journal.yview()[0]
             self.stats_journal.configure(state='normal')
@@ -480,7 +480,7 @@ class App(ctk.CTk):
             self.stats_journal.configure(state='disabled')
             self.stats_journal.yview_moveto(scroll)
             self.journal_content = content
-        self.stats_observed.configure(text='Наблюдение с ' + self.activity_time(state['since']) + ' (Бангкок). Журнал сохраняется после закрытия; сбор идёт, пока приложение открыто. Хранятся последние 2000 событий.')
+        self.stats_observed.configure(text='Monitoring since ' + self.activity_time(state['since']) + ' (local time). The log persists after closing; monitoring runs while the application is open. The latest 2000 events are kept.')
 
     def draw_account_list(self):
         self.update_total_quota()
@@ -521,7 +521,7 @@ class App(ctk.CTk):
                     options = {'fill': 'x', 'padx': 5, 'pady': (6, 3)}
                     separator.pack(**options)
                     self.account_group_widgets.append((index, separator, options))
-                title = f'Нужно подтвердить · {pending_count}' if pending else f'Рабочие аккаунты · {len(accounts) - pending_count}'
+                title = f'Verification required · {pending_count}' if pending else f'Ready accounts · {len(accounts) - pending_count}'
                 header = ctk.CTkLabel(self.account_list, text=title, height=19, anchor='w',
                     font=('Segoe UI', 11, 'bold'), text_color='#f7ca70' if pending else MUTED)
                 options = {'fill': 'x', 'padx': 6, 'pady': (0, 3)}
@@ -539,14 +539,14 @@ class App(ctk.CTk):
             countdown = {}
             verification_frame = ctk.CTkFrame(card, fg_color='transparent')
             verification_frame.grid_columnconfigure((0, 3), weight=1)
-            verify = self.button(verification_frame, 'Подтвердить', lambda n=name: self.open_verification(n))
+            verify = self.button(verification_frame, 'Verify', lambda n=name: self.open_verification(n))
             refresh_link = self.button(verification_frame, '↻', lambda n=name: self.refresh_verification_link(n))
             refresh_link.configure(height=22, width=24, font=('Segoe UI', 18))
             refresh_link.grid(row=0, column=1, padx=3)
             copy_link = self.button(verification_frame, '⧉', lambda n=name: self.copy_verification_link(n))
             copy_link.configure(height=22, width=24, font=('Segoe UI Symbol', 15))
             copy_link.grid(row=0, column=2, padx=(0, 3))
-            retry = self.button(verification_frame, 'Я подтвердил', lambda n=name: self.retry_verification(n))
+            retry = self.button(verification_frame, 'I verified', lambda n=name: self.retry_verification(n))
             for column, action in ((0, verify), (3, retry)):
                 action.configure(height=22, width=88, font=('Segoe UI', 11))
                 action.grid(row=0, column=column, sticky='ew', padx=1)
@@ -635,21 +635,21 @@ class App(ctk.CTk):
         return f'{remaining * 100:.1f}'.replace('.', ',') + '%'
 
     def sidebar_account_status(self, account):
-        status = 'Приостановлен' if account['disabled'] else ('Ожидание / лимит' if account['unavailable'] else 'Доступен')
+        status = 'Paused' if account['disabled'] else ('Waiting / quota' if account['unavailable'] else 'Available')
         last = max(self.activity_state['latest'].values(), key=lambda e: e['at'], default=None)
         if last and last['name'] == account['name'] and not account['disabled']:
             try:
-                moment = datetime.fromisoformat(last['at'].replace('Z', '+00:00')).astimezone(ZoneInfo('Asia/Bangkok'))
-                status = 'Последний ответ ' + moment.strftime('%H:%M:%S')
+                moment = datetime.fromisoformat(last['at'].replace('Z', '+00:00')).astimezone()
+                status = 'Last response ' + moment.strftime('%H:%M:%S')
             except (ValueError, TypeError):
                 pass
         if account.get('access_issue') == 'verification':
-            status = 'Нужно подтвердить Google'
+            status = 'Google verification required'
         elif account.get('access_issue') == 'login':
-            status = 'Нужно повторить вход'
+            status = 'Sign in again'
         elif account.get('access_issue') == 'denied':
-            status = 'Google запретил доступ'
-        return status + ' · ' + str(account.get('success') or 0) + ' ответов'
+            status = 'Google denied access'
+        return status + ' · ' + str(account.get('success') or 0) + ' responses'
 
     def open_verification(self, name):
         account = next((a for a in self.items if a['name'] == name), None)
@@ -661,14 +661,14 @@ class App(ctk.CTk):
         if account and account.get('verification_url'):
             self.clipboard_clear()
             self.clipboard_append(account['verification_url'])
-            self.notice.configure(text='Ссылка подтверждения скопирована.', text_color=GREEN)
+            self.notice.configure(text='Verification link copied.', text_color=GREEN)
         else:
-            self.notice.configure(text='Сначала обнови ссылку кнопкой ↻.', text_color='#f7ca70')
+            self.notice.configure(text='Refresh the link using ↻ first.', text_color='#f7ca70')
 
     def retry_verification(self, name):
         account = next((a for a in self.items if a['name'] == name), None)
         if account:
-            self.action(lambda: self.controller.retry_verified_account(account), 'Google принял проверочный запрос. Аккаунт подтверждён, повтори запрос Claude.')
+            self.action(lambda: self.controller.retry_verified_account(account), 'Google accepted the check. Account verified; retry your Claude request.')
 
     def refresh_verification_link(self, name):
         account = next((a for a in self.items if a['name'] == name), None)
@@ -682,9 +682,9 @@ class App(ctk.CTk):
             self.loaded(accounts)
             if issue.get('verification_url'):
                 webbrowser.open(issue['verification_url'])
-                self.notice.configure(text='Свежая ссылка подтверждения открыта в браузере.', text_color=GREEN)
+                self.notice.configure(text='A fresh verification link opened in your browser.', text_color=GREEN)
             else:
-                self.notice.configure(text='Google принял проверочный запрос. Подтверждение больше не требуется.', text_color=GREEN)
+                self.notice.configure(text='Google accepted the check. Verification is no longer required.', text_color=GREEN)
         self.work(refresh, done, mutation=True)
 
     def quota_groups(self, name):
@@ -724,9 +724,9 @@ class App(ctk.CTk):
                             'weekly_remaining': weekly.get('remaining'), 'weekly_reset': weekly.get('reset')})
         # Equal account shares: 100% means every included account is full.
         weekly_remaining = sum(weekly_values) / len(weekly_values) if weekly_values else None
-        weekly_title = 'Gemini · 1w · общий остаток'
+        weekly_title = 'Gemini · 1w · pooled remaining'
         if len(weekly_values) != len(accounts):
-            weekly_title = f'Gemini · 1w · данные {len(weekly_values)}/{len(accounts)} акк.'
+            weekly_title = f'Gemini · 1w · data {len(weekly_values)}/{len(accounts)} accounts'
         weekly_color = self.quota_color(weekly_remaining)
         self.total_weekly_title.configure(text=weekly_title)
         self.total_weekly_value.configure(text=self.quota_percent(weekly_remaining), text_color=weekly_color)
@@ -744,9 +744,9 @@ class App(ctk.CTk):
             if not self.total_weekly_bar.winfo_manager():
                 self.total_weekly_bar.pack(fill='x', pady=(1, 0))
         remaining = sum(values) / len(values) if values else None
-        title = 'Gemini · 5h · общий остаток'
+        title = 'Gemini · 5h · pooled remaining'
         if len(values) != len(accounts):
-            title = f'Gemini · 5h · данные {len(values)}/{len(accounts)} акк.'
+            title = f'Gemini · 5h · data {len(values)}/{len(accounts)} accounts'
         color = self.quota_color(remaining)
         self.total_quota_title.configure(text=title)
         self.total_quota_value.configure(text=self.quota_percent(remaining), text_color=color)
@@ -804,7 +804,7 @@ class App(ctk.CTk):
             reset = datetime.fromisoformat(point['reset'])
             minutes = max(0, math.ceil((reset - now).total_seconds() / 60))
             hours, minutes = divmod(minutes, 60)
-            text = f'{hours}ч {minutes:02}м'
+            text = f'{hours}h {minutes:02}m'
             text_width = self.forecast_font.measure(text)
             x = margin + track * min(1, max(0, point['remaining']))
             left = x - text_width - 3 * scale
@@ -880,17 +880,17 @@ class App(ctk.CTk):
         except (ValueError, AttributeError):
             return '—'
         if seconds <= 0:
-            return '0м'
+            return '0m'
         if seconds < 60:
-            return '< 1м'
+            return '< 1m'
         minutes = int(seconds // 60)
         days, minutes = divmod(minutes, 1440)
         hours, minutes = divmod(minutes, 60)
         if days:
-            return f'{days}д {hours}ч'
+            return f'{days}d {hours}h'
         if hours:
-            return f'{hours}ч {minutes}м'
-        return f'{minutes}м'
+            return f'{hours}h {minutes}m'
+        return f'{minutes}m'
 
     def update_countdown(self, name):
         widgets = self.account_widgets.get(name)
@@ -950,9 +950,9 @@ class App(ctk.CTk):
         for family, title in (('claude', 'Claude'), ('gemini', 'Gemini')):
             if family in resets:
                 minutes = math.ceil(max(0, resets[family] - now) / 60)
-                duration = f'{minutes // 60}ч {minutes % 60:02}м' if minutes >= 60 else f'{minutes}м'
-                labels.append(f'до {title} · {duration}')
-        return '  /  '.join(labels) or 'Ожидание'
+                duration = f'{minutes // 60}h {minutes % 60:02}m' if minutes >= 60 else f'{minutes}m'
+                labels.append(f'until {title} · {duration}')
+        return '  /  '.join(labels) or 'Waiting'
 
     def active_provider_accounts(self):
         enabled = {a['name'] for a in self.items if not a.get('disabled')}
@@ -1083,7 +1083,7 @@ class App(ctk.CTk):
         self.after(100, self.animate_active_borders)
 
     def display_name(self, account):
-        return self.controller.preferences.get('labels', {}).get(account['name']) or account.get('email') or 'Google-аккаунт'
+        return self.controller.preferences.get('labels', {}).get(account['name']) or account.get('email') or 'Google account'
 
     def select(self, account):
         self.selected = account['name']
@@ -1099,38 +1099,38 @@ class App(ctk.CTk):
         self.drawn_models = None
         account = next((a for a in self.items if a['name'] == self.selected), None)
         if not account:
-            self.label(self.detail, 'Добавь первый аккаунт', 22, bold=True)
-            self.label(self.detail, 'Нажми «Добавить Google-аккаунт» и заверши вход в браузере. Здесь появится сохранённый аккаунт и доступные ему модели.', color=MUTED)
+            self.label(self.detail, 'Add your first account', 22, bold=True)
+            self.label(self.detail, 'Click Add Google account and complete browser sign-in. Your saved account and available models will appear here.', color=MUTED)
             return
         self.detail_heading = self.label(self.detail, self.display_name(account), 22, bold=True)
         if self.display_name(account) != account.get('email') and account.get('email'):
             self.label(self.detail, account['email'], color=MUTED)
-        status = 'Вход сохранён • аккаунт приостановлен' if account['disabled'] else 'Вход сохранён • используется для запросов'
+        status = 'Sign-in saved • account paused' if account['disabled'] else 'Sign-in saved • enabled for requests'
         self.detail_status = self.label(self.detail, status, color=MUTED)
-        self.label(self.detail, 'Осталось квоты', 17, bold=True)
+        self.label(self.detail, 'Remaining quota', 17, bold=True)
         cached = self.quota_cache.get(account['name'])
-        self.quota_updated = self.label(self.detail, 'Получаем лимиты Google…', 12, MUTED)
+        self.quota_updated = self.label(self.detail, 'Loading Google quotas…', 12, MUTED)
         self.quota_updated.configure(wraplength=0)
         data = (cached or {}).get('data', {})
         for group in self.quota_groups(account['name']):
             self.label(self.detail, group['name'], 15, bold=True)
             for bucket in sorted(group['buckets'], key=lambda b: b['window'] != '5h'):
-                self.detail_quota_widgets[(group['kind'], bucket['window'])] = self.quota_row('Недельный лимит' if bucket['window'] == 'weekly' else 'Лимит на 5 часов', bucket)
-        self.label(self.detail, 'Полоска показывает остаток: полная = 100%. Если Google не передал процент, показано «Нет данных».', 12, MUTED)
+                self.detail_quota_widgets[(group['kind'], bucket['window'])] = self.quota_row('Weekly quota' if bucket['window'] == 'weekly' else '5-hour quota', bucket)
+        self.label(self.detail, 'Bars show remaining quota: full = 100%. Missing percentages are shown as No data.', 12, MUTED)
         actions = ctk.CTkFrame(self.detail, fg_color='transparent')
         actions.pack(fill='x', pady=(8, 16))
-        self.button(actions, 'Использовать только этот', lambda: self.action(lambda: self.controller.route(account['name']), 'Аккаунт выбран для Claude.'), primary=True).pack(side='left', padx=(0, 10))
-        self.pause_button = self.button(actions, 'Возобновить' if account['disabled'] else 'Приостановить', self.pause_selected)
+        self.button(actions, 'Use only this account', lambda: self.action(lambda: self.controller.route(account['name']), 'Account selected for Claude.'), primary=True).pack(side='left', padx=(0, 10))
+        self.pause_button = self.button(actions, 'Resume' if account['disabled'] else 'Pause', self.pause_selected)
         self.pause_button.pack(side='left')
         rename_frame = ctk.CTkFrame(self.detail, fg_color='transparent')
         rename_frame.pack(fill='x', pady=(0, 20))
-        entry = ctk.CTkEntry(rename_frame, placeholder_text='Название аккаунта, например: личный', height=36, fg_color=CARD, border_color='#3a465c')
+        entry = ctk.CTkEntry(rename_frame, placeholder_text='Account label, e.g. Personal', height=36, fg_color=CARD, border_color='#3a465c')
         entry.pack(side='left', fill='x', expand=True, padx=(0, 10))
         entry.insert(0, self.controller.preferences.get('labels', {}).get(account['name'], ''))
         self.rename_entry = entry
-        self.button(rename_frame, 'Сохранить имя', lambda: self.rename(account, entry.get())).pack(side='left')
+        self.button(rename_frame, 'Save label', lambda: self.rename(account, entry.get())).pack(side='left')
         self.unavailable_label = self.label(self.detail, '', color='#ffbd93')
-        self.label(self.detail, 'Приостановка сохраняет вход. Переключение применяется к следующим запросам Claude; текущий ответ может завершиться на прежнем аккаунте.', 12, MUTED)
+        self.label(self.detail, 'Pausing preserves the sign-in. Switching applies to future requests; an ongoing response may finish on the previous account.', 12, MUTED)
         self.update_detail_account()
         self.after_idle(lambda: self.detail._parent_canvas.yview_moveto(position))
 
@@ -1157,17 +1157,17 @@ class App(ctk.CTk):
         value, bar, reset_label = widgets
         remaining = (quota or {}).get('remaining')
         color = self.quota_color(remaining)
-        value.configure(text='Нет данных' if remaining is None else self.quota_percent(remaining) + ' осталось', text_color=color)
+        value.configure(text='No data' if remaining is None else self.quota_percent(remaining) + ' remaining', text_color=color)
         bar.configure(progress_color=color)
         bar.set(remaining if remaining is not None else 0)
         reset = (quota or {}).get('reset')
-        label = 'Время восстановления не указано'
+        label = 'Reset time not provided'
         if reset:
             try:
-                date = datetime.fromisoformat(reset.replace('Z', '+00:00')).astimezone(ZoneInfo('Asia/Bangkok'))
-                label = 'Восстановление: ' + date.strftime('%d.%m в %H:%M') + ' (Бангкок)'
+                date = datetime.fromisoformat(reset.replace('Z', '+00:00')).astimezone()
+                label = 'Resets: ' + date.strftime('%b %d at %H:%M') + ' (local time)'
             except (ValueError, KeyError):
-                label = 'Время восстановления не указано'
+                label = 'Reset time not provided'
         reset_label.configure(text=label)
 
     def update_model_rows(self):
@@ -1179,24 +1179,24 @@ class App(ctk.CTk):
         if not account or self.detail_account != self.selected:
             return
         self.detail_heading.configure(text=self.display_name(account))
-        self.detail_status.configure(text='Вход сохранён • аккаунт приостановлен' if account['disabled'] else 'Вход сохранён • используется для запросов')
-        self.pause_button.configure(text='Возобновить' if account['disabled'] else 'Приостановить')
-        self.unavailable_label.configure(text='Сервис сообщил временную недоступность. Вход остаётся сохранённым; можно выбрать другой аккаунт.' if account.get('unavailable') else '')
+        self.detail_status.configure(text='Sign-in saved • account paused' if account['disabled'] else 'Sign-in saved • enabled for requests')
+        self.pause_button.configure(text='Resume' if account['disabled'] else 'Pause')
+        self.unavailable_label.configure(text='The service reported temporary unavailability. Your sign-in is saved; you can select another account.' if account.get('unavailable') else '')
         self.update_detail_quota()
 
     def pause_selected(self):
         account = next((a for a in self.items if a['name'] == self.selected), None)
         if account:
-            self.action(lambda: self.controller.pause(account), 'Состояние аккаунта обновлено.')
+            self.action(lambda: self.controller.pause(account), 'Account status updated.')
 
     def update_detail_quota(self):
         cached = self.quota_cache.get(self.selected, {})
-        self.quota_updated.configure(text=(('Обновлено ' + cached['at'].strftime('%H:%M:%S') if cached.get('at') else 'Лимиты пока не получены') + ' • автоматически раз в минуту') if cached else 'Получаем лимиты Google…')
+        self.quota_updated.configure(text=(('Updated ' + cached['at'].strftime('%H:%M:%S') if cached.get('at') else 'Quota data not received yet') + ' • automatically every minute') if cached else 'Loading Google quotas…')
         data = cached.get('data', {})
         # Keep errors in the status line so refreshing cannot change the layout.
         error = cached.get('error') or data.get('summary_error')
         if error:
-            text = error + (' Показаны последние полученные данные.' if cached.get('at') else '')
+            text = error + (' Showing the latest cached data.' if cached.get('at') else '')
             self.quota_updated.configure(text=text[:92] + ('…' if len(text) > 92 else ''), text_color='#ffbd93')
         else:
             self.quota_updated.configure(text_color=MUTED)
@@ -1242,16 +1242,16 @@ class App(ctk.CTk):
             except AccountError as exc:
                 return None, str(exc)
             except Exception:
-                return None, 'Не удалось получить лимиты. Попробуй обновить позже.'
+                return None, 'Could not load quotas. Try again later.'
         def done(result):
             self.quota_pending.discard(name)
             data, error = result
             old = self.quota_cache.get(name, {})
             if data is not None and data.get('summary_error') and old.get('data', {}).get('groups'):
                 data['groups'] = old['data']['groups']
-                data['summary_error'] += ' Показаны последние полученные недельные данные от ' + old['at'].strftime('%H:%M:%S') + '.'
+                data['summary_error'] += ' Showing the latest cached weekly data from ' + old['at'].strftime('%H:%M:%S') + '.'
             self.quota_cache[name] = {'data': data if data is not None else old.get('data', {}),
-                'at': datetime.now(ZoneInfo('Asia/Bangkok')) if data is not None else old.get('at'),
+                'at': datetime.now().astimezone() if data is not None else old.get('at'),
                 'checked': time.monotonic(), 'error': error}
             account = next((a for a in self.items if a['name'] == name), None)
             if account:
@@ -1297,40 +1297,40 @@ class App(ctk.CTk):
             self.connection_window.lift()
             return
         window = self.connection_window = ctk.CTkToplevel(self)
-        window.title('Подключение приложений')
+        window.title('Application connections')
         window.geometry('620x480')
         window.configure(fg_color=PANEL)
         window.transient(self)
-        ctk.CTkLabel(window, text='Настроить подключения', font=('Segoe UI', 23, 'bold'), text_color=TEXT).pack(anchor='w', padx=24, pady=(22, 12))
-        ctk.CTkLabel(window, text='Выбери приложения. Мы настроим локальное подключение\nи сохраним исходные конфигурации для возврата.', justify='left', text_color=MUTED).pack(anchor='w', padx=24)
+        ctk.CTkLabel(window, text='Set up connections', font=('Segoe UI', 23, 'bold'), text_color=TEXT).pack(anchor='w', padx=24, pady=(22, 12))
+        ctk.CTkLabel(window, text='Choose applications. We will configure the local connection\nand back up your original configurations for restoration.', justify='left', text_color=MUTED).pack(anchor='w', padx=24)
         detected = self.integrations.detected()
         choices = {}
-        for client, title in [('claude_desktop', 'Claude Desktop · вкладка Code'), ('codex', 'Codex Desktop и Codex CLI'), ('claude_cli', 'Claude Code CLI')]:
+        for client, title in [('claude_desktop', 'Claude Desktop · Code tab'), ('codex', 'Codex Desktop and CLI'), ('claude_cli', 'Claude Code CLI')]:
             value = ctk.BooleanVar(value=detected[client])
             choices[client] = value
-            ctk.CTkCheckBox(window, text=title + ('' if detected[client] else ' · не найдено'), variable=value).pack(anchor='w', padx=26, pady=12)
-        status = ctk.CTkLabel(window, text='Сессии, проекты и входы клиентов сохраняются.', text_color=MUTED, wraplength=560, justify='left')
+            ctk.CTkCheckBox(window, text=title + ('' if detected[client] else ' · not detected'), variable=value).pack(anchor='w', padx=26, pady=12)
+        status = ctk.CTkLabel(window, text='Client sessions, projects and sign-ins are preserved.', text_color=MUTED, wraplength=560, justify='left')
         status.pack(anchor='w', padx=24, pady=8)
         def apply():
             clients = [name for name, value in choices.items() if value.get()]
             if not clients:
-                status.configure(text='Выбери хотя бы одно приложение.', text_color='#f7ca70')
+                status.configure(text='Choose at least one application.', text_color='#f7ca70')
                 return
             paths = '\n'.join(str(p) for name in clients for p in self.integrations.paths()[name])
-            warning = ('Будут изменены конфигурации:\n\n' + paths +
-                       '\n\nЗапросы выбранных приложений пойдут через Gemini Accounts. '
-                       'Настройки подключения и модель по умолчанию изменятся. '
-                       'Исходные файлы будут сохранены в защищённой резервной копии. '
-                       'Для уже открытых клиентов потребуется перезапуск.\n\nРазрешить изменения?')
-            if not messagebox.askyesno('Разрешить настройку приложений?', warning, parent=window):
+            warning = ('These configuration files will be changed:\n\n' + paths +
+                       '\n\nRequests from selected applications will use Gemini Accounts. '
+                       'Connection settings and the default model will change. '
+                       'Original files will be saved in a protected backup. '
+                       'Already running clients will need a restart.\n\nAllow these changes?')
+            if not messagebox.askyesno('Allow application setup?', warning, parent=window):
                 return
             apply_button.configure(state='disabled')
             def done(_):
                 apply_button.configure(state='normal')
-                status.configure(text='Подключения настроены. CLI можно запускать обычной командой.', text_color=GREEN)
+                status.configure(text='Connections configured. Launch CLI clients as usual.', text_color=GREEN)
                 desktops = [name for name in clients if name in ('claude_desktop', 'codex')]
-                if desktops and messagebox.askyesno('Применить настройки сейчас?', 'Перезапустить открытые Claude / Codex, чтобы применить подключения? Текущая работа в них прервётся. Сохранённые сессии останутся.', parent=window):
-                    self.work(lambda: self.integrations.restart_desktop(desktops), lambda _: status.configure(text='Приложения перезапущены с новым подключением.', text_color=GREEN))
+                if desktops and messagebox.askyesno('Apply settings now?', 'Restart running Claude / Codex clients to apply connections? This interrupts current work. Saved sessions are preserved.', parent=window):
+                    self.work(lambda: self.integrations.restart_desktop(desktops), lambda _: status.configure(text='Applications restarted with the new connection.', text_color=GREEN))
             def perform():
                 try:
                     return self.integrations.apply(clients), None
@@ -1340,14 +1340,14 @@ class App(ctk.CTk):
                 configured, error = result
                 if error:
                     apply_button.configure(state='normal')
-                    status.configure(text='Настройка не выполнена: ' + error, text_color='#f7ca70')
+                    status.configure(text='Setup failed: ' + error, text_color='#f7ca70')
                 else:
                     done(configured)
             self.work(perform, applied, mutation=True)
-        apply_button = self.button(window, 'Настроить выбранные приложения', apply, primary=True)
+        apply_button = self.button(window, 'Configure selected applications', apply, primary=True)
         apply_button.pack(fill='x', padx=24, pady=(8, 12))
         def restore():
-            if not messagebox.askyesno('Вернуть как было?', 'Конфигурации клиентов будут восстановлены до нашего первого подключения. Последующие изменения этих файлов тоже заменятся резервной копией. Настройки Gemini Accounts вернутся к заводским. Google-входы сохранятся.\n\nВернуть настройки?', parent=window):
+            if not messagebox.askyesno('Restore previous settings?', 'Client configurations will be restored to their state before the first connection. Later edits to these files will also be replaced by the backup. Gemini Accounts preferences will return to defaults. Google sign-ins will be preserved.\n\nRestore settings?', parent=window):
                 return
             def reset():
                 count = self.integrations.restore()
@@ -1355,18 +1355,18 @@ class App(ctk.CTk):
                 self.controller.save()
                 return count
             def done(count):
-                status.configure(text=f'Исходные конфигурации восстановлены: {count}. Перезапусти открытые клиенты.', text_color=GREEN)
-                if messagebox.askyesno('Применить восстановление сейчас?', 'Перезапустить открытые Claude / Codex? Текущая работа прервётся; сохранённые сессии останутся.', parent=window):
-                    self.work(lambda: self.integrations.restart_desktop(['claude_desktop', 'codex']), lambda _: status.configure(text='Приложения перезапущены с исходными настройками.', text_color=GREEN))
+                status.configure(text=f'Original configurations restored: {count}. Restart running clients.', text_color=GREEN)
+                if messagebox.askyesno('Apply restoration now?', 'Restart running Claude / Codex? Current work will be interrupted; saved sessions are preserved.', parent=window):
+                    self.work(lambda: self.integrations.restart_desktop(['claude_desktop', 'codex']), lambda _: status.configure(text='Applications restarted with original settings.', text_color=GREEN))
             self.work(reset, done, mutation=True)
-        self.button(window, 'Вернуть как было · заводские настройки', restore).pack(fill='x', padx=24)
+        self.button(window, 'Restore previous settings / reset preferences', restore).pack(fill='x', padx=24)
 
     def rename(self, account, label):
         try:
             self.controller.rename(account['name'], label)
             self.loaded(self.items)
         except OSError:
-            self.notice.configure(text='Не удалось сохранить имя аккаунта.', text_color='#ffbd93')
+            self.notice.configure(text='Could not save the account label.', text_color='#ffbd93')
 
     def add_account(self):
         if self.busy or self.pending_login:
@@ -1377,17 +1377,17 @@ class App(ctk.CTk):
         self.login_url, state = result
         self.pending_login = (state, time.monotonic())
         self.add_button.configure(state='disabled')
-        self.notice.configure(text='В браузере выбери нужный Google-аккаунт и заверши вход. Он появится здесь автоматически.', text_color=ACCENT)
+        self.notice.configure(text='Choose your Google account in the browser and complete sign-in. It will appear here automatically.', text_color=ACCENT)
         self.login_window = ctk.CTkToplevel(self)
-        self.login_window.title('Добавление аккаунта')
+        self.login_window.title('Add account')
         self.login_window.geometry('480x260')
         self.login_window.resizable(False, False)
         self.login_window.configure(fg_color=PANEL)
         self.login_window.transient(self)
-        ctk.CTkLabel(self.login_window, text='Заверши вход Google', font=('Segoe UI', 22, 'bold'), text_color=TEXT).pack(pady=(26, 10))
-        ctk.CTkLabel(self.login_window, text='Выбери аккаунт в открывшемся браузере.\nСохранённый вход появится в списке автоматически.', font=('Segoe UI', 13), text_color=MUTED).pack(pady=8)
-        self.button(self.login_window, 'Открыть страницу входа снова', lambda: webbrowser.open(self.login_url)).pack(pady=14)
-        ctk.CTkLabel(self.login_window, text='Ожидаем вход… Можно закрыть это окно.', text_color=MUTED, font=('Segoe UI', 12)).pack()
+        ctk.CTkLabel(self.login_window, text='Complete Google sign-in', font=('Segoe UI', 22, 'bold'), text_color=TEXT).pack(pady=(26, 10))
+        ctk.CTkLabel(self.login_window, text='Choose an account in the opened browser.\nThe saved sign-in will appear in the list automatically.', font=('Segoe UI', 13), text_color=MUTED).pack(pady=8)
+        self.button(self.login_window, 'Reopen sign-in page', lambda: webbrowser.open(self.login_url)).pack(pady=14)
+        ctk.CTkLabel(self.login_window, text='Waiting for sign-in… You can close this window.', text_color=MUTED, font=('Segoe UI', 12)).pack()
         webbrowser.open(self.login_url)
         self.after(1800, self.poll_login)
 
@@ -1396,7 +1396,7 @@ class App(ctk.CTk):
             return
         state, started = self.pending_login
         if time.monotonic() - started > 310:
-            self.finish_login('Время входа истекло. Нажми «Добавить Google-аккаунт» ещё раз.', False)
+            self.finish_login('Sign-in timed out. Click Add Google account again.', False)
             return
         def poll():
             try:
@@ -1405,9 +1405,9 @@ class App(ctk.CTk):
                 return {'status': 'wait'}
         def done(result):
             if result.get('status') == 'ok':
-                self.finish_login('Аккаунт сохранён. Его можно выбрать для Claude.', True)
+                self.finish_login('Account saved. You can select it for Claude.', True)
             elif result.get('status') == 'error':
-                self.finish_login('Google не завершил вход. Попробуй добавить аккаунт заново.', False)
+                self.finish_login('Google sign-in did not finish. Try adding the account again.', False)
             else:
                 self.after(1800, self.poll_login)
         self.work(poll, done)
@@ -1429,13 +1429,13 @@ class App(ctk.CTk):
                 pending = next((r for r in results if r.get('access_issue') == 'verification'), None)
                 error = next((r for r in results if r.get('status') == 'error'), None)
                 if pending:
-                    self.notice.configure(text='Google требует подтверждение нового аккаунта. Открываю страницу; кнопки доступны наверху списка.', text_color='#f7ca70')
+                    self.notice.configure(text='Google requires verification of this account. Opening the page; controls are at the top of the list.', text_color='#f7ca70')
                     if pending.get('verification_url'):
                         webbrowser.open(pending['verification_url'])
                 elif error:
                     self.notice.configure(text=error['message'], text_color='#ffbd93')
                 else:
-                    self.notice.configure(text='Аккаунт проверен и добавлен в автоподбор.' if self.controller.preferences.get('mode') != 'single' else 'Аккаунт проверен. Сейчас вручную выбран другой аккаунт.', text_color=GREEN)
+                    self.notice.configure(text='Account verified and added to automatic routing.' if self.controller.preferences.get('mode') != 'single' else 'Account verified. Another account is currently selected manually.', text_color=GREEN)
             self.work(reconcile, done, mutation=True)
 
     def close(self):
@@ -1449,7 +1449,7 @@ def main():
     ctypes.windll.kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
     mutex = ctypes.windll.kernel32.CreateMutexW(None, False, 'Local\\GeminiAccountsDesktop')
     if ctypes.windll.kernel32.GetLastError() == 183:
-        ctypes.windll.user32.MessageBoxW(None, 'Gemini Accounts уже открыт. Найди окно на панели задач.', 'Gemini Accounts', 0)
+        ctypes.windll.user32.MessageBoxW(None, 'Gemini Accounts is already open. Find its window in the taskbar.', 'Gemini Accounts', 0)
         return
     ctk.set_appearance_mode('dark')
     try:

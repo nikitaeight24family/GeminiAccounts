@@ -27,7 +27,7 @@ class ActivityTests(unittest.TestCase):
             self.assertEqual(state['stats']['b']['success'], 1)
             self.assertNotIn('SECRET', path.read_text(encoding='utf-8'))
             tracker.ingest([event('3', 'A', trace='different')], accounts)
-            self.assertIn('не передана', state['events'][-1]['reason'])
+            self.assertIn('did not report', state['events'][-1]['reason'])
             restored = Activity(path)
             self.assertEqual(restored.state, state)
             tracker.ingest([event('4', 'B', trace='other-model', model='claude')], accounts)

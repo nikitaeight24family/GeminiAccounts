@@ -63,17 +63,17 @@ def rank_accounts(accounts, caches, group, now=None):
             blocked_dates = [reset_date(b.get('reset')) for b in zero]
             if all(date and date > now for date in blocked_dates):
                 reset = max(blocked_dates)
-                tier, reason = 3, 'Квота исчерпана; восстановление всех ограничивающих окон'
+                tier, reason = 3, 'Quota exhausted; waiting for all blocking windows to reset'
             else:
                 reset = None
-                tier, reason = 2, 'Сброс наступил или время неизвестно; нужны свежие лимиты'
+                tier, reason = 2, 'Reset reached or unknown; fresh quota data required'
         elif len({b['window'] for b in known}) != 2 or expired:
             reset = None
-            tier, reason = 2, 'Нет свежих полных данных лимитов'
+            tier, reason = 2, 'No fresh complete quota data'
         else:
             reset = min(upcoming) if upcoming else None
             tier = 0 if reset else 1
-            reason = 'Квота доступна; ближайший сброс' if reset else 'Квота доступна; время сброса неизвестно'
+            reason = 'Quota available; earliest reset' if reset else 'Quota available; reset time unknown'
         cooldowns = []
         for cooldown in account.get('cooldowns') or []:
             model = cooldown.get('model_key', '')
@@ -83,7 +83,7 @@ def rank_accounts(accounts, caches, group, now=None):
                 cooldowns.append(retry)
         if cooldowns:
             reset = max(cooldowns + ([reset] if tier == 3 and reset else []))
-            tier, reason = 3, 'Прокси временно исключил аккаунт для этой группы'
+            tier, reason = 3, 'Proxy temporarily excluded this account for this group'
         rows.append({'name': account['name'], 'reset': reset.isoformat() if reset else None,
                      'tier': tier, 'reason': reason, 'remaining': min((b['remaining'] for b in known), default=None),
                      '_sort': (tier, reset.timestamp() if reset else float('inf'), min((b['remaining'] for b in known), default=1), account['name'])})

@@ -12,6 +12,7 @@ import threading
 import urllib.request
 import urllib.error
 import urllib.parse
+import sys
 
 import bcrypt
 import yaml
@@ -25,10 +26,43 @@ def atomic_write(path, data):
     path = Path(path)
     temp = path.with_name(path.name + '.new')
     temp.write_bytes(data)
+    if os.name != 'nt':
+        temp.chmod(0o600)
     os.replace(temp, path)
 
 
+def storage_root():
+    if os.environ.get('GEMINI_ACCOUNTS_HOME'):
+        return Path(os.environ['GEMINI_ACCOUNTS_HOME']).expanduser().resolve()
+    if os.name == 'nt':
+        local = Path(os.environ['LOCALAPPDATA'])
+        cached = local / 'Packages' / 'OpenAI.Codex_2p2nqsd0c76g0' / 'LocalCache' / 'Local'
+        return cached if (cached / 'ClaudeGemini' / 'config.yaml').exists() else local
+    if sys.platform == 'darwin':
+        return Path.home() / 'Library' / 'Application Support' / 'GeminiAccounts'
+    return Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')) / 'GeminiAccounts'
+
+
 def dpapi(data, decrypt=False):
+    if os.name != 'nt':
+        from cryptography.fernet import Fernet, InvalidToken
+        root = storage_root() / 'GeminiAccounts'
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        key_path = root / 'storage-key'
+        if not key_path.exists():
+            if decrypt:
+                raise AccountError('The local storage key is missing.')
+            try:
+                fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, 'wb') as file:
+                    file.write(Fernet.generate_key())
+            except FileExistsError:
+                pass
+        try:
+            cipher = Fernet(key_path.read_bytes())
+            return cipher.decrypt(data) if decrypt else cipher.encrypt(data)
+        except (InvalidToken, ValueError) as error:
+            raise AccountError('Could not unlock protected application data.') from error
     class Blob(ctypes.Structure):
         _fields_ = [('size', wintypes.DWORD), ('data', ctypes.POINTER(ctypes.c_ubyte))]
     buffer = ctypes.create_string_buffer(data)
@@ -40,7 +74,7 @@ def dpapi(data, decrypt=False):
     else:
         ok = api.CryptProtectData(ctypes.byref(source), 'Gemini Accounts', None, None, None, 1, ctypes.byref(target))
     if not ok:
-        raise AccountError('Windows не смог открыть защищённый ключ приложения.')
+        raise AccountError('Windows could not unlock the protected application key.')
     try:
         return ctypes.string_at(target.data, target.size)
     finally:
@@ -49,11 +83,7 @@ def dpapi(data, decrypt=False):
 
 class Controller:
     def __init__(self, proxy_dir=None, data_dir=None):
-        local = Path(os.environ['LOCALAPPDATA'])
-        # Files installed from a packaged desktop host can live in its redirected
-        # LocalCache. Resolve the physical location so desktop shortcuts also work.
-        cached = local / 'Packages' / 'OpenAI.Codex_2p2nqsd0c76g0' / 'LocalCache' / 'Local'
-        root = cached if (cached / 'ClaudeGemini' / 'config.yaml').exists() else local
+        root = storage_root()
         self.proxy_dir = Path(proxy_dir or root / 'ClaudeGemini')
         self.data_dir = Path(data_dir or root / 'GeminiAccounts')
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -84,11 +114,11 @@ class Controller:
     def prepare(self):
         config_path = self.proxy_dir / 'config.yaml'
         if not config_path.exists():
-            raise AccountError('Не найдено установленное подключение Gemini для Claude.')
+            raise AccountError('The local Gemini connection is not installed.')
         config = yaml.safe_load(config_path.read_text('utf-8-sig'))
         host = config.get('server', {}).get('host', '')
         if host not in ('127.0.0.1', 'localhost'):
-            raise AccountError('Подключение должно работать только на этом компьютере.')
+            raise AccountError('The connection must be restricted to this computer.')
         self.base = 'http://127.0.0.1:' + str(config['server']['port'])
         secret_path = self.data_dir / 'management-key.dpapi'
         if secret_path.exists():
@@ -119,7 +149,7 @@ class Controller:
             pass
         # Reuse the user's existing service launcher; it avoids duplicate services.
         starter = self.proxy_dir / 'start-proxy.ps1'
-        if starter.exists():
+        if os.name == 'nt' and starter.exists():
             subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(starter)],
                            creationflags=subprocess.CREATE_NO_WINDOW, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(30):
@@ -128,14 +158,17 @@ class Controller:
                 return
             except AccountError:
                 time.sleep(.3)
-        raise AccountError('Подключение не отвечает. Перезапусти подключение Gemini и нажми «Обновить».')
+        raise AccountError('The connection is not responding. Restart Gemini Accounts.')
 
     def start_services(self):
         starter = self.proxy_dir / 'start-proxy.ps1'
-        if starter.exists():
+        if os.name == 'nt' and starter.exists():
             subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(starter)],
                            creationflags=subprocess.CREATE_NO_WINDOW, timeout=15,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            from runtime import start_services
+            start_services(self)
 
     def quota_wait_status(self):
         request = urllib.request.Request('http://127.0.0.1:8317/v0/management/quota-wait',
@@ -155,9 +188,9 @@ class Controller:
             with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=12) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
-            raise AccountError(f'Локальное подключение вернуло ошибку {exc.code}.') from None
+            raise AccountError(f'The local connection returned error {exc.code}.') from None
         except (OSError, ValueError) as exc:
-            raise AccountError('Нет связи с локальным подключением Gemini.') from None
+            raise AccountError('Cannot reach the local Gemini connection.') from None
 
     def accounts(self):
         result = self.request('/auth-files')
@@ -222,12 +255,12 @@ class Controller:
         if result.get('status') == 'ok':
             self.request('/reset-quota', 'POST', {'auth_index': account['auth_index']})
             return result
-        raise AccountError('Google не прислал новую ссылку. Старая ссылка сохранена.')
+        raise AccountError('Google did not return a new link. The previous link has been kept.')
 
     def check_verified_account(self, account, refresh_link=False):
         payload = {'project': account.get('project_id') or 'aicode-consumers',
             'model': 'gemini-3.1-flash-lite',
-            'request': {'contents': [{'role': 'user', 'parts': [{'text': 'Привет'}]}],
+            'request': {'contents': [{'role': 'user', 'parts': [{'text': 'Hi'}]}],
                         'generationConfig': {'maxOutputTokens': 1}}}
         response = self.request('/api-call', 'POST', {
             'auth_index': account['auth_index'], 'method': 'POST',
@@ -241,9 +274,9 @@ class Controller:
             self.remember_verification(account['name'], issue)
             if refresh_link:
                 return issue
-            raise AccountError('Google ещё требует подтверждение. Кнопки сохранены; открой «Подтвердить Google».')
+            raise AccountError('Google still requires verification. Open Verify Google; verification controls have been kept.')
         if status != 200:
-            raise AccountError(f'Проверка Google вернула {status}. Требование подтверждения пока сохранено.')
+            raise AccountError(f'Google verification returned {status}. Verification is still required.')
         with self.verification_lock:
             pending = self.verifications.get(account['name'], {})
             if (pending.get('auto_disabled') or account.get('disabled')) and (self.preferences.get('mode') != 'single' or
@@ -298,7 +331,7 @@ class Controller:
                 except AccountError:
                     rollback_failed = True
             if rollback_failed:
-                raise AccountError('Приоритет применён частично. Проверь подключение и обнови лимиты.') from None
+                raise AccountError('Priority was only partially applied. Check the connection and reload quotas.') from None
             raise
         return True
 
@@ -348,14 +381,14 @@ class Controller:
             'header': {'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json', 'User-Agent': 'antigravity/2.19.1 windows/amd64'},
             'data': json.dumps(payload)})
         if response.get('status_code') != 200:
-            raise AccountError('Google пока не сообщил лимиты. Попробуй обновить позже.')
+            raise AccountError('Google has not returned quota data yet. Try again later.')
         try:
             body = json.loads(response.get('body', '{}'))
             if not isinstance(body.get('models'), dict):
                 raise ValueError()
             result = self.parse_quotas(body)
         except (ValueError, TypeError, AttributeError):
-            raise AccountError('Google вернул неполные данные лимитов.') from None
+            raise AccountError('Google returned incomplete quota data.') from None
         groups, summary_error = [], None
         try:
             summary = self.request('/api-call', 'POST', {
@@ -369,7 +402,7 @@ class Controller:
             if not groups:
                 raise ValueError()
         except (AccountError, ValueError, TypeError, AttributeError):
-            summary_error = 'Недельные лимиты пока не получены от Google.'
+            summary_error = 'Weekly quota data has not been received from Google yet.'
         # Grouped API explicitly reports exhausted 5-hour buckets as zero,
         # including cases where fetchAvailableModels omits its fraction.
         for model in result:
@@ -443,7 +476,7 @@ class Controller:
                 state.update(armed=False, attempt_at=now, status='pending', model=model)
                 atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
             payload = {'project': account.get('project_id') or 'aicode-consumers', 'model': model,
-                'request': {'contents': [{'role': 'user', 'parts': [{'text': 'Привет'}]}],
+                'request': {'contents': [{'role': 'user', 'parts': [{'text': 'Hi'}]}],
                             'generationConfig': {'maxOutputTokens': 1}}}
             try:
                 response = self.request('/api-call', 'POST', {'auth_index': account['auth_index'], 'method': 'POST',
@@ -468,11 +501,11 @@ class Controller:
     def route(self, selected=None):
         accounts = self.accounts()
         if not accounts:
-            raise AccountError('Сначала добавь Google-аккаунт.')
+            raise AccountError('Add a Google account first.')
         if selected and selected not in {a['name'] for a in accounts}:
-            raise AccountError('Этот аккаунт больше не найден. Обнови список.')
+            raise AccountError('This account is no longer available. Reload the list.')
         if selected and any(a['name'] == selected and a.get('access_issue') == 'verification' for a in accounts):
-            raise AccountError('Сначала подтверди этот аккаунт Google и нажми «Я подтвердил».')
+            raise AccountError('Verify this Google account first, then click I verified.')
         # Enable the destination first. Restore original states if any update fails.
         changes = sorted([(a, bool(a.get('access_issue') == 'verification' or (selected and a['name'] != selected)))
                           for a in accounts], key=lambda pair: pair[1])
@@ -490,7 +523,7 @@ class Controller:
                 except AccountError:
                     failed_rollback = True
             if failed_rollback:
-                raise AccountError('Переключение выполнено частично. Обнови список и выбери аккаунт повторно.') from None
+                raise AccountError('Switching was only partially completed. Reload and select the account again.') from None
             raise
         self.preferences['mode'] = 'single' if selected else 'pool'
         self.preferences['selected'] = selected
@@ -498,7 +531,7 @@ class Controller:
 
     def pause(self, account):
         if account.get('access_issue') == 'verification':
-            raise AccountError('Сначала подтверди аккаунт Google и нажми «Я подтвердил».')
+            raise AccountError('Verify the Google account first, then click I verified.')
         self._set_disabled(account, not bool(account['disabled']))
         self.preferences['mode'] = 'custom'
         self.preferences['selected'] = None
@@ -515,7 +548,7 @@ class Controller:
         state = result.get('state', '')
         parts = urllib.parse.urlsplit(url)
         if parts.scheme != 'https' or parts.hostname != 'accounts.google.com' or not state:
-            raise AccountError('Не удалось получить безопасную ссылку входа Google.')
+            raise AccountError('Could not obtain a safe Google sign-in URL.')
         query = dict(urllib.parse.parse_qsl(parts.query))
         query['prompt'] = 'select_account consent'
         return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query))), state
