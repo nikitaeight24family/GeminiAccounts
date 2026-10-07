@@ -1,4 +1,6 @@
 PyYAML>=6,<7
 bcrypt>=4,<6
-cryptography>=44,<51
+# Use the universal wheel with bundled OpenSSL on Intel and Apple Silicon Macs.
+cryptography==46.0.5; sys_platform == 'darwin'
+cryptography>=44,<51; sys_platform != 'darwin'
 tzdata>=2025
