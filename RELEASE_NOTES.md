@@ -1,4 +1,10 @@
-# Gemini Accounts 1.1.0 — English + terminal editions
+# Gemini Accounts 1.2.0 — Model selection and compact weekly countdowns
+
+Choose any available text model using **⚙ next to Gemini Accounts**: Pro Low / High, Flash, Flash Lite, Sonnet, Opus or GPT-OSS. Default / Sonnet and Fast / Haiku slots are independent. Changes apply to new gateway requests without restarting clients. Updating Codex's explicit default is optional, asks consent and requires restarting Codex. Availability follows your account catalog.
+
+Weekly **1w** countdowns now show days only, including markers inside the pooled quota bar. Less than one day is shown as `< 1d`. Five-hour countdowns retain hours and minutes.
+
+The gateway refreshes model mappings while waiting for quota. Request history keeps the original model after a selection change. Terminal mode includes a **Models** menu and the `models --default MODEL_ID --fast MODEL_ID` command.
 
 The desktop interface, installer, messages and documentation are fully in English. Existing accounts and backups are preserved.
 

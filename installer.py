@@ -70,7 +70,7 @@ def install(payload, root, shortcuts=True):
             'requests': {'streaming': {'keepalive-seconds': 5}},
         }
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    atomic_write(manager / 'installation.json', json.dumps({'version': '1.1.0'}).encode())
+    atomic_write(manager / 'installation.json', json.dumps({'version': '1.2.0'}).encode())
     if shortcuts:
         # PowerShell receives paths as environment data, never executable interpolation.
         env = os.environ.copy()

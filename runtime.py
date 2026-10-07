@@ -18,7 +18,7 @@ import bcrypt
 import yaml
 from backend import AccountError, atomic_write, dpapi
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 UPSTREAM_VERSION = '8.0.16'
 ARCHIVES = {
     ('Windows', 'amd64'): ('windows_amd64.zip', 'e0d999703c9af70067b15bf50e6521e76392da604d1543541361e6891c676c43'),
