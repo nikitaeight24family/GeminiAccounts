@@ -18,7 +18,8 @@ with tempfile.TemporaryDirectory() as directory:
     owned = start_services(controller)
     try:
         assert controller.request('/auth-files').get('files') == [], 'A fresh installation must have no accounts'
-        assert controller.quota_wait_status() == {'jobs': []}, 'Quota queue must respond'
+        snapshot = controller.quota_wait_status()
+        assert snapshot.get('jobs') == [] and snapshot.get('poll_seconds') == 3, 'Quota queue must respond'
         if len(sys.argv) > 1:
             # Verify the bundled executable's internal queue worker on the real OS.
             stop_owned(owned)
@@ -29,10 +30,11 @@ with tempfile.TemporaryDirectory() as directory:
                 for _ in range(100):
                     try:
                         assert controller.request('/auth-files').get('files') == []
-                        assert controller.quota_wait_status() == {'jobs': []}
+                        snapshot = controller.quota_wait_status()
+                        assert snapshot.get('jobs') == [] and snapshot.get('poll_seconds') == 3
                         # The queue status fallback also returns empty on failure.
                         controller.base = 'http://127.0.0.1:8317'
-                        assert controller.request('/quota-wait') == {'jobs': []}
+                        assert controller.request('/quota-wait').get('jobs') == []
                         controller.base = 'http://127.0.0.1:8318'
                         break
                     except Exception:

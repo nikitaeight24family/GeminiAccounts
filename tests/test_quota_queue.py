@@ -76,8 +76,9 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.backend.calls, 1)
     def test_resumption_keeps_heartbeats_during_delayed_headers_and_body(self):
         self.backend.files = [account(seconds=.15)]
-        self.backend.header_delay = .15
-        self.backend.body_delay = .15
+        # Keep phases long enough for coarse / loaded CI scheduler ticks.
+        self.backend.header_delay = .4
+        self.backend.body_delay = .4
         self.gate.heartbeat_seconds = .04
         response = self.post()
         data = response.read()
