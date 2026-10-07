@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.exe
+*.spec
+build/
+dist/
+.venv/
+auth/
+*.dpapi
+client-key.txt
+config.yaml
+preferences.json
+activity.json
+quota-starts.json
+*.log

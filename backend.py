@@ -1,0 +1,541 @@
+"""Local account control. Credentials remain with CLIProxyAPI, never in the UI."""
+import ctypes
+from ctypes import wintypes
+import json
+import os
+from pathlib import Path
+import secrets
+import subprocess
+import time
+import math
+import threading
+import urllib.request
+import urllib.error
+import urllib.parse
+
+import bcrypt
+import yaml
+
+
+class AccountError(Exception):
+    pass
+
+
+def atomic_write(path, data):
+    path = Path(path)
+    temp = path.with_name(path.name + '.new')
+    temp.write_bytes(data)
+    os.replace(temp, path)
+
+
+def dpapi(data, decrypt=False):
+    class Blob(ctypes.Structure):
+        _fields_ = [('size', wintypes.DWORD), ('data', ctypes.POINTER(ctypes.c_ubyte))]
+    buffer = ctypes.create_string_buffer(data)
+    source = Blob(len(data), ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)))
+    target = Blob()
+    api = ctypes.windll.crypt32
+    if decrypt:
+        ok = api.CryptUnprotectData(ctypes.byref(source), None, None, None, None, 1, ctypes.byref(target))
+    else:
+        ok = api.CryptProtectData(ctypes.byref(source), 'Gemini Accounts', None, None, None, 1, ctypes.byref(target))
+    if not ok:
+        raise AccountError('Windows не смог открыть защищённый ключ приложения.')
+    try:
+        return ctypes.string_at(target.data, target.size)
+    finally:
+        ctypes.windll.kernel32.LocalFree(target.data)
+
+
+class Controller:
+    def __init__(self, proxy_dir=None, data_dir=None):
+        local = Path(os.environ['LOCALAPPDATA'])
+        # Files installed from a packaged desktop host can live in its redirected
+        # LocalCache. Resolve the physical location so desktop shortcuts also work.
+        cached = local / 'Packages' / 'OpenAI.Codex_2p2nqsd0c76g0' / 'LocalCache' / 'Local'
+        root = cached if (cached / 'ClaudeGemini' / 'config.yaml').exists() else local
+        self.proxy_dir = Path(proxy_dir or root / 'ClaudeGemini')
+        self.data_dir = Path(data_dir or root / 'GeminiAccounts')
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.settings_path = self.data_dir / 'preferences.json'
+        try:
+            self.preferences = json.loads(self.settings_path.read_text('utf-8'))
+        except (OSError, ValueError):
+            self.preferences = {'labels': {}, 'mode': 'pool', 'selected': None}
+        self.key = None
+        self.base = 'http://127.0.0.1:8317'
+        self.verification_lock = threading.RLock()
+        self.verification_checks = {}
+        self.verification_path = self.data_dir / 'verification-state.dpapi'
+        self.quota_start_lock = threading.RLock()
+        self.quota_start_path = self.data_dir / 'quota-starts.json'
+        try:
+            self.quota_starts = json.loads(self.quota_start_path.read_text('utf-8'))
+        except (OSError, ValueError):
+            self.quota_starts = {}
+        try:
+            self.verifications = json.loads(dpapi(self.verification_path.read_bytes(), decrypt=True))
+        except (OSError, ValueError, AccountError):
+            self.verifications = {}
+
+    def save(self):
+        atomic_write(self.settings_path, json.dumps(self.preferences, ensure_ascii=False, indent=2).encode('utf-8'))
+
+    def prepare(self):
+        config_path = self.proxy_dir / 'config.yaml'
+        if not config_path.exists():
+            raise AccountError('Не найдено установленное подключение Gemini для Claude.')
+        config = yaml.safe_load(config_path.read_text('utf-8-sig'))
+        host = config.get('server', {}).get('host', '')
+        if host not in ('127.0.0.1', 'localhost'):
+            raise AccountError('Подключение должно работать только на этом компьютере.')
+        self.base = 'http://127.0.0.1:' + str(config['server']['port'])
+        secret_path = self.data_dir / 'management-key.dpapi'
+        if secret_path.exists():
+            self.key = dpapi(secret_path.read_bytes(), decrypt=True).decode('ascii')
+        else:
+            self.key = secrets.token_urlsafe(40)
+            atomic_write(secret_path, dpapi(self.key.encode('ascii')))
+        management = config.setdefault('management', {})
+        current = str(management.get('secret-key', ''))
+        try:
+            matches = current.startswith('$2') and bcrypt.checkpw(self.key.encode(), current.encode())
+        except ValueError:
+            matches = False
+        if not matches or management.get('allow-remote', False):
+            backup = self.data_dir / 'proxy-before-manager.yaml'
+            if not backup.exists():
+                atomic_write(backup, config_path.read_bytes())
+            management['secret-key'] = bcrypt.hashpw(self.key.encode(), bcrypt.gensalt()).decode()
+            management['allow-remote'] = False
+            management['disable-control-panel'] = True
+            atomic_write(config_path, yaml.safe_dump(config, allow_unicode=True, sort_keys=False).encode())
+        try:
+            self.request('/auth-files')
+            if config['server']['port'] == 8318:
+                self.start_services()
+            return
+        except AccountError:
+            pass
+        # Reuse the user's existing service launcher; it avoids duplicate services.
+        starter = self.proxy_dir / 'start-proxy.ps1'
+        if starter.exists():
+            subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(starter)],
+                           creationflags=subprocess.CREATE_NO_WINDOW, timeout=15, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(30):
+            try:
+                self.request('/auth-files')
+                return
+            except AccountError:
+                time.sleep(.3)
+        raise AccountError('Подключение не отвечает. Перезапусти подключение Gemini и нажми «Обновить».')
+
+    def start_services(self):
+        starter = self.proxy_dir / 'start-proxy.ps1'
+        if starter.exists():
+            subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(starter)],
+                           creationflags=subprocess.CREATE_NO_WINDOW, timeout=15,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def quota_wait_status(self):
+        request = urllib.request.Request('http://127.0.0.1:8317/v0/management/quota-wait',
+            headers={'Authorization': 'Bearer ' + (self.key or '')})
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=3) as response:
+                return json.load(response)
+        except (OSError, ValueError):
+            return {'jobs': []}
+
+    def request(self, path, method='GET', payload=None):
+        data = None if payload is None else json.dumps(payload).encode()
+        request = urllib.request.Request(self.base + '/v0/management' + path, data=data, method=method,
+            headers={'Authorization': 'Bearer ' + (self.key or ''), 'Content-Type': 'application/json'})
+        # Local calls must not be sent through a system HTTP proxy.
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=12) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            raise AccountError(f'Локальное подключение вернуло ошибку {exc.code}.') from None
+        except (OSError, ValueError) as exc:
+            raise AccountError('Нет связи с локальным подключением Gemini.') from None
+
+    def accounts(self):
+        result = self.request('/auth-files')
+        # Strip everything except display/routing metadata before it reaches the UI.
+        allowed = ('name', 'auth_index', 'email', 'project_id', 'disabled', 'status', 'unavailable', 'cooldowns', 'success', 'failed', 'last_refresh', 'created_at', 'priority')
+        accounts = []
+        for item in result.get('files', []):
+            if item.get('provider', item.get('type')) != 'antigravity':
+                continue
+            account = {k: item.get(k) for k in allowed}
+            issue = self.access_issue(item.get('status_message'))
+            if issue.get('access_issue') == 'verification':
+                self.remember_verification(account['name'], issue)
+            with self.verification_lock:
+                account.update(self.verifications.get(account['name'], issue))
+            if account.get('access_issue') == 'verification' and not account.get('disabled'):
+                # Google validation errors can stop credential failover. Keep the
+                # login and its confirmation buttons, but quarantine it from inference.
+                self._set_disabled(account, True)
+                self.remember_verification(account['name'], {'auto_disabled': True})
+                account['disabled'] = True
+                account['auto_disabled'] = True
+            accounts.append(account)
+        return accounts
+
+    @staticmethod
+    def access_issue(message):
+        try:
+            error = json.loads(message or '{}').get('error', {})
+            for detail in error.get('details', []):
+                if detail.get('reason') == 'VALIDATION_REQUIRED':
+                    url = detail.get('metadata', {}).get('validation_url', '')
+                    parsed = urllib.parse.urlsplit(url)
+                    if parsed.scheme == 'https' and parsed.hostname == 'accounts.google.com' and parsed.path.startswith('/signin/'):
+                        return {'access_issue': 'verification', 'verification_url': url}
+                    return {'access_issue': 'verification'}
+            if error.get('code') == 401:
+                return {'access_issue': 'login'}
+            if error.get('code') == 403:
+                return {'access_issue': 'denied'}
+        except (ValueError, TypeError, AttributeError):
+            pass
+        return {}
+
+    def retry_verified_account(self, account):
+        # Clearing a cooldown is not proof that Google accepted verification.
+        self.request('/reset-quota', 'POST', {'auth_index': account['auth_index']})
+        return self.check_verified_account(account)
+
+    def remember_verification(self, name, issue):
+        with self.verification_lock:
+            previous = self.verifications.get(name, {})
+            saved = {**previous, **issue}
+            if previous != saved:
+                self.verifications[name] = saved
+                atomic_write(self.verification_path, dpapi(json.dumps(self.verifications).encode()))
+
+    def refresh_verification_url(self, account):
+        result = self.check_verified_account(account, refresh_link=True)
+        if result.get('verification_url'):
+            return result
+        if result.get('status') == 'ok':
+            self.request('/reset-quota', 'POST', {'auth_index': account['auth_index']})
+            return result
+        raise AccountError('Google не прислал новую ссылку. Старая ссылка сохранена.')
+
+    def check_verified_account(self, account, refresh_link=False):
+        payload = {'project': account.get('project_id') or 'aicode-consumers',
+            'model': 'gemini-3.1-flash-lite',
+            'request': {'contents': [{'role': 'user', 'parts': [{'text': 'Привет'}]}],
+                        'generationConfig': {'maxOutputTokens': 1}}}
+        response = self.request('/api-call', 'POST', {
+            'auth_index': account['auth_index'], 'method': 'POST',
+            'url': 'https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent',
+            'header': {'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json',
+                       'User-Agent': 'antigravity/2.19.1 windows/amd64'},
+            'data': json.dumps(payload)})
+        status = response.get('status_code')
+        issue = self.access_issue(response.get('body'))
+        if issue.get('access_issue') == 'verification':
+            self.remember_verification(account['name'], issue)
+            if refresh_link:
+                return issue
+            raise AccountError('Google ещё требует подтверждение. Кнопки сохранены; открой «Подтвердить Google».')
+        if status != 200:
+            raise AccountError(f'Проверка Google вернула {status}. Требование подтверждения пока сохранено.')
+        with self.verification_lock:
+            pending = self.verifications.get(account['name'], {})
+            if (pending.get('auto_disabled') or account.get('disabled')) and (self.preferences.get('mode') != 'single' or
+                                                self.preferences.get('selected') == account['name']):
+                self._set_disabled(account, False)
+            if self.verifications.pop(account['name'], None) is not None:
+                atomic_write(self.verification_path, dpapi(json.dumps(self.verifications).encode()))
+        return {'status': 'ok'}
+
+    def activity_snapshot(self):
+        accounts = self.accounts()
+        for account in accounts:
+            if account.get('access_issue') != 'verification':
+                continue
+            now = time.monotonic()
+            if now - self.verification_checks.get(account['name'], -60) < 60:
+                continue
+            self.verification_checks[account['name']] = now
+            try:
+                result = self.check_verified_account(account, refresh_link=True)
+                if result.get('status') == 'ok':
+                    accounts = self.accounts()
+            except AccountError:
+                pass
+        records = []
+        for _ in range(5):
+            batch = self.request('/usage-queue?count=200')
+            records.extend(r for r in batch if isinstance(r, dict))
+            if len(batch) < 200:
+                break
+        return accounts, records, self.request('/routing/strategy').get('strategy', 'unknown')
+
+    def apply_reset_priority(self, rows):
+        accounts = self.accounts()
+        enabled = {a['name']: a for a in accounts if not a['disabled']}
+        if self.preferences.get('mode') == 'single' or set(enabled) != {r['name'] for r in rows}:
+            return False
+        if self.request('/routing/strategy').get('strategy') != 'fill-first':
+            self.request('/routing/strategy', 'PUT', {'value': 'fill-first'})
+        changes = []
+        try:
+            for row in rows:
+                account = enabled[row['name']]
+                if (account.get('priority') or 0) != row['priority']:
+                    changes.append((account, account.get('priority') or 0))
+                    self.request('/auth-files/fields', 'PATCH', {'name': account['name'], 'priority': row['priority']})
+        except AccountError:
+            rollback_failed = False
+            for account, priority in reversed(changes):
+                try:
+                    self.request('/auth-files/fields', 'PATCH', {'name': account['name'], 'priority': priority})
+                except AccountError:
+                    rollback_failed = True
+            if rollback_failed:
+                raise AccountError('Приоритет применён частично. Проверь подключение и обнови лимиты.') from None
+            raise
+        return True
+
+    def models(self, account):
+        query = urllib.parse.urlencode({'name': account['name']})
+        result = self.request('/auth-files/models?' + query)
+        return [m['id'] for m in result.get('models', []) if isinstance(m.get('id'), str)]
+
+    @staticmethod
+    def parse_quotas(body):
+        result = {}
+        for model, info in body.get('models', {}).items():
+            if not isinstance(info, dict) or not isinstance(info.get('quotaInfo'), dict):
+                continue
+            quota = info['quotaInfo']
+            fraction = quota.get('remainingFraction')
+            if not isinstance(fraction, (int, float)) or isinstance(fraction, bool) or not math.isfinite(fraction) or not 0 <= fraction <= 1:
+                fraction = None
+            result[model] = {'remaining': fraction, 'reset': quota.get('resetTime') if isinstance(quota.get('resetTime'), str) else None}
+        return result
+
+    @staticmethod
+    def parse_groups(body):
+        groups = []
+        for group in body.get('groups', []):
+            if not isinstance(group, dict):
+                continue
+            title = str(group.get('displayName', ''))
+            kind = 'gemini' if 'gemini' in title.lower() else 'claude' if any(s in title.lower() for s in ('claude', 'gpt')) else 'other'
+            buckets = []
+            for bucket in group.get('buckets', []):
+                if not isinstance(bucket, dict) or bucket.get('window') not in ('weekly', '5h'):
+                    continue
+                value = bucket.get('remainingFraction')
+                if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value) or not 0 <= value <= 1:
+                    value = None
+                buckets.append({'window': bucket['window'], 'remaining': value, 'reset': bucket.get('resetTime')})
+            if buckets:
+                groups.append({'name': 'Gemini' if kind == 'gemini' else 'Claude / GPT' if kind == 'claude' else title, 'kind': kind, 'buckets': buckets})
+        return groups
+
+    def quotas(self, account):
+        payload = {'project': account['project_id']} if account.get('project_id') else {}
+        response = self.request('/api-call', 'POST', {
+            'auth_index': account['auth_index'], 'method': 'POST',
+            'url': 'https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels',
+            'header': {'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json', 'User-Agent': 'antigravity/2.19.1 windows/amd64'},
+            'data': json.dumps(payload)})
+        if response.get('status_code') != 200:
+            raise AccountError('Google пока не сообщил лимиты. Попробуй обновить позже.')
+        try:
+            body = json.loads(response.get('body', '{}'))
+            if not isinstance(body.get('models'), dict):
+                raise ValueError()
+            result = self.parse_quotas(body)
+        except (ValueError, TypeError, AttributeError):
+            raise AccountError('Google вернул неполные данные лимитов.') from None
+        groups, summary_error = [], None
+        try:
+            summary = self.request('/api-call', 'POST', {
+                'auth_index': account['auth_index'], 'method': 'POST',
+                'url': 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+                'header': {'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json', 'User-Agent': 'antigravity/2.19.1 windows/amd64'},
+                'data': json.dumps(payload)})
+            if summary.get('status_code') != 200:
+                raise ValueError()
+            groups = self.parse_groups(json.loads(summary.get('body', '{}')))
+            if not groups:
+                raise ValueError()
+        except (AccountError, ValueError, TypeError, AttributeError):
+            summary_error = 'Недельные лимиты пока не получены от Google.'
+        # Grouped API explicitly reports exhausted 5-hour buckets as zero,
+        # including cases where fetchAvailableModels omits its fraction.
+        for model in result:
+            kind = 'gemini' if model.startswith('gemini') else 'claude' if model.startswith(('claude', 'gpt')) else None
+            for group in groups:
+                if group['kind'] == kind:
+                    for bucket in group['buckets']:
+                        if bucket['window'] == '5h' and bucket['remaining'] is not None:
+                            result[model] = {'remaining': bucket['remaining'], 'reset': bucket['reset']}
+        config = yaml.safe_load((self.proxy_dir / 'config.yaml').read_text('utf-8-sig'))
+        aliases = config.get('oauth', {}).get('model-alias', {}).get('antigravity', [])
+        for alias in aliases:
+            if alias.get('name') in result:
+                result[alias['alias']] = dict(result[alias['name']])
+        return {'models': result, 'groups': groups, 'summary_error': summary_error}
+
+    def start_full_quota_windows(self, account, quotas, now=None, last_used=None):
+        """Start a fresh five-hour window once per account/provider, using one output token."""
+        if account.get('disabled') or account.get('access_issue'):
+            return []
+        now = time.time() if now is None else now
+        results = []
+        for group in quotas.get('groups', []):
+            kind = group.get('kind')
+            if kind not in ('gemini', 'claude'):
+                continue
+            # Never fall back to expensive Pro/Sonnet/Opus for a timer trigger.
+            model = 'gemini-3-flash' if kind == 'gemini' else 'gpt-oss-120b-medium'
+            if model not in quotas.get('models', {}):
+                continue
+            buckets = {b.get('window'): b for b in group.get('buckets', [])}
+            remaining = buckets.get('5h', {}).get('remaining')
+            if remaining is None:
+                continue
+            key = account['name'] + ':' + kind
+            with self.quota_start_lock:
+                state = self.quota_starts.setdefault(key, {'armed': True})
+                if state.get('endpoint') != 'daily':
+                    # Failed probes on the production host must not exhaust the
+                    # retry budget for the working Antigravity endpoint.
+                    if state.get('status') not in (None, 200):
+                        state.update(armed=True, failures=0, attempt_at=0)
+                    state['endpoint'] = 'daily'
+                    atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
+                if remaining < 1:
+                    if not state.get('armed') or 'full_since' in state:
+                        state.update(armed=True, failures=0)
+                        state.pop('full_since', None)
+                        atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
+                    continue
+                if remaining != 1 or buckets.get('weekly', {}).get('remaining') == 0:
+                    continue
+                last = state.get('attempt_at', 0)
+                retry = state.get('status') != 200 and state.get('failures', 0) < 3 and now - last >= 600
+                if not state.get('armed') and not retry and now - last < 5 * 3600:
+                    continue
+                if last and now - last < 600:
+                    continue
+                if 'full_since' not in state or (last and now - last >= 5 * 3600 and state['full_since'] <= last):
+                    state['full_since'] = now
+                    atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
+                used = (last_used or {}).get(kind, 0)
+                if used >= state['full_since']:
+                    state.update(armed=False, attempt_at=used, status=200, failures=0)
+                    state.pop('full_since', None)
+                    atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
+                    continue
+                if now - state['full_since'] < 180:
+                    continue
+                # Persist the claim before sending, including across app restarts.
+                state.update(armed=False, attempt_at=now, status='pending', model=model)
+                atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
+            payload = {'project': account.get('project_id') or 'aicode-consumers', 'model': model,
+                'request': {'contents': [{'role': 'user', 'parts': [{'text': 'Привет'}]}],
+                            'generationConfig': {'maxOutputTokens': 1}}}
+            try:
+                response = self.request('/api-call', 'POST', {'auth_index': account['auth_index'], 'method': 'POST',
+                    'url': 'https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent',
+                    'header': {'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json',
+                               'User-Agent': 'antigravity/2.19.1 windows/amd64'}, 'data': json.dumps(payload)})
+                status = response.get('status_code', 0)
+                issue = self.access_issue(response.get('body'))
+                if issue.get('access_issue') == 'verification':
+                    self.remember_verification(account['name'], issue)
+            except AccountError:
+                status = 0
+            with self.quota_start_lock:
+                state.update(status=status, failures=0 if status == 200 else state.get('failures', 0) + 1)
+                atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
+            results.append({'kind': kind, 'status': status})
+        return results
+
+    def _set_disabled(self, account, disabled):
+        return self.request('/auth-files/status', 'PATCH', {'name': account['name'], 'auth_index': account.get('auth_index'), 'disabled': disabled})
+
+    def route(self, selected=None):
+        accounts = self.accounts()
+        if not accounts:
+            raise AccountError('Сначала добавь Google-аккаунт.')
+        if selected and selected not in {a['name'] for a in accounts}:
+            raise AccountError('Этот аккаунт больше не найден. Обнови список.')
+        if selected and any(a['name'] == selected and a.get('access_issue') == 'verification' for a in accounts):
+            raise AccountError('Сначала подтверди этот аккаунт Google и нажми «Я подтвердил».')
+        # Enable the destination first. Restore original states if any update fails.
+        changes = sorted([(a, bool(a.get('access_issue') == 'verification' or (selected and a['name'] != selected)))
+                          for a in accounts], key=lambda pair: pair[1])
+        changed = []
+        try:
+            for account, disabled in changes:
+                if bool(account['disabled']) != disabled:
+                    changed.append(account)
+                    self._set_disabled(account, disabled)
+        except AccountError:
+            failed_rollback = False
+            for account in reversed(changed):
+                try:
+                    self._set_disabled(account, bool(account['disabled']))
+                except AccountError:
+                    failed_rollback = True
+            if failed_rollback:
+                raise AccountError('Переключение выполнено частично. Обнови список и выбери аккаунт повторно.') from None
+            raise
+        self.preferences['mode'] = 'single' if selected else 'pool'
+        self.preferences['selected'] = selected
+        self.save()
+
+    def pause(self, account):
+        if account.get('access_issue') == 'verification':
+            raise AccountError('Сначала подтверди аккаунт Google и нажми «Я подтвердил».')
+        self._set_disabled(account, not bool(account['disabled']))
+        self.preferences['mode'] = 'custom'
+        self.preferences['selected'] = None
+        self.save()
+
+    def rename(self, name, label):
+        self.preferences.setdefault('labels', {})[name] = label.strip()[:60]
+        self.save()
+
+    def begin_login(self):
+        self.login_accounts_before = {a['name'] for a in self.accounts()}
+        result = self.request('/antigravity-auth-url?is_webui=true')
+        url = result.get('url', '')
+        state = result.get('state', '')
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != 'https' or parts.hostname != 'accounts.google.com' or not state:
+            raise AccountError('Не удалось получить безопасную ссылку входа Google.')
+        query = dict(urllib.parse.parse_qsl(parts.query))
+        query['prompt'] = 'select_account consent'
+        return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query))), state
+
+    def login_status(self, state):
+        return self.request('/get-auth-status?' + urllib.parse.urlencode({'state': state}))
+
+    def reconcile_new_login(self):
+        results = []
+        before = getattr(self, 'login_accounts_before', set())
+        for account in self.accounts():
+            if account['name'] in before:
+                continue
+            try:
+                result = self.check_verified_account(account, refresh_link=True)
+            except AccountError as error:
+                result = {'status': 'error', 'message': str(error)}
+            results.append({'name': account['name'], **result})
+        # Apply quarantine before a new identity can be picked for inference.
+        self.accounts()
+        if self.preferences.get('mode') == 'single' and self.preferences.get('selected'):
+            self.route(self.preferences['selected'])
+        return results
