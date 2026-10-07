@@ -307,7 +307,19 @@ class Controller:
             records.extend(r for r in batch if isinstance(r, dict))
             if len(batch) < 200:
                 break
+        aliases = self.model_aliases()
+        for record in records:
+            model = record.get('model') or record.get('alias') or 'Unknown model'
+            record['upstream_model'] = aliases.get(model, model)
         return accounts, records, self.request('/routing/strategy').get('strategy', 'unknown')
+
+    def model_aliases(self):
+        from model_names import DEFAULT_ALIASES
+        try:
+            config = yaml.safe_load((self.proxy_dir / 'config.yaml').read_text('utf-8-sig'))
+            return {item['alias']: item['name'] for item in config.get('oauth', {}).get('model-alias', {}).get('antigravity', [])}
+        except (OSError, ValueError, yaml.YAMLError):
+            return dict(DEFAULT_ALIASES)
 
     def apply_reset_priority(self, rows):
         accounts = self.accounts()

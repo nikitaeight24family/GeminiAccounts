@@ -36,6 +36,16 @@ class ActivityTests(unittest.TestCase):
             self.assertFalse(state['events'][-1]['switch'])
             self.assertEqual(state['latest']['gemini']['name'], 'a')
 
+    def test_preserves_actual_upstream_model_while_correlating_alias(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tracker = Activity(Path(directory) / 'activity.json')
+            state = tracker.ingest([{'execution_id': 'real-model', 'auth_index': 'A',
+                'alias': 'claude-haiku-4-5', 'model': 'gemini-3.8-flash-high',
+                'timestamp': '2026-10-07T00:00:00Z', 'failed': True}], [{'name': 'a', 'auth_index': 'A'}])
+            self.assertEqual(state['stats']['a']['last_model'], 'gemini-3.8-flash-high')
+            self.assertEqual(state['events'][0]['upstream_model'], 'gemini-3.8-flash-high')
+            self.assertEqual(state['events'][0]['model'], 'claude-haiku-4-5')
+
 
 if __name__ == '__main__':
     unittest.main()

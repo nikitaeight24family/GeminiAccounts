@@ -41,6 +41,7 @@ class Activity:
             self.state['seen'].append(identifier)
             changed = True
             model = record.get('alias') or record.get('model') or 'Unknown model'
+            upstream_model = record.get('upstream_model') or record.get('model') or model
             timestamp = record.get('timestamp') or datetime.now(timezone.utc).isoformat()
             failed = bool(record.get('failed'))
             code = (record.get('fail') or {}).get('status_code', 0)
@@ -53,7 +54,7 @@ class Activity:
             stats['latency_ms'] += max(0, latency or 0)
             if timestamp >= stats.get('last', ''):
                 stats['last'] = timestamp
-                stats['last_model'] = model
+                stats['last_model'] = upstream_model
             previous = self.state['latest'].get(model)
             attempt = self.state['attempts'].get(trace) if trace else None
             if attempt and attempt.get('model') != model:
@@ -68,6 +69,7 @@ class Activity:
             elif switched:
                 reason = 'The model account changed; the proxy did not report the exact reason'
             event = {'id': identifier, 'at': timestamp, 'name': name, 'model': model, 'failed': failed,
+                     'upstream_model': upstream_model,
                      'code': code, 'tokens': tokens, 'latency_ms': latency, 'switch': bool(switched), 'reason': reason,
                      'from': attempt['name'] if switched and attempt else previous['name'] if switched else None}
             self.state['events'].append(event)

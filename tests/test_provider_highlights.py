@@ -10,10 +10,14 @@ from app import App
 class ProviderHighlightTests(unittest.TestCase):
     def test_card_last_model_includes_failed_requests_and_honest_alias_labels(self):
         view = SimpleNamespace(activity_state={'stats': {'a': {'last_model': 'claude-opus-4-6-thinking'}}, 'events': [], 'latest': {}})
-        self.assertEqual(App.last_account_model(view, 'a'), 'Opus 4.6')
+        self.assertEqual(App.last_account_model(view, 'a'), 'Opus 4.6 Thinking')
         view.activity_state['stats'] = {}
         view.activity_state['events'] = [{'name':'a', 'at':'2026-10-07T00:00:00Z', 'model':'claude-sonnet-4-5', 'failed':True}]
-        self.assertEqual(App.last_account_model(view, 'a'), 'Gemini Pro')
+        self.assertEqual(App.last_account_model(view, 'a'), '3.1 Pro Low')
+        view.model_aliases = {'claude-sonnet-4-5': 'gemini-3.8-pro-high'}
+        self.assertEqual(App.last_account_model(view, 'a'), '3.8 Pro High')
+        view.activity_state['stats']['a'] = {'last_model': 'gemini-3.8-flash-high'}
+        self.assertEqual(App.last_account_model(view, 'a'), '3.8 Flash High')
         self.assertEqual(App.last_account_model(view, 'unknown'), '')
 
     def test_wait_caption_is_short_and_names_actual_provider(self):

@@ -13,6 +13,7 @@ from backend import AccountError, Controller
 from integrations import Integrations
 from routing import rank_accounts, reset_date
 from runtime import initialize, install_native, start_services, stop_owned
+from model_names import model_name
 
 
 def confirm(prompt, yes=False):
@@ -126,7 +127,7 @@ class Terminal:
                         selected[group] = event
                 active = [group for group, event in selected.items() if event['name'] == account['name']]
                 print(f'{i}. {label} [{status}]' + (' • ' + ' + '.join(active) if active else ''))
-                print(f'   Last model: {latest}')
+                print(f'   Last model: {model_name(latest, self.controller.model_aliases())}')
                 cached = self.caches.get(account['name'], {})
                 if cached.get('error'):
                     print('   Quota: ' + cached['error'])

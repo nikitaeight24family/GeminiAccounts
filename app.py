@@ -19,6 +19,7 @@ from backend import Controller, AccountError
 from activity import Activity
 from routing import rank_accounts, quota_projection
 from integrations import Integrations
+from model_names import model_name
 
 BG = '#10141d'
 PANEL = '#191f2b'
@@ -29,7 +30,7 @@ ACCENT = '#739aff'
 GREEN = '#66d7b0'
 SIDEBAR_WIDTH = 280
 
-MODEL_LABELS = {'claude-sonnet-4-5': 'Gemini Pro', 'claude-haiku-4-5': 'Gemini Flash',
+MODEL_LABELS = {'claude-sonnet-4-5': 'Gemini 3.1 Pro Low', 'claude-haiku-4-5': 'Gemini 3 Flash',
                 'claude-sonnet-4-6': 'Claude Sonnet 4.6', 'claude-opus-4-6-thinking': 'Claude Opus 4.6 Thinking'}
 
 
@@ -49,6 +50,7 @@ class App(ctk.CTk):
         self.minsize(990, 680)
         self.configure(fg_color=BG)
         self.controller = Controller()
+        self.model_aliases = self.controller.model_aliases()
         self.integrations = Integrations(self.controller)
         self.provider_icons = self.make_provider_icons()
         self.mailbox = queue.Queue()
@@ -972,18 +974,10 @@ class App(ctk.CTk):
             candidates = [e for e in self.activity_state.get('events', []) if e.get('name') == name]
             candidates += [e for e in self.activity_state.get('latest', {}).values() if e.get('name') == name]
             last = max(candidates, key=lambda e: e.get('at', ''), default={})
-            model = last.get('model')
+            model = last.get('upstream_model') or last.get('model')
         if not model:
             return ''
-        labels = {'claude-sonnet-4-5': 'Gemini Pro', 'claude-haiku-4-5': 'Gemini Flash',
-                  'claude-sonnet-4-6': 'Sonnet 4.6', 'claude-opus-4-6-thinking': 'Opus 4.6'}
-        if model in labels:
-            return labels[model]
-        if model.startswith('gemini-'):
-            parts = model.split('-')
-            if len(parts) >= 3:
-                return parts[2].title() + ' ' + parts[1]
-        return model.replace('claude-', '').replace('-thinking', '')[:18]
+        return model_name(model, getattr(self, 'model_aliases', None))
 
     def draw_active_badges(self, widgets, families, model=''):
         button = widgets['button']
