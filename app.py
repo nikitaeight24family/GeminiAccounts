@@ -91,6 +91,9 @@ class App(ctk.CTk):
         self.details_toggle = self.button(sidebar_header, '☰', self.toggle_details)
         self.details_toggle.configure(height=26, width=28, font=('Segoe UI', 20), fg_color='transparent')
         self.details_toggle.pack(side='right')
+        self.models_button = self.button(sidebar_header, '⚙', self.model_settings)
+        self.models_button.configure(height=26, width=24, font=('Segoe UI', 17), fg_color='transparent')
+        self.models_button.pack(side='right', padx=(0, 3))
         self.add_button = self.button(self.sidebar, '+  Add Google account', self.add_account, primary=True)
         self.add_button.configure(height=30)
         self.add_button.pack(fill='x', padx=16, pady=(0, 6))
@@ -368,7 +371,7 @@ class App(ctk.CTk):
             return choice
         latest = sorted(self.activity_state['latest'].values(), key=lambda e: e['at'], reverse=True)
         if latest:
-            model = latest[0]['model']
+            model = latest[0].get('upstream_model') or self.model_aliases.get(latest[0]['model'], latest[0]['model'])
             if model in ('claude-sonnet-4-5', 'claude-haiku-4-5') or model.startswith('gemini'):
                 return 'gemini'
             if model.startswith(('claude', 'gpt')):
@@ -446,7 +449,7 @@ class App(ctk.CTk):
         latest = sorted(state['latest'].values(), key=lambda e: e['at'], reverse=True)
         if latest:
             last = latest[0]
-            self.stats_latest.configure(text='Last successful request: ' + name(last['name']) + '\n' + MODEL_LABELS.get(last['model'], last['model']) + ' • ' + self.activity_time(last['at']))
+            self.stats_latest.configure(text='Last successful request: ' + name(last['name']) + '\n' + model_name(last.get('upstream_model') or last['model'], self.model_aliases) + ' • ' + self.activity_time(last['at']))
             self.mode_activity.configure(text='Last response: ' + name(last['name']) + ' • ' + self.activity_time(last['at']))
         stats = state['stats']
         success = sum(v['success'] for v in stats.values())
@@ -472,7 +475,7 @@ class App(ctk.CTk):
         for e in reversed(events[-100:]):
             title = 'SWITCH' if e['switch'] else 'ERROR' if e['failed'] else 'RESPONSE'
             route = (name(e['from']) + ' → ' if e['from'] else '') + name(e['name'])
-            lines.append(f"{self.activity_time(e['at'])} • {title}\n{route} • {MODEL_LABELS.get(e['model'], e['model'])}\n{e['reason']} • {e['latency_ms'] / 1000:.1f} s • {e['tokens']:,} tokens\n")
+            lines.append(f"{self.activity_time(e['at'])} • {title}\n{route} • {model_name(e.get('upstream_model') or e['model'], self.model_aliases)}\n{e['reason']} • {e['latency_ms'] / 1000:.1f} s • {e['tokens']:,} tokens\n")
         content = '\n'.join(lines) or 'No events yet. New requests will appear automatically.'
         if getattr(self, 'journal_content', None) != content:
             scroll = self.stats_journal.yview()[0]
@@ -945,7 +948,7 @@ class App(ctk.CTk):
         now = time.time() if now is None else now
         resets = {}
         for job in waiting:
-            family = App.model_family(job.get('model', ''))
+            family = App.model_family(job.get('upstream_model') or job.get('model', ''))
             if family:
                 resets[family] = min(resets.get(family, float('inf')), job['retry_at'])
         labels = []
@@ -960,7 +963,8 @@ class App(ctk.CTk):
         enabled = {a['name'] for a in self.items if not a.get('disabled')}
         latest = {}
         for model, event in self.activity_state['latest'].items():
-            family = self.model_family(event.get('model') or model)
+            actual = event.get('upstream_model') or getattr(self, 'model_aliases', {}).get(event.get('model') or model, event.get('model') or model)
+            family = self.model_family(actual)
             if family and not event.get('failed') and (family not in latest or event['at'] > latest[family]['at']):
                 latest[family] = event
         return {family: event['name'] for family, event in latest.items() if event['name'] in enabled}
@@ -1219,7 +1223,8 @@ class App(ctk.CTk):
                 data = self.controller.quotas(account)
                 last_used = {}
                 for model, event in self.activity_state['latest'].items():
-                    family = self.model_family(event.get('model') or model)
+                    actual = event.get('upstream_model') or self.model_aliases.get(event.get('model') or model, event.get('model') or model)
+                    family = self.model_family(actual)
                     if family and event['name'] == name:
                         try:
                             at = datetime.fromisoformat(event['at'].replace('Z', '+00:00')).timestamp()
@@ -1285,6 +1290,110 @@ class App(ctk.CTk):
             self.notice.configure(text=message, text_color=GREEN)
             self.loaded(items)
         self.work(perform, done, mutation=True)
+
+    def model_settings(self):
+        if hasattr(self, 'model_window') and self.model_window.winfo_exists():
+            self.model_window.lift()
+            return
+        window = self.model_window = ctk.CTkToplevel(self)
+        window.title('Model selection')
+        window.geometry('550x395')
+        window.configure(fg_color=PANEL)
+        window.transient(self)
+        self.label(window, 'Choose models', 23, bold=True).pack_configure(padx=24, pady=(20, 8))
+        self.label(window, 'Choose any available text model for each client slot.\nNew requests use your choice. Ongoing responses keep their model.', 12, MUTED).pack_configure(padx=24, pady=(0, 15))
+        controls = ctk.CTkFrame(window, fg_color='transparent')
+        controls.pack(fill='x', padx=24)
+        controls.grid_columnconfigure(1, weight=1)
+        selectors = {}
+        options = {}
+        current = self.controller.model_aliases()
+        for row, (group, alias) in enumerate([('pro', 'claude-sonnet-4-5'), ('flash', 'claude-haiku-4-5')]):
+            ctk.CTkLabel(controls, text='Default / Sonnet' if group == 'pro' else 'Fast / Haiku', text_color=TEXT, width=120, anchor='w').grid(row=row, column=0, pady=7)
+            selector = ctk.CTkOptionMenu(controls, values=['Loading…'], state='disabled', fg_color=CARD)
+            selector.grid(row=row, column=1, sticky='ew', pady=7)
+            selectors[group] = selector
+        codex_path = self.integrations.paths()['codex'][0]
+        try:
+            managed_codex = '# BEGIN Gemini Accounts managed provider' in codex_path.read_text('utf-8-sig')
+        except OSError:
+            managed_codex = False
+        update_codex = ctk.BooleanVar(value=managed_codex)
+        ctk.CTkCheckBox(window, text='Also update the Codex default model (asks permission)',
+            variable=update_codex).pack(anchor='w', padx=24, pady=(16, 10))
+        status = ctk.CTkLabel(window, text='Loading the account model catalog…', text_color=MUTED, wraplength=500, justify='left')
+        status.pack(anchor='w', padx=24, pady=(0, 10))
+
+        def apply():
+            selected = {group: options[group][selector.get()] for group, selector in selectors.items()}
+            if update_codex.get():
+                paths = '\n'.join(str(p) for p in self.integrations.paths()['codex'])
+                if not messagebox.askyesno('Update Codex configuration?',
+                    'The gateway model aliases will change, and these Codex files will be configured:\n\n' + paths +
+                    '\n\nThe default model and connection settings will change. Original files are backed up. '
+                    'Restart Codex to apply its new default. Allow these changes?', parent=window):
+                    return
+            apply_button.configure(state='disabled')
+            update_client = bool(update_codex.get())
+            previous = self.controller.model_aliases()
+            def change():
+                changed = False
+                try:
+                    aliases = self.controller.set_model_choices(selected['pro'], selected['flash'])
+                    changed = True
+                    if update_client:
+                        self.integrations.apply(['codex'])
+                    return aliases, None
+                except Exception as error:
+                    if changed:
+                        try:
+                            self.controller.set_model_choices(previous['claude-sonnet-4-5'], previous['claude-haiku-4-5'])
+                        except Exception:
+                            return None, 'Codex setup failed and model rollback failed. Reopen model selection and check the gateway.'
+                    return None, str(error)
+            def done(result):
+                aliases, error = result
+                if not window.winfo_exists():
+                    return
+                apply_button.configure(state='normal')
+                if error:
+                    status.configure(text=error, text_color='#ffbd93')
+                    return
+                self.model_aliases = aliases
+                self.activity = Activity(self.controller.data_dir / 'activity.json')
+                self.activity_state = copy.deepcopy(self.activity.state)
+                status.configure(text='Applied to new gateway requests.' + (' Restart Codex to use its new default.' if update_client else ''), text_color=GREEN)
+                self.render_activity()
+            self.work(change, done)
+
+        apply_button = self.button(window, 'Apply models', apply, primary=True)
+        apply_button.configure(state='disabled')
+        apply_button.pack(fill='x', padx=24)
+        def load():
+            try:
+                return self.controller.model_choices(), None
+            except Exception as error:
+                return None, str(error)
+        def loaded(result):
+            if not window.winfo_exists():
+                return
+            choices, error = result
+            if error:
+                status.configure(text=error, text_color='#ffbd93')
+                return
+            for group, alias in [('pro', 'claude-sonnet-4-5'), ('flash', 'claude-haiku-4-5')]:
+                options[group] = {}
+                for model in choices[group]:
+                    label = model_name(model)
+                    if label in options[group]:
+                        label += ' (' + model + ')'
+                    options[group][label] = model
+                selectors[group].configure(values=list(options[group]), state='normal')
+                selected_label = next((label for label, model in options[group].items() if model == current.get(alias)), next(iter(options[group])))
+                selectors[group].set(selected_label)
+            apply_button.configure(state='normal')
+            status.configure(text='Available text models: Pro Low / High, Flash, Lite, Claude and GPT. Availability depends on your accounts.', text_color=MUTED)
+        self.work(load, loaded)
 
     def connection_settings(self):
         if hasattr(self, 'connection_window') and self.connection_window.winfo_exists():

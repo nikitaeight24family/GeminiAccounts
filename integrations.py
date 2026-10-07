@@ -131,7 +131,8 @@ class Integrations:
         split = re.search(r'^\s*\[', text, re.M)
         root, tables = (text[:split.start()], text[split.start():]) if split else (text, '')
         root = re.sub(r'^\s*(model|model_provider)\s*=.*\n?', '', root, flags=re.M)
-        defaults = 'model = "gemini-3.1-pro-low"\nmodel_provider = "gemini_accounts"\n'
+        model = self.controller.preferences.get('pro-model') or self.controller.model_aliases().get('claude-sonnet-4-5', 'gemini-3.1-pro-low')
+        defaults = 'model = ' + json.dumps(model) + '\nmodel_provider = "gemini_accounts"\n'
         updated = defaults + root + '\n' + tables.rstrip() + '\n\n' + BEGIN + '\n' + self.provider_toml(key) + END + '\n'
         tomllib.loads(updated)
         path.parent.mkdir(parents=True, exist_ok=True)

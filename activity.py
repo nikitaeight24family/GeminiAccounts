@@ -27,6 +27,27 @@ class Activity:
             return f'Service error {code}'
         return f'Request error {code}' if code else 'Request failed without a status code'
 
+    def pin_model_aliases(self, aliases):
+        """Keep historical model captions accurate before changing a gateway alias."""
+        changed = False
+        for stats in self.state['stats'].values():
+            model = stats.get('last_model')
+            if model in aliases:
+                stats['last_model'] = aliases[model]
+                changed = True
+        for event in self.state['events']:
+            model = event.get('upstream_model') or event.get('model')
+            if model in aliases:
+                event['upstream_model'] = aliases[model]
+                changed = True
+        for event in self.state.get('latest', {}).values():
+            model = event.get('upstream_model') or event.get('model')
+            if model in aliases:
+                event['upstream_model'] = aliases[model]
+                changed = True
+        if changed:
+            atomic_write(self.path, json.dumps(self.state, ensure_ascii=False).encode('utf-8'))
+
     def ingest(self, records, accounts):
         known = {a['auth_index']: a['name'] for a in accounts}
         issues = {a['name']: a.get('access_issue') for a in accounts}
@@ -76,7 +97,7 @@ class Activity:
             if failed and trace:
                 self.state['attempts'][trace] = {'name': name, 'code': code, 'model': model}
             else:
-                current = {'name': name, 'at': timestamp, 'model': model}
+                current = {'name': name, 'at': timestamp, 'model': model, 'upstream_model': upstream_model}
                 if not previous or timestamp >= previous['at']:
                     self.state['latest'][model] = current
                 self.state['attempts'].pop(trace, None)

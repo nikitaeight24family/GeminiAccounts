@@ -21,6 +21,41 @@ class QuotaUITests(unittest.TestCase):
         self.controller_patch.stop()
         self.temp.cleanup()
 
+    def test_model_picker_offers_high_and_other_families_and_applies_exact_id(self):
+        import customtkinter as ctk
+        from integrations import Integrations
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
+            app = App()
+            try:
+                root = Path(self.temp.name)
+                app.integrations = Integrations(app.controller, home=root / 'home', local=root / 'local')
+                choices = ['gemini-3.1-pro-low', 'gemini-pro-agent', 'gemini-3-flash', 'gemini-3.5-flash-lite', 'claude-opus-4-6-thinking']
+                app.controller.model_choices = lambda: {'pro': choices, 'flash': choices}
+                app.controller.model_aliases = lambda: {'claude-sonnet-4-5': choices[0], 'claude-haiku-4-5': choices[2]}
+                app.work = lambda fn, done, **kwargs: done(fn())
+                with patch.object(app.controller, 'set_model_choices', return_value={'claude-sonnet-4-5': choices[1], 'claude-haiku-4-5': choices[2]}) as apply, patch.object(app, 'render_activity'), patch.object(app.integrations, 'apply') as setup:
+                    app.model_settings()
+                    window = app.model_window
+                    widgets = []
+                    def collect(widget):
+                        widgets.append(widget)
+                        for child in widget.winfo_children():
+                            collect(child)
+                    collect(window)
+                    selectors = [w for w in widgets if isinstance(w, ctk.CTkOptionMenu)]
+                    self.assertEqual(len(selectors), 2)
+                    self.assertIn('3.1 Pro High', selectors[0].cget('values'))
+                    self.assertIn('Opus 4.6 Thinking', selectors[0].cget('values'))
+                    selectors[0].set('3.1 Pro High')
+                    button = next(w for w in widgets if isinstance(w, ctk.CTkButton) and w.cget('text') == 'Apply models')
+                    button.invoke()
+                    apply.assert_called_once_with(choices[1], choices[2])
+                    setup.assert_not_called()
+                    self.assertFalse((root / 'home' / '.codex' / 'config.toml').exists())
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_ten_accounts_fit_and_all_four_limits_remain_visible(self):
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
             app = App()

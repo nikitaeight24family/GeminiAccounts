@@ -21,7 +21,10 @@ def account(model='gemini', seconds=20, code=429):
 class Mock(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
-        data = json.dumps({'files': self.server.files}).encode()
+        value = {'files': self.server.files}
+        if self.path == '/v0/management/oauth-model-alias' and hasattr(self.server, 'model_aliases'):
+            value = {'oauth-model-alias': {'antigravity': self.server.model_aliases}}
+        data = json.dumps(value).encode()
         self.send_response(200); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
         self.rfile.read(int(self.headers.get('Content-Length', 0)))
@@ -131,6 +134,15 @@ class QueueTests(unittest.TestCase):
         self.assertIn(b'Denied', data)
         self.assertNotIn(b'message_start', data)
         self.assertEqual(self.backend.calls, 1)
+
+    def test_hot_model_selection_does_not_wait_for_old_model_quota(self):
+        self.backend.files = [account(model='gemini')]
+        self.backend.model_aliases = [{'alias': 'alias', 'name': 'gemini-pro-agent'}]
+        response = self.post()
+        data = response.read()
+        self.assertIn(b'"text":"OK"', data)
+        self.assertNotIn(PING, data)
+        self.assertEqual(self.gate.aliases['alias'], 'gemini-pro-agent')
 
 
 if __name__ == '__main__': unittest.main()

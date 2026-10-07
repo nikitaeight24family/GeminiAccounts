@@ -19,6 +19,12 @@ On Windows, replace `./gemini-accounts` with `.\GeminiAccounts-CLI.exe`. From so
 # Accounts, four quota values, reset times and last models
 ./gemini-accounts status
 
+# List the actual available model IDs; menu item 6 selects interactively
+./gemini-accounts models
+
+# Set Pro High for the default slot and Flash for the fast slot
+./gemini-accounts models --default gemini-pro-agent --fast gemini-3-flash
+
 # Configure clients with an approval prompt
 ./gemini-accounts configure --clients claude_cli codex
 

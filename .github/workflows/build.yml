@@ -40,7 +40,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements-cli.txt pyinstaller
-      - run: python -m unittest tests.test_console tests.test_accounts tests.test_activity tests.test_quota_queue tests.test_quota_starts tests.test_routing
+      - run: python -m unittest tests.test_console tests.test_accounts tests.test_activity tests.test_quota_queue tests.test_quota_starts tests.test_routing tests.test_model_selection
       - run: python -m PyInstaller --noconfirm --onefile --name gemini-accounts --collect-all tzdata console.py
       - run: python tests/portable_smoke.py dist/gemini-accounts
       - run: tar -czf dist/GeminiAccounts-CLI-${{ matrix.archive }}.tar.gz -C dist gemini-accounts -C .. CLI.md LICENSE THIRD_PARTY.md

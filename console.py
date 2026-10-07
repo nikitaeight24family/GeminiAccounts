@@ -67,7 +67,8 @@ class Terminal:
                     data = self.controller.quotas(account)
                     last_used = {}
                     for model, event in state['latest'].items():
-                        group = family(event.get('model') or model)
+                        actual = event.get('upstream_model') or self.controller.model_aliases().get(event.get('model') or model, event.get('model') or model)
+                        group = family(actual)
                         if group and event['name'] == account['name']:
                             at = reset_date(event['at'])
                             if at:
@@ -82,7 +83,8 @@ class Terminal:
                 group = self.controller.preferences.get('reset-group', 'auto')
                 if group not in ('gemini', 'claude'):
                     last = max(state['latest'].values(), key=lambda e: e['at'], default={})
-                    group = family(last.get('model', 'gemini')) or 'gemini'
+                    actual = last.get('upstream_model') or self.controller.model_aliases().get(last.get('model', 'gemini'), last.get('model', 'gemini'))
+                    group = family(actual) or 'gemini'
                 rows = rank_accounts(accounts, self.caches, group)
                 if rows and any(row['tier'] != 2 for row in rows):
                     self.controller.apply_reset_priority(rows)
@@ -122,7 +124,8 @@ class Terminal:
                 # Last successful subscriptions are shown independently per provider.
                 selected = {}
                 for event in self.activity.state['latest'].values():
-                    group = family(event['model'])
+                    actual = event.get('upstream_model') or self.controller.model_aliases().get(event['model'], event['model'])
+                    group = family(actual)
                     if group and (group not in selected or event['at'] > selected[group]['at']):
                         selected[group] = event
                 active = [group for group, event in selected.items() if event['name'] == account['name']]
@@ -202,6 +205,28 @@ class Terminal:
             time.sleep(2)
         raise AccountError('Google sign-in timed out. Run login again.')
 
+    def models(self, default=None, fast=None, interactive=False):
+        choices = self.controller.model_choices()
+        current = self.controller.model_aliases()
+        available = sorted(set(choices['pro'] + choices['flash']))
+        for index, model in enumerate(available, 1):
+            print(f'{index}. {model_name(model)}  [{model}]')
+        if interactive:
+            try:
+                value = input('Default / Sonnet model number (Enter keeps current): ').strip()
+                if value and not 1 <= int(value) <= len(available):
+                    raise ValueError()
+                default = available[int(value) - 1] if value else None
+                value = input('Fast / Haiku model number (Enter keeps current): ').strip()
+                if value and not 1 <= int(value) <= len(available):
+                    raise ValueError()
+                fast = available[int(value) - 1] if value else None
+            except (ValueError, IndexError):
+                raise AccountError('Choose a model number from the list.') from None
+        if default or fast:
+            self.controller.set_model_choices(default or current['claude-sonnet-4-5'], fast or current['claude-haiku-4-5'])
+            print('Model aliases updated for new requests. To update the Codex default, run configure --clients codex (asks permission).')
+
     @staticmethod
     def verification_link(account):
         url = account.get('verification_url')
@@ -219,6 +244,9 @@ def parser():
     commands.add_parser('serve', help='run gateway and quota monitoring; Ctrl+C stops services started here')
     commands.add_parser('status', help='show accounts, quotas, resets and last models')
     commands.add_parser('login', help='add a Google account through browser sign-in')
+    models = commands.add_parser('models', help='list available models or choose default / fast model aliases')
+    models.add_argument('--default', help='upstream model ID for Sonnet / Pro requests')
+    models.add_argument('--fast', help='upstream model ID for Haiku / Flash requests')
     verify = commands.add_parser('verify', help='check verification after completing Google confirmation')
     verify.add_argument('account')
     verify.add_argument('--refresh-link', action='store_true', help='request and open a fresh verification URL')
@@ -249,6 +277,8 @@ def main(argv=None):
             terminal.show_status()
         elif command == 'login':
             terminal.login()
+        elif command == 'models':
+            terminal.models(args.default, args.fast)
         elif command == 'configure':
             return 0 if terminal.configure(args.clients, args.yes) else 1
         elif command == 'verify':
@@ -282,7 +312,7 @@ def main(argv=None):
                     raise AccountError('A local service stopped. Check the runtime logs.')
         else:
             while True:
-                print('\n1 Accounts & quotas  2 Add account  3 Connect clients  4 Restore settings  5 Verify account  0 Exit')
+                print('\n1 Accounts & quotas  2 Add account  3 Connect clients  4 Restore settings  5 Verify account  6 Models  0 Exit')
                 choice = input('> ').strip()
                 try:
                     if choice == '0':
@@ -295,6 +325,8 @@ def main(argv=None):
                         terminal.configure(None)
                     elif choice == '4':
                         terminal.restore()
+                    elif choice == '6':
+                        terminal.models(interactive=True)
                     elif choice == '5':
                         account = terminal.account(input('Account email: ').strip())
                         if confirm('Have you completed Google verification?'):

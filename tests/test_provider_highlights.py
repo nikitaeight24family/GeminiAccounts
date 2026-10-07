@@ -26,6 +26,12 @@ class ProviderHighlightTests(unittest.TestCase):
         jobs.append({'model': 'claude-sonnet-4-5', 'retry_at': 1000 + 22 * 60})
         self.assertEqual(App.quota_wait_text(jobs, now=1000), 'until Claude · 151h 00m  /  until Gemini · 22m')
 
+    def test_alias_can_select_claude_without_marking_gemini_active(self):
+        view = SimpleNamespace(items=[{'name': 'a', 'disabled': False}],
+            activity_state={'latest': {'claude-sonnet-4-5': {'name': 'a', 'model': 'claude-sonnet-4-5',
+                'upstream_model': 'claude-opus-4-6-thinking', 'at': '2026-10-07T00:00:00Z'}}}, model_family=App.model_family)
+        self.assertEqual(App.active_provider_accounts(view), {'claude': 'a'})
+
     def test_independent_selections_aliases_and_disabled_latest(self):
         state = {'latest': {
             'claude-sonnet-4-5': {'name': 'a', 'at': '2026-10-07T00:00:00Z'},

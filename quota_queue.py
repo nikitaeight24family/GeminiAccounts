@@ -65,6 +65,28 @@ class QueueServer(ThreadingHTTPServer):
         self.poll_seconds = 3
         self.heartbeat_seconds = 10
         self.verifications_path = None
+        self.aliases_checked = 0
+
+    def refresh_aliases(self):
+        # Hot model selection must also update quota-wait model scoping.
+        with self.lock:
+            if time.monotonic() - self.aliases_checked < 1:
+                return
+            self.aliases_checked = time.monotonic()
+        conn = http.client.HTTPConnection(*self.upstream, timeout=3)
+        try:
+            conn.request('GET', '/v0/management/oauth-model-alias', headers={'Authorization': 'Bearer ' + self.key})
+            response = conn.getresponse()
+            if response.status == 200:
+                result = json.loads(response.read())
+                if 'oauth-model-alias' in result:
+                    aliases = (result['oauth-model-alias'] or {}).get('antigravity', [])
+                    with self.lock:
+                        self.aliases = {item['alias']: item['name'] for item in aliases}
+        except (OSError, ValueError, KeyError, http.client.HTTPException):
+            pass
+        finally:
+            conn.close()
 
     def accounts(self):
         conn = http.client.HTTPConnection(*self.upstream, timeout=12)
@@ -87,7 +109,7 @@ class QueueServer(ThreadingHTTPServer):
 
     def snapshot(self):
         with self.lock:
-            return {'jobs': [dict(j) for j in self.jobs.values()], 'poll_seconds': self.poll_seconds}
+            return {'jobs': [dict(j, upstream_model=self.aliases.get(j['model'], j['model'])) for j in self.jobs.values()], 'poll_seconds': self.poll_seconds}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -187,6 +209,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             while True:
                 try:
+                    self.server.refresh_aliases()
                     reset = quota_wait(self.server.accounts(), model, self.server.aliases)
                 except (OSError, ValueError, http.client.HTTPException):
                     reset = None

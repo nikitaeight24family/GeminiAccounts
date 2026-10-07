@@ -321,6 +321,43 @@ class Controller:
         except (OSError, ValueError, yaml.YAMLError):
             return dict(DEFAULT_ALIASES)
 
+    def model_choices(self):
+        aliases = self.model_aliases()
+        available = set()
+        for account in self.accounts():
+            if account.get('access_issue'):
+                continue
+            available.update(self.models(account))
+        return {
+            'pro': sorted({m for m in available if m.startswith(('gemini-', 'claude-', 'gpt-')) and m not in aliases and 'image' not in m} |
+                          {aliases.get('claude-sonnet-4-5', 'gemini-3.1-pro-low')}),
+            'flash': sorted({m for m in available if m.startswith(('gemini-', 'claude-', 'gpt-')) and m not in aliases and 'image' not in m} |
+                            {aliases.get('claude-haiku-4-5', 'gemini-3-flash')}),
+        }
+
+    def set_model_choices(self, pro, flash):
+        choices = self.model_choices()
+        if pro not in choices['pro'] or flash not in choices['flash']:
+            raise AccountError('This model is not in the available account catalog. Reload model choices.')
+        payload = self.request('/oauth-model-alias').get('oauth-model-alias') or {}
+        entries = [dict(item) for item in payload.get('antigravity', [])]
+        activity_path = self.data_dir / 'activity.json'
+        if activity_path.exists():
+            from activity import Activity
+            Activity(activity_path).pin_model_aliases({entry['alias']: entry['name'] for entry in entries})
+        from model_names import model_name
+        for alias, target in [('claude-sonnet-4-5', pro), ('claude-haiku-4-5', flash)]:
+            entry = next((item for item in entries if item['alias'] == alias), None)
+            if entry is None:
+                entry = {'alias': alias}
+                entries.append(entry)
+            entry.update(name=target, fork=True, **{'force-mapping': True, 'display-name': model_name(target)})
+        # The management endpoint persists and hot-reloads only this provider.
+        self.request('/oauth-model-alias', 'PATCH', {'provider': 'antigravity', 'aliases': entries})
+        self.preferences.update({'pro-model': pro, 'flash-model': flash})
+        self.save()
+        return {entry['alias']: entry['name'] for entry in entries}
+
     def apply_reset_priority(self, rows):
         accounts = self.accounts()
         enabled = {a['name']: a for a in accounts if not a['disabled']}
