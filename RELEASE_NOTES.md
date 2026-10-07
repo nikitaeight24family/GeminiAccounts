@@ -19,3 +19,9 @@ Setup always requires consent. Desktop **Restore previous settings / reset prefe
 Windows supports Claude Desktop Code, Claude Code CLI and Codex Desktop / CLI. Mac terminal mode supports Claude Code CLI and Codex CLI. Mac executables are not notarized; macOS may require approval in Privacy & Security. Source mode is also available.
 
 See the English [quick start](https://github.com/nikitaeight24family/GeminiAccounts#readme) and [terminal guide](https://github.com/nikitaeight24family/GeminiAccounts/blob/main/CLI.md). Google Antigravity determines eligibility, models and quotas. Clients are installed separately. `SHA256SUMS.txt` lists release checksums.
+
+### Compact desktop panel
+
+Demo accounts and example quota values; no personal account addresses.
+
+<img src="https://raw.githubusercontent.com/nikitaeight24family/GeminiAccounts/v1.2.0/docs/compact-panel.png" alt="Compact Gemini Accounts panel" width="320">

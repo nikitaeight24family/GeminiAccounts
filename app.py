@@ -809,7 +809,7 @@ class App(ctk.CTk):
             reset = datetime.fromisoformat(point['reset'])
             minutes = max(0, math.ceil((reset - now).total_seconds() / 60))
             hours, minutes = divmod(minutes, 60)
-            text = self.time_until_reset(point['reset'], now, days_only=True) if weekly else f'{hours}h {minutes:02}m'
+            text = App.time_until_reset(point['reset'], now, days_only=True) if weekly else f'{hours}h {minutes:02}m'
             text_width = self.forecast_font.measure(text)
             x = margin + track * min(1, max(0, point['remaining']))
             left = x - text_width - 3 * scale

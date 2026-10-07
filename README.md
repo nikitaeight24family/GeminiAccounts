@@ -4,6 +4,10 @@ Google Antigravity account manager with Gemini / Claude quota monitoring and a l
 
 ## Windows desktop: three steps
 
+<img src="docs/compact-panel.png" alt="Compact panel with verification controls, model names, independent Gemini and Claude selections, and pooled quotas" width="320">
+
+Screenshot uses demo accounts and example quota values.
+
 1. [Download GeminiAccounts-Setup.exe](https://github.com/nikitaeight24family/GeminiAccounts/releases/latest/download/GeminiAccounts-Setup.exe) and click **Install**. No Python or administrator access required.
 2. Click **Add Google account** and complete browser sign-in. If Google requires verification, its page opens and the account stays pinned above ready accounts until verification succeeds.
 3. Open **Connect applications** and approve setup of installed clients. Original configs are backed up. Restarting running clients requires separate consent.
