@@ -29,6 +29,8 @@ class QuotaUITests(unittest.TestCase):
             try:
                 app.controller.preferences = {'labels': {}}
                 # A 4K desktop at 175% has approximately 1200 logical pixels.
+                # Allow this viewport on CI desktops with smaller monitors too.
+                app.maxsize(2400, 2400)
                 app.geometry('1120x1180')
                 items = [{'name': str(i), 'email': f'account.number{i}@gmail.com', 'disabled': False, 'unavailable': False} for i in range(10)]
                 now = datetime.now(timezone.utc)
