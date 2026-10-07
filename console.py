@@ -32,11 +32,13 @@ def family(model):
         return 'claude'
 
 
-def reset_text(value, now=None):
+def reset_text(value, now=None, days_only=False):
     moment = reset_date(value)
     if moment is None:
         return '--'
     seconds = max(0, int((moment - (now or datetime.now(timezone.utc))).total_seconds()))
+    if days_only:
+        return '0d' if seconds == 0 else '< 1d' if seconds < 86400 else f'{seconds // 86400}d'
     minutes = seconds // 60
     days, hours = divmod(minutes // 60, 24)
     return f'{days}d {hours}h' if days else f'{hours}h {minutes % 60:02}m' if hours else f'{minutes}m'
@@ -142,7 +144,7 @@ class Terminal:
                         bucket = next((b for b in group['buckets'] if b.get('window') == window), {})
                         remaining = bucket.get('remaining')
                         percent = '--' if remaining is None else f'{remaining * 100:.1f}%'
-                        values.append(f'{"1w" if window == "weekly" else "5h"}: {percent} ({reset_text(bucket.get("reset"))})')
+                        values.append(f'{"1w" if window == "weekly" else "5h"}: {percent} ({reset_text(bucket.get("reset"), days_only=window == "weekly")})')
                     print('   ' + title + '  ' + ' | '.join(values))
             jobs = self.controller.quota_wait_status().get('jobs', [])
             for job in jobs:

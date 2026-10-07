@@ -809,7 +809,7 @@ class App(ctk.CTk):
             reset = datetime.fromisoformat(point['reset'])
             minutes = max(0, math.ceil((reset - now).total_seconds() / 60))
             hours, minutes = divmod(minutes, 60)
-            text = f'{hours}h {minutes:02}m'
+            text = self.time_until_reset(point['reset'], now, days_only=True) if weekly else f'{hours}h {minutes:02}m'
             text_width = self.forecast_font.measure(text)
             x = margin + track * min(1, max(0, point['remaining']))
             left = x - text_width - 3 * scale
@@ -876,7 +876,7 @@ class App(ctk.CTk):
         self.update_countdown(account['name'])
 
     @staticmethod
-    def time_until_reset(value, now=None):
+    def time_until_reset(value, now=None, days_only=False):
         try:
             reset = datetime.fromisoformat(value.replace('Z', '+00:00'))
             if not reset.tzinfo:
@@ -884,6 +884,8 @@ class App(ctk.CTk):
             seconds = (reset - (now or datetime.now(timezone.utc))).total_seconds()
         except (ValueError, AttributeError):
             return '—'
+        if days_only:
+            return '0d' if seconds <= 0 else '< 1d' if seconds < 86400 else f'{int(seconds // 86400)}d'
         if seconds <= 0:
             return '0m'
         if seconds < 60:
@@ -907,7 +909,7 @@ class App(ctk.CTk):
         for group in self.quota_groups(name):
             for bucket in group['buckets']:
                 label = widgets['countdown'][(group['kind'], bucket['window'])]
-                duration = self.time_until_reset(bucket.get('reset'))
+                duration = self.time_until_reset(bucket.get('reset'), now, days_only=bucket['window'] == 'weekly')
                 text = duration
                 color = self.reset_color(bucket.get('reset'), now, bounds[bucket['window']])
                 if label.cget('text') != text or label.cget('text_color') != color:
