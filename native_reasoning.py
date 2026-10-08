@@ -1,5 +1,4 @@
-"""Request separately marked Gemini thought summaries at the native boundary."""
-import copy
+"""Migration for the retired experimental thought-summary override."""
 
 SUMMARY_RULE = {
     'models': [{'name': 'gemini-*', 'protocol': 'antigravity',
@@ -8,10 +7,10 @@ SUMMARY_RULE = {
 }
 
 
-def ensure_summary_rule(config):
-    """Default only: retain explicit visibility choices and existing payload rules."""
-    rules = config.setdefault('requests', {}).setdefault('payload', {}).setdefault('default', [])
-    if SUMMARY_RULE in rules:
+def remove_legacy_summary_rule(config):
+    """Remove only the exact experimental rule installed by versions 1.3.2–1.3.3."""
+    rules = config.get('requests', {}).get('payload', {}).get('default', [])
+    if not isinstance(rules, list) or SUMMARY_RULE not in rules:
         return False
-    rules.append(copy.deepcopy(SUMMARY_RULE))
+    rules[:] = [rule for rule in rules if rule != SUMMARY_RULE]
     return True

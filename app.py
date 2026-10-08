@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageTk
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import customtkinter as ctk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, simpledialog
 from tkinter import Canvas, font as tkfont
 from backend import Controller, AccountError
 from activity import Activity
@@ -374,8 +374,8 @@ class App(ctk.CTk):
         self.work(idle, done)
 
     def send_diagnostic_log(self):
-        from gateway_diagnostics import send_diagnostics
-        endpoint = self.controller.preferences.get('diagnostics-endpoint', '')
+        from gateway_diagnostics import send_diagnostics, DEFAULT_ENDPOINT, read_upload_token, save_upload_token
+        endpoint = self.controller.preferences.get('diagnostics-endpoint') or DEFAULT_ENDPOINT
         if not endpoint:
             dialog = ctk.CTkInputDialog(text='HTTPS diagnostic upload endpoint:', title='Diagnostic recipient')
             endpoint = dialog.get_input()
@@ -386,11 +386,18 @@ class App(ctk.CTk):
         if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
             messagebox.showerror('Invalid recipient', 'Use an HTTPS URL without embedded credentials.', parent=self)
             return
+        token = read_upload_token(self.controller, endpoint)
+        if not token:
+            token = simpledialog.askstring('Diagnostic upload access',
+                'Upload access token for ' + parsed.hostname + ':', show='*', parent=self)
+            if not token:
+                return
         if not messagebox.askyesno('Send diagnostic log?',
             'Recipient: ' + endpoint + '\n\nThe ZIP contains request phases, models, errors, timings, account cooldowns and active requests. '
             'Email addresses are replaced with account labels. Prompts, generated text, passwords and authentication tokens are excluded. '
             '\n\nSend this diagnostic archive now? No automatic uploads will be enabled.', parent=self):
             return
+        save_upload_token(self.controller, endpoint, token.strip())
         self.controller.preferences['diagnostics-endpoint'] = endpoint
         self.controller.save()
         self.work(lambda: send_diagnostics(self.controller, endpoint),
@@ -1257,6 +1264,7 @@ class App(ctk.CTk):
         self.button(actions, 'Use only this account', lambda: self.action(lambda: self.controller.route(account['name']), 'Account selected for Claude.'), primary=True).pack(side='left', padx=(0, 10))
         self.pause_button = self.button(actions, 'Resume' if account['disabled'] else 'Pause', self.pause_selected)
         self.pause_button.pack(side='left')
+        self.button(actions, 'Remove account', self.remove_selected_account).pack(side='right')
         rename_frame = ctk.CTkFrame(self.detail, fg_color='transparent')
         rename_frame.pack(fill='x', pady=(0, 20))
         entry = ctk.CTkEntry(rename_frame, placeholder_text='Account label, e.g. Personal', height=36, fg_color=CARD, border_color='#3a465c')
@@ -1318,6 +1326,29 @@ class App(ctk.CTk):
         self.pause_button.configure(text='Resume' if account['disabled'] else 'Pause')
         self.unavailable_label.configure(text='The service reported temporary unavailability. Your sign-in is saved; you can select another account.' if account.get('unavailable') else '')
         self.update_detail_quota()
+
+    def remove_selected_account(self):
+        if self.busy:
+            return
+        account = next((a for a in self.items if a['name'] == self.selected), None)
+        if not account:
+            return
+        name = account['name']
+        identity = account.get('email') or self.display_name(account)
+        if not messagebox.askyesno('Remove account?',
+                f'Remove {identity} from Gemini Accounts?\n\n'
+                'Its saved sign-in will be deleted and it will no longer be used for new requests. '
+                'Your Google account will not be deleted. You can add it again by signing in.\n\n'
+                'An ongoing request may still finish on this account.', parent=self):
+            return
+        def remove():
+            self.controller.remove_account(name)
+            return self.controller.accounts()
+        def done(items):
+            self.quota_cache.pop(name, None)
+            self.notice.configure(text='Account removed. You can add it again by signing in.', text_color=GREEN)
+            self.loaded(items)
+        self.work(remove, done, mutation=True)
 
     def pause_selected(self):
         account = next((a for a in self.items if a['name'] == self.selected), None)

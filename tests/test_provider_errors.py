@@ -25,3 +25,8 @@ class ProviderErrorsTests(unittest.TestCase):
             self.assertIn('capacity unavailable', state['events'][0]['reason'])
             self.assertNotIn('SECRET', path.read_text())
             self.assertNotIn('https://secret', path.read_text())
+
+    def test_nested_native_error_preserves_google_reason(self):
+        google = {'error':{'code':429, 'status':'RESOURCE_EXHAUSTED', 'details':[{'reason':'MODEL_CAPACITY_EXHAUSTED'}]}}
+        wrapped = {'type':'error','error':{'type':'rate_limit_error','message':json.dumps(google)}}
+        self.assertIn('capacity unavailable', failure_reason(429, json.dumps(wrapped)))

@@ -116,8 +116,8 @@ class Controller:
         if not config_path.exists():
             raise AccountError('The local Gemini connection is not installed.')
         config = yaml.safe_load(config_path.read_text('utf-8-sig'))
-        from native_reasoning import ensure_summary_rule
-        reasoning_changed = ensure_summary_rule(config)
+        from native_reasoning import remove_legacy_summary_rule
+        reasoning_changed = remove_legacy_summary_rule(config)
         host = config.get('server', {}).get('host', '')
         if host not in ('127.0.0.1', 'localhost'):
             raise AccountError('The connection must be restricted to this computer.')
@@ -640,6 +640,25 @@ class Controller:
         self.preferences['mode'] = 'custom'
         self.preferences['selected'] = None
         self.save()
+
+    def remove_account(self, name):
+        if not isinstance(name, str) or not name or not any(a['name'] == name for a in self.accounts()):
+            raise AccountError('Account no longer exists. Refresh the account list.')
+        # Delete the exact credential through the provider API, never a filesystem glob.
+        self.request('/auth-files?' + urllib.parse.urlencode({'name': name}), 'DELETE')
+        self.preferences.get('labels', {}).pop(name, None)
+        if self.preferences.get('selected') == name:
+            self.preferences['selected'] = None
+            self.preferences['mode'] = 'custom'
+        self.save()
+        with self.verification_lock:
+            self.verification_checks.pop(name, None)
+            if self.verifications.pop(name, None) is not None:
+                atomic_write(self.verification_path, dpapi(json.dumps(self.verifications).encode()))
+        with self.quota_start_lock:
+            for kind in ('gemini', 'claude'):
+                self.quota_starts.pop(name + ':' + kind, None)
+            atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
 
     def rename(self, name, label):
         self.preferences.setdefault('labels', {})[name] = label.strip()[:60]

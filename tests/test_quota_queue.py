@@ -33,6 +33,8 @@ class Mock(BaseHTTPRequestHandler):
         data = (b'event: message_start\ndata: {"type":"message_start","message":{"id":"real"}}\n\n'
                 b'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"OK"}}\n\n'
                 b'event: message_stop\ndata: {"type":"message_stop"}\n\n') if self.server.status == 200 else b'{"error":{"type":"authentication_error","message":"Denied"}}'
+        if getattr(self.server, 'json_nonstream', False) and not self.server.last_request.get('stream'):
+            data = b'{"type":"message","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"}'
         if self.path == '/v1/responses' and self.server.status == 200:
             data = b'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\n'
         if self.server.calls <= getattr(self.server, 'empty_attempts', 0):
@@ -61,6 +63,40 @@ class QueueTests(unittest.TestCase):
     def post(self, key='client', model='alias'):
         self.client.request('POST', '/v1/messages', json.dumps({'model': model, 'stream': True, 'messages': []}), {'x-api-key': key})
         return self.client.getresponse()
+    def test_sdk_identity_removed_for_stream_nonstream_and_token_count(self):
+        from quota_queue import SDK_IDENTITY
+        self.backend.files = []
+        self.backend.json_nonstream = True
+        for path, stream in [('/v1/messages', True), ('/v1/messages', False), ('/v1/messages/count_tokens', False)]:
+            with self.subTest(path=path, stream=stream):
+                payload = {'model': 'gemini-test', 'stream': stream,
+                           'system': [{'type': 'text', 'text': SDK_IDENTITY},
+                                      {'type': 'text', 'text': 'Keep all other instructions.', 'cache_control': {'type': 'ephemeral'}}],
+                           'messages': [{'role': 'user', 'content': SDK_IDENTITY}],
+                           'tools': [{'name': 'test', 'description': SDK_IDENTITY, 'input_schema': {'type': 'object'}}]}
+                self.client.request('POST', path, json.dumps(payload), {'x-api-key': 'client'})
+                response = self.client.getresponse()
+                self.assertEqual(response.status, 200)
+                response.read()
+                forwarded = self.backend.last_request
+                self.assertEqual(forwarded['system'], payload['system'][1:])
+                self.assertEqual(forwarded['messages'], payload['messages'])
+                self.assertEqual(forwarded['tools'], payload['tools'])
+                self.client.close()
+                self.client = http.client.HTTPConnection(*self.gate.server_address, timeout=3)
+
+    def test_sdk_identity_only_exact_system_lines_and_idempotent(self):
+        from quota_queue import SDK_IDENTITY, normalize_sdk_system
+        request = {'system': 'Keep before.\n' + SDK_IDENTITY + '.\nKeep after.'}
+        self.assertTrue(normalize_sdk_system(request))
+        self.assertEqual(request['system'], 'Keep before.\nKeep after.')
+        self.assertFalse(normalize_sdk_system(request))
+        request = {'system': 'Quoted: ' + SDK_IDENTITY}
+        self.assertFalse(normalize_sdk_system(request))
+        request = {'system': SDK_IDENTITY}
+        self.assertTrue(normalize_sdk_system(request))
+        self.assertNotIn('system', request)
+
     def test_wait_heartbeat_then_new_account_real_response(self):
         response = self.post()
         self.assertEqual(response.read(len(PING)), PING)
@@ -132,6 +168,14 @@ class QueueTests(unittest.TestCase):
         self.assertIn(b'"text":"OK"', data)
         self.assertEqual(data.count(b'event: message_start'), 1)
         self.assertEqual(self.backend.calls, 1)
+    def test_token_count_normalizes_context_suffix_and_logs_requested_model(self):
+        self.client.request('POST', '/v1/messages/count_tokens', json.dumps({'model':'alias[1m]', 'messages':[]}), {'x-api-key':'client'})
+        response = self.client.getresponse()
+        response.read()
+        self.assertEqual(self.backend.last_request['model'], 'alias')
+        event = next(e for e in self.gate.diagnostics.snapshot()['events'] if e['event'] == 'token_count_requested')
+        self.assertEqual(event['requested_model'], 'alias[1m]')
+
     def test_other_model_does_not_wait(self):
         response = self.post(model='claude')
         self.assertNotIn(PING, response.read()); self.assertEqual(self.backend.calls, 1)
@@ -181,6 +225,22 @@ class QueueTests(unittest.TestCase):
         response = self.client.getresponse()
         self.assertEqual(response.status, 200)
         self.assertIn(b'message_start', response.read())
+    def test_429_without_cooldown_is_held_and_resumes_without_client_retry(self):
+        self.backend.files = []
+        self.backend.status = 429
+        self.gate.retry_base_seconds = .15
+        self.gate.retry_max_seconds = .15
+        response = self.post()
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.read(len(PING)), PING)
+        self.assertEqual(self.backend.calls, 1)
+        self.backend.status = 200
+        data = response.read()
+        self.assertIn(b'OK', data)
+        self.assertNotIn(b'Denied', data)
+        self.assertNotIn(b'event: error', data)
+        self.assertEqual(self.backend.calls, 2)
+
     def test_verification_error_is_not_hidden_without_quota(self):
         self.backend.files = [account(code=403)]
         self.backend.status = 403

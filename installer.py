@@ -79,11 +79,11 @@ def install(payload, root, shortcuts=True, automatic=False):
             'requests': {'streaming': {'keepalive-seconds': 5}},
         }
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    from native_reasoning import ensure_summary_rule
+    from native_reasoning import remove_legacy_summary_rule
     config = yaml.safe_load(config_path.read_text('utf-8-sig'))
-    if ensure_summary_rule(config):
+    if remove_legacy_summary_rule(config):
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    atomic_write(manager / 'installation.json', json.dumps({'version': '1.3.3'}).encode())
+    atomic_write(manager / 'installation.json', json.dumps({'version': '1.3.4'}).encode())
     if shortcuts:
         # PowerShell receives paths as environment data, never executable interpolation.
         env = os.environ.copy()

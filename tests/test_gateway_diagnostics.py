@@ -4,7 +4,9 @@ import unittest
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
-from gateway_diagnostics import Diagnostics, export_diagnostics
+from gateway_diagnostics import Diagnostics, export_diagnostics, send_diagnostics
+from unittest.mock import patch
+import io
 from activity import Activity
 from provider_errors import provider_error_metadata, failure_reason
 
@@ -68,3 +70,25 @@ class DiagnosticsTests(unittest.TestCase):
                 for name in archive.namelist():
                     self.assertNotIn('owner@example.com', archive.read(name).decode())
                     self.assertIn('account-1', archive.read(name).decode())
+
+    def test_upload_protocol_and_credentials_excluded_from_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = SimpleNamespace(data_dir=Path(directory), quota_wait_status=lambda: {'jobs':[]}, accounts=lambda: [])
+            received = []
+            class Response:
+                status = 201
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+            class Opener:
+                def open(self, request, timeout):
+                    received.append(request)
+                    return Response()
+            with patch('urllib.request.build_opener', return_value=Opener()):
+                self.assertEqual(send_diagnostics(controller, 'https://logs.conch-labs.com/ingest', 'UPLOAD_SECRET'), 201)
+            request = received[0]
+            self.assertEqual(request.get_header('Authorization'), 'Bearer UPLOAD_SECRET')
+            self.assertEqual(request.get_header('X-filename'), 'logs.zip')
+            self.assertEqual(request.get_header('Content-type'), 'application/zip')
+            with zipfile.ZipFile(io.BytesIO(request.data)) as archive:
+                for name in archive.namelist():
+                    self.assertNotIn('UPLOAD_SECRET', archive.read(name).decode())

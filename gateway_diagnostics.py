@@ -4,7 +4,9 @@ import threading
 from collections import deque
 from datetime import datetime, timezone
 
-FIELDS = {'method', 'path', 'model', 'upstream_model', 'stream', 'request_bytes',
+DEFAULT_ENDPOINT = 'https://logs.conch-labs.com/ingest'
+
+FIELDS = {'method', 'path', 'model', 'requested_model', 'upstream_model', 'stream', 'request_bytes',
           'attempt', 'status', 'phase', 'elapsed_seconds', 'wait_seconds', 'retry_at',
           'response_bytes', 'exception_type', 'reason', 'accounts', 'has_text', 'has_tool',
           'has_thinking', 'terminal', 'error', 'pending_seconds', 'account', 'from_account',
@@ -88,7 +90,24 @@ def export_diagnostics(controller, destination, anonymize=False):
     return destination
 
 
-def send_diagnostics(controller, endpoint):
+def save_upload_token(controller, endpoint, token):
+    from backend import atomic_write, dpapi
+    if not token or any(character in token for character in '\r\n'):
+        raise ValueError('Invalid upload access token.')
+    atomic_write(controller.data_dir / 'diagnostic-upload-token.dpapi',
+                 dpapi(json.dumps({'endpoint':endpoint, 'token':token}).encode()))
+
+
+def read_upload_token(controller, endpoint):
+    from backend import dpapi
+    path = controller.data_dir / 'diagnostic-upload-token.dpapi'
+    if not path.exists():
+        return None
+    value = json.loads(dpapi(path.read_bytes(), decrypt=True))
+    return value.get('token') if value.get('endpoint') == endpoint else None
+
+
+def send_diagnostics(controller, endpoint, token=None):
     """Invoked by the UI only after the owner explicitly confirms this export."""
     import tempfile
     import urllib.request
@@ -96,10 +115,14 @@ def send_diagnostics(controller, endpoint):
     parsed = urlparse(endpoint)
     if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
         raise ValueError('Use an HTTPS endpoint without embedded credentials.')
+    token = token or read_upload_token(controller, endpoint)
+    if not token or any(character in token for character in '\r\n'):
+        raise ValueError('The diagnostic upload access token is missing or invalid.')
     with tempfile.TemporaryDirectory() as directory:
         path = export_diagnostics(controller, __import__('pathlib').Path(directory) / 'diagnostics.zip', anonymize=True)
         request = urllib.request.Request(endpoint, data=path.read_bytes(), method='POST',
-            headers={'Content-Type':'application/zip', 'User-Agent':'GeminiAccounts-Diagnostics'})
+            headers={'Content-Type':'application/zip', 'User-Agent':'GeminiAccounts-Diagnostics',
+                     'Authorization':'Bearer ' + token, 'X-Filename':'logs.zip'})
         # Do not follow redirects: approval applies to the displayed recipient only.
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):

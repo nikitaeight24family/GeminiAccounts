@@ -23,6 +23,64 @@ class AccountsTests(unittest.TestCase):
     def set_disabled(self, account, disabled):
         next(a for a in self.items if a['name'] == account['name'])['disabled'] = disabled
 
+    def test_remove_exact_account_cleans_metadata_without_enabling_others(self):
+        from urllib.parse import parse_qs, urlsplit
+        name = 'a+tag&all=true.json'
+        self.items[0]['name'] = name
+        c = self.controller
+        c.preferences.update(labels={name: 'Personal', 'b': 'Other'}, selected=name, mode='single')
+        c.verifications = {name: {'access_issue': 'verification'}, 'b': {'access_issue': 'verification'}}
+        c.quota_starts = {name + ':gemini': {}, 'b:gemini': {'armed': True}}
+        def request(path, method):
+            self.assertEqual(method, 'DELETE')
+            self.assertEqual(parse_qs(urlsplit(path).query), {'name': [name]})
+            self.items.pop(0)
+            return {'status': 'ok'}
+        c.request = request
+        c.remove_account(name)
+        self.assertEqual(self.items, [{'name': 'b', 'disabled': True}])
+        self.assertEqual(c.preferences['labels'], {'b': 'Other'})
+        self.assertIsNone(c.preferences['selected'])
+        self.assertNotIn(name, c.verifications)
+        self.assertEqual(c.quota_starts, {'b:gemini': {'armed': True}})
+        restored = Controller(data_dir=self.temp.name)
+        self.assertNotIn(name, restored.verifications)
+        self.assertEqual(restored.preferences['labels'], {'b': 'Other'})
+
+    @unittest.skipUnless(os.name == "nt", "Windows desktop UI")
+    def test_remove_ui_requires_confirmation_and_refreshes_list(self):
+        from app import App
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        c = Mock()
+        c.accounts.return_value = []
+        ui = SimpleNamespace(busy=False, selected='a', items=[{'name': 'a', 'email': 'a@example.com'}],
+                             controller=c, quota_cache={'a': {}}, notice=Mock(), loaded=Mock())
+        ui.work = lambda fn, done, **kw: done(fn())
+        with patch('app.messagebox.askyesno', return_value=False):
+            App.remove_selected_account(ui)
+        c.remove_account.assert_not_called()
+        with patch('app.messagebox.askyesno', return_value=True):
+            App.remove_selected_account(ui)
+        c.remove_account.assert_called_once_with('a')
+        ui.loaded.assert_called_once_with([])
+        self.assertNotIn('a', ui.quota_cache)
+
+    def test_failed_removal_preserves_metadata(self):
+        c = self.controller
+        c.preferences['labels'] = {'a': 'Personal'}
+        with patch.object(c, 'request', side_effect=AccountError('Delete failed')):
+            with self.assertRaises(AccountError):
+                c.remove_account('a')
+        self.assertEqual(c.preferences['labels'], {'a': 'Personal'})
+        self.assertEqual(len(self.items), 2)
+
+    def test_remove_missing_account_does_not_send_delete(self):
+        with patch.object(self.controller, 'request') as request:
+            with self.assertRaises(AccountError):
+                self.controller.remove_account('missing')
+            request.assert_not_called()
+
     def test_select_and_restore_pool_preserves_all_logins(self):
         self.controller.route('b')
         self.assertEqual([a['disabled'] for a in self.items], [True, False])

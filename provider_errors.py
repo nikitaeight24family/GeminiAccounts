@@ -2,16 +2,31 @@
 import json
 
 
+def unpack_error(body):
+    """Native Anthropic errors can wrap Google's JSON inside error.message."""
+    value = body
+    error = {}
+    for _ in range(6):
+        if isinstance(value, (str, bytes)):
+            try:
+                value = json.loads(value)
+            except (ValueError, TypeError):
+                break
+        if not isinstance(value, dict):
+            break
+        nested = value.get('error')
+        error = nested if isinstance(nested, dict) else value
+        message = error.get('message')
+        if not isinstance(message, str) or not message.lstrip().startswith('{'):
+            break
+        value = message
+    return error
+
+
 def failure_reason(code, body=None):
     if code != 429:
         return None
-    try:
-        value = json.loads(body) if isinstance(body, (str, bytes)) else body
-    except (ValueError, TypeError):
-        value = None
-    error = value.get('error', value) if isinstance(value, dict) else {}
-    if not isinstance(error, dict):
-        error = {}
+    error = unpack_error(body)
     details = error.get('details')
     details = details if isinstance(details, list) else []
     reasons = {str(d.get('reason', '')).upper() for d in details if isinstance(d, dict)}
@@ -28,8 +43,7 @@ def failure_reason(code, body=None):
 def provider_error_metadata(body):
     """Only structured reason codes and retry duration, never free-form error text."""
     try:
-        value = json.loads(body) if isinstance(body, (str, bytes)) else body
-        error = value.get('error', value)
+        error = unpack_error(body)
         result = {'provider_status': error.get('status')}
         details = error.get('details') or []
         result['provider_reasons'] = [str(d['reason'])[:100] for d in details if isinstance(d, dict) and 'reason' in d]

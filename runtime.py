@@ -18,7 +18,7 @@ import bcrypt
 import yaml
 from backend import AccountError, atomic_write, dpapi
 
-VERSION = '1.3.3'
+VERSION = '1.3.4'
 UPSTREAM_VERSION = '8.0.16'
 ARCHIVES = {
     ('Windows', 'amd64'): ('windows_amd64.zip', 'e0d999703c9af70067b15bf50e6521e76392da604d1543541361e6891c676c43'),
@@ -103,9 +103,9 @@ def initialize(controller):
             'requests': {'streaming': {'keepalive-seconds': 5}},
         }
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    from native_reasoning import ensure_summary_rule
+    from native_reasoning import remove_legacy_summary_rule
     config = yaml.safe_load(config_path.read_text('utf-8-sig'))
-    if ensure_summary_rule(config):
+    if remove_legacy_summary_rule(config):
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
     return config_path
 

@@ -21,6 +21,43 @@ HOP = {'connection', 'transfer-encoding', 'content-length', 'keep-alive',
        'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'upgrade', 'host'}
 
 
+SDK_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK"
+
+
+def normalize_sdk_system(request):
+    """Drop only the standalone SDK identity line; never edit user messages or tools."""
+    def clean(text):
+        return ''.join(line for line in text.splitlines(keepends=True)
+                       if line.strip() not in (SDK_IDENTITY, SDK_IDENTITY + '.'))
+    system = request.get('system')
+    changed = False
+    if isinstance(system, str):
+        value = clean(system)
+        changed = value != system
+        if changed:
+            if value.strip():
+                request['system'] = value
+            else:
+                request.pop('system')
+    elif isinstance(system, list):
+        blocks = []
+        for block in system:
+            if isinstance(block, dict) and block.get('type') == 'text' and isinstance(block.get('text'), str):
+                value = clean(block['text'])
+                if value != block['text']:
+                    changed = True
+                    if not value.strip():
+                        continue
+                    block = {**block, 'text': value}
+            blocks.append(block)
+        if changed:
+            if blocks:
+                request['system'] = blocks
+            else:
+                request.pop('system')
+    return changed
+
+
 def deadline(item):
     try:
         return datetime.fromisoformat(item['retry_at'].replace('Z', '+00:00')).timestamp()
@@ -70,6 +107,8 @@ class QueueServer(ThreadingHTTPServer):
         self.diagnostics = Diagnostics()
         self.lock = threading.Lock()
         self.poll_seconds = 3
+        self.retry_base_seconds = 5
+        self.retry_max_seconds = 60
         self.heartbeat_seconds = 10
         self.verifications_path = None
         self.aliases_checked = 0
@@ -227,6 +266,20 @@ class Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(size) if size else None
         inference = self.command == 'POST' and self.path.split('?')[0] in ('/v1/messages', '/v1/responses', '/v1/chat/completions')
         if not inference:
+            if self.command == 'POST' and self.path.split('?')[0] == '/v1/messages/count_tokens':
+                try:
+                    request = json.loads(body)
+                    if normalize_sdk_system(request):
+                        self.trace('sdk_identity_removed')
+                        body = json.dumps(request, ensure_ascii=False).encode()
+                    raw_model = request.get('model')
+                    normalized = strip_context_suffix(raw_model)
+                    if isinstance(normalized, str):
+                        self.trace('token_count_requested', model=normalized, requested_model=raw_model)
+                        request['model'] = normalized
+                        body = json.dumps(request, ensure_ascii=False).encode()
+                except (ValueError, TypeError, AttributeError):
+                    pass
             self.forward(body)
             return
         if not any(secrets.compare_digest(token.encode(), key.encode()) for token in tokens for key in self.server.client_keys):
@@ -238,6 +291,10 @@ class Handler(BaseHTTPRequestHandler):
             model = request['model']
             if not isinstance(model, str):
                 raise ValueError()
+            if self.path.split('?')[0] == '/v1/messages' and normalize_sdk_system(request):
+                self.trace('sdk_identity_removed')
+                body = json.dumps(request, ensure_ascii=False).encode()
+            requested_model = model
             normalized = strip_context_suffix(model)
             if normalized != model:
                 model = normalized
@@ -250,9 +307,11 @@ class Handler(BaseHTTPRequestHandler):
         guarded = self.path.split('?')[0] == '/v1/messages'
         ident = self.request_id
         attempt = 0
-        self.trace('validated', model=model, stream=stream, request_bytes=size)
+        self.trace('validated', model=model, requested_model=requested_model, stream=stream, request_bytes=size)
         started = False
         empty_retries = 0
+        rate_retries = 0
+        provider_retry_at = 0
         with self.server.lock:
             if self.server.updating:
                 self.json_reply(503, {'error': {'type':'api_error', 'message':'Gateway updating. Retry shortly.'}})
@@ -260,12 +319,15 @@ class Handler(BaseHTTPRequestHandler):
             self.server.jobs[ident] = {'model': model, 'state': 'running', 'since': time.time(), 'retry_at': None}
         try:
             while True:
+                accounts = []
                 try:
                     self.server.refresh_aliases()
                     accounts = self.server.accounts()
                     reset = quota_wait(accounts, model, self.server.aliases)
                 except (OSError, ValueError, http.client.HTTPException):
                     reset = None
+                if provider_retry_at > time.time():
+                    reset = max(reset or 0, provider_retry_at)
                 if reset:
                     with self.server.lock:
                         was_waiting = self.server.jobs[ident].get('state') == 'waiting'
@@ -298,6 +360,20 @@ class Handler(BaseHTTPRequestHandler):
                             reset = quota_wait(self.server.accounts(), model, self.server.aliases)
                         except (OSError, ValueError, http.client.HTTPException):
                             reset = None
+                        if response.status == 429:
+                            rate_retries += 1
+                            delay = min(self.server.retry_max_seconds,
+                                        self.server.retry_base_seconds * (2 ** min(rate_retries - 1, 8)))
+                            try:
+                                reported = float(response.getheader('Retry-After') or 0)
+                                if reported > 0:
+                                    delay = max(delay, min(reported, 3600))
+                            except (ValueError, TypeError):
+                                pass
+                            provider_retry_at = reset if reset else time.time() + delay
+                            self.trace('rate_limit_retry_scheduled', attempt=attempt,
+                                retry_at=provider_retry_at, wait_seconds=max(0, provider_retry_at-time.time()))
+                            continue
                         if reset:
                             continue
                         self.deliver(response, error, started, stream)
@@ -354,6 +430,8 @@ class Handler(BaseHTTPRequestHandler):
         """Retry only before any assistant content or tool call reaches the client."""
         if not stream:
             data = self.await_upstream(response.read, False)
+            self.response_bytes += len(data)
+            self.trace('nonstream_body_received')
             try:
                 value = json.loads(data)
                 valid = usable_message(value)
@@ -431,7 +509,9 @@ class Handler(BaseHTTPRequestHandler):
         conn = None
         try:
             conn, response = self.open_upstream(body)
+            self.trace('forwarded_headers', status=response.status)
             self.deliver(response, None)
+            self.trace('finished')
         except (OSError, http.client.HTTPException):
             self.close_connection = True
         finally:

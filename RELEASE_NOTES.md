@@ -1,17 +1,14 @@
-# Gemini Accounts 1.3.3 — Request diagnostics and log export
+# Gemini Accounts 1.3.4 — Gateway retry handling and authenticated log uploads
 
-- Windows desktop checks the latest GitHub release. Click **Update to …** to download a SHA-256-verified installer, wait for current requests, replace application files and restart. New requests are temporarily blocked during replacement; connected client configurations are not automatically rewritten.
-- **Send diagnostic log…** requires separate owner consent for each upload to a configured HTTPS endpoint, replaces email addresses with account labels and does not follow redirects. No endpoint is preconfigured.
-- Automatic rotating file logs record requests immediately: selected and upstream models, attempts, provider cooldowns, waiting phases, time to headers / first bytes, streamed byte counts, cancellations, empty responses and completion.
-- Logs include completed provider attempts, account names and failover attempts even when the next account also fails. The switch counter now includes these correlated failed attempts instead of only successful switches.
-- **Routing statistics → Save diagnostic log…** exports a ZIP containing current / rotated logs, request history and a live snapshot of active requests and account restrictions. Logging continues in the gateway even when the desktop window is closed.
-- Terminal export: `./gemini-accounts diagnostics --output diagnostics.zip` or `GeminiAccounts-CLI.exe diagnostics --output diagnostics.zip`. Export remains available when the services are offline.
-- Structured Google error reason codes and retry delays are recorded. Generic “quota exceeded” messages no longer claim that the complete model quota has been exhausted.
+- Removes the standalone Claude Agent SDK identity line from Anthropic system instructions before forwarding generation and token-count requests. User messages, tools and all other instructions are preserved. Both streaming and nonstreaming paths are covered by protocol tests; the affected remote installation has not yet been retested.
+- Adds **Remove account** in account details, with confirmation. Deletes the saved credential and its local labels / verification state without deleting the Google account or enabling other paused accounts.
+- Removes the exact experimental thought-summary override introduced in 1.3.2�1.3.3; custom payload settings remain intact.
+- The gateway now keeps HTTP 429 retries local even when account cooldown metadata is missing or no longer matches the rejection. It sends keepalives, respects numeric Retry-After and otherwise uses increasing retry delays instead of exposing 429 to Claude's own retry loop. Authentication / verification failures still surface as errors.
+- Claude token-count requests normalize the extended-context suffix before forwarding. Diagnostics record their route, original model, forwarded model and HTTP status as well as generation requests. This closes a diagnostics gap; it does not prove that the reported “model not found” error has been resolved.
+- Nonstream response body byte counts are recorded correctly.
+- **Send diagnostic log…** uses `https://logs.conch-labs.com/ingest`, POST `application/zip`, bearer authorization and `X-Filename: logs.zip`. A server connectivity test accepted a synthetic archive with HTTP 201. Upload credentials are stored encrypted per installation and are never included in published sources or diagnostic ZIPs. Enter an upload credential once when prompted; every upload still requires owner confirmation.
+- Retains file log export and verified one-click Windows updates from 1.3.3. Install this version manually when upgrading from a version older than 1.3.3; later Windows updates can use **Routing statistics → Update to …**.
 
-Logs contain account names and technical request metadata. They exclude prompts, generated text, authentication tokens, verification links and configuration files. Logs rotate to keep disk usage bounded; export captures retained history and live state, not events from before this version was installed.
+Google model availability and account restrictions remain outside the gateway's control. Waiting is cancellable; no assistant answers or tool calls are fabricated. This release does not claim to fix the underlying Google restriction or the unconfirmed model routing issue.
 
-Windows: install `GeminiAccounts-Setup.exe` after current requests finish. Existing sign-ins and configuration backups are preserved. New users: **Install → Add Google account → approve Connect applications**, then restart the selected client.
-
-Terminal: extract the CLI archive for your platform and run the included executable. Windows x64, macOS Apple Silicon / Intel and Linux x64 are supported. Mac builds are not notarized. See the [quick start](https://github.com/nikitaeight24family/GeminiAccounts#readme) and [terminal guide](https://github.com/nikitaeight24family/GeminiAccounts/blob/main/CLI.md).
-
-This is a diagnostics update. It does not remove provider restrictions or establish that the reported Opus waiting issue is fixed. The new logs allow its actual request path and failover behavior to be checked.
+Windows: run `GeminiAccounts-Setup.exe` after current requests finish. Existing Google sign-ins and configuration backups are preserved. Terminal archives cover Windows x64, macOS Apple Silicon / Intel and Linux x64. See the [quick start](https://github.com/nikitaeight24family/GeminiAccounts#readme) and [terminal guide](https://github.com/nikitaeight24family/GeminiAccounts/blob/main/CLI.md).
