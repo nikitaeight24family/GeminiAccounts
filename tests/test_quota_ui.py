@@ -1,6 +1,7 @@
 import sys
 import unittest
 import tempfile
+import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
@@ -88,12 +89,14 @@ class QuotaUITests(unittest.TestCase):
                 app.activity_state['latest'] = {
                     'gemini': {'name': '0', 'at': '2026-10-07T00:00:00Z', 'failed': False},
                     'claude': {'name': '1', 'at': '2026-10-07T00:00:01Z', 'failed': False}}
+                app.gateway_jobs = [{'model': 'gemini-3-flash', 'state': 'running'}, {'model': 'claude-opus-4-6-thinking', 'state': 'running'}]
+                app.gateway_jobs_checked = time.monotonic()
                 app.animate_active_borders()
                 self.assertEqual(app.active_account_names(), {'0', '1'})
                 self.assertEqual(app.active_provider_accounts(), {'gemini': '0', 'claude': '1'})
                 self.assertEqual(app.account_widgets['0']['active_families'], ('gemini',))
                 self.assertEqual(app.account_widgets['1']['active_families'], ('claude',))
-                app.activity_state['stats']['0'] = {'last_model': 'claude-sonnet-4-6'}
+                app.activity_state['stats']['0'] = {'last_model': 'claude-sonnet-4-6', 'last': datetime.now(timezone.utc).isoformat()}
                 app.animate_active_borders()
                 app.update()
                 heading = app.account_widgets['0']['button']

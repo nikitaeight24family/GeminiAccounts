@@ -72,7 +72,8 @@ class ConsoleTests(unittest.TestCase):
             {'kind': kind, 'buckets': [{'window': window, 'remaining': .5} for window in ('5h', 'weekly')]}
             for kind in ('gemini', 'claude')]}}
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
+        with patch.object(self.controller, 'quota_wait_status', return_value={'jobs': [
+            {'model': 'gemini-3-flash', 'state': 'running'}, {'model': 'claude-opus-4-6-thinking', 'state': 'running'}]}), contextlib.redirect_stdout(output):
             self.terminal.show_status(refresh=False)
         self.assertIn('gemini + claude', output.getvalue())
         self.assertEqual(output.getvalue().count('50.0%'), 4)

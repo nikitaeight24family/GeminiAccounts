@@ -113,6 +113,9 @@ class Terminal:
         if refresh:
             self.update()
         with self.lock:
+            jobs = self.controller.quota_wait_status().get('jobs', [])
+            running = {family(job.get('upstream_model') or self.controller.model_aliases().get(job.get('model', ''), job.get('model', '')))
+                       for job in jobs if job.get('state') == 'running'}
             if self.error:
                 print('Monitoring: ' + self.error)
             if not self.accounts:
@@ -122,17 +125,20 @@ class Terminal:
                 label = account.get('email') or account['name']
                 issue = account.get('access_issue')
                 status = issue or ('paused' if account.get('disabled') else 'ready')
-                latest = self.activity.state['stats'].get(account['name'], {}).get('last_model', '--')
-                # Last successful subscriptions are shown independently per provider.
+                stats = self.activity.state['stats'].get(account['name'], {})
+                latest = stats.get('last_model', '--')
+                # Historical selections are highlighted only during real running jobs.
                 selected = {}
                 for event in self.activity.state['latest'].values():
                     actual = event.get('upstream_model') or self.controller.model_aliases().get(event['model'], event['model'])
                     group = family(actual)
                     if group and (group not in selected or event['at'] > selected[group]['at']):
                         selected[group] = event
-                active = [group for group, event in selected.items() if event['name'] == account['name']]
+                active = [group for group, event in selected.items() if group in running and event['name'] == account['name']]
                 print(f'{i}. {label} [{status}]' + (' • ' + ' + '.join(active) if active else ''))
-                print(f'   Last model: {model_name(latest, self.controller.model_aliases())}')
+                last = reset_date(stats.get('last'))
+                if last and 0 <= (datetime.now(timezone.utc) - last).total_seconds() < 60:
+                    print(f'   Last model: {model_name(latest, self.controller.model_aliases())}')
                 cached = self.caches.get(account['name'], {})
                 if cached.get('error'):
                     print('   Quota: ' + cached['error'])
@@ -146,7 +152,6 @@ class Terminal:
                         percent = '--' if remaining is None else f'{remaining * 100:.1f}%'
                         values.append(f'{"1w" if window == "weekly" else "5h"}: {percent} ({reset_text(bucket.get("reset"), days_only=window == "weekly")})')
                     print('   ' + title + '  ' + ' | '.join(values))
-            jobs = self.controller.quota_wait_status().get('jobs', [])
             for job in jobs:
                 print(f'   Request {job.get("model", "--")}: {job.get("state", "--")}')
 

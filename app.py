@@ -71,6 +71,8 @@ class App(ctk.CTk):
         self.activity_state = copy.deepcopy(self.activity.state)
         self.activity_started = False
         self.activity_busy = False
+        self.gateway_jobs = []
+        self.gateway_jobs_checked = 0
         self.activity_rows = {}
         self.policy_busy = False
         self.policy_job = None
@@ -191,6 +193,7 @@ class App(ctk.CTk):
         self.after(60000, self.periodic_quota)
         self.after(15000, self.tick_countdowns)
         self.after(150, self.animate_active_borders)
+        self.after(200, self.poll_gateway_jobs)
         if self.controller.preferences.get('details-collapsed'):
             self.restore_details_job = self.after(180, self.toggle_details)
 
@@ -961,26 +964,53 @@ class App(ctk.CTk):
                 labels.append(f'until {title} · {duration}')
         return '  /  '.join(labels) or 'Waiting'
 
+    def poll_gateway_jobs(self):
+        if self.closed:
+            return
+        if not self.controller.key:
+            self.after(1000, self.poll_gateway_jobs)
+            return
+        def done(snapshot):
+            if self.closed:
+                return
+            self.gateway_jobs = snapshot.get('jobs', [])
+            self.gateway_jobs_checked = time.monotonic()
+            self.after(1000, self.poll_gateway_jobs)
+        self.work(self.controller.quota_wait_status, done)
+
     def active_provider_accounts(self):
+        if time.monotonic() - getattr(self, 'gateway_jobs_checked', 0) > 10:
+            return {}
+        running = {self.model_family(job.get('upstream_model') or
+                   getattr(self, 'model_aliases', {}).get(job.get('model'), job.get('model', '')))
+                   for job in getattr(self, 'gateway_jobs', []) if job.get('state') == 'running'}
         enabled = {a['name'] for a in self.items if not a.get('disabled')}
         latest = {}
         for model, event in self.activity_state['latest'].items():
             actual = event.get('upstream_model') or getattr(self, 'model_aliases', {}).get(event.get('model') or model, event.get('model') or model)
             family = self.model_family(actual)
-            if family and not event.get('failed') and (family not in latest or event['at'] > latest[family]['at']):
+            if family and family in running and not event.get('failed') and (family not in latest or event['at'] > latest[family]['at']):
                 latest[family] = event
         return {family: event['name'] for family, event in latest.items() if event['name'] in enabled}
 
     def active_account_names(self):
         return set(self.active_provider_accounts().values())
 
-    def last_account_model(self, name):
-        model = self.activity_state.get('stats', {}).get(name, {}).get('last_model')
-        if not model:
-            candidates = [e for e in self.activity_state.get('events', []) if e.get('name') == name]
-            candidates += [e for e in self.activity_state.get('latest', {}).values() if e.get('name') == name]
-            last = max(candidates, key=lambda e: e.get('at', ''), default={})
-            model = last.get('upstream_model') or last.get('model')
+    def last_account_model(self, name, now=None):
+        stats = self.activity_state.get('stats', {}).get(name, {})
+        candidates = [e for e in self.activity_state.get('events', []) if e.get('name') == name]
+        candidates += [e for e in self.activity_state.get('latest', {}).values() if e.get('name') == name]
+        if stats.get('last_model') and stats.get('last'):
+            candidates.insert(0, {'at': stats['last'], 'upstream_model': stats['last_model']})
+        last = max(candidates, key=lambda e: e.get('at', ''), default={})
+        try:
+            timestamp = datetime.fromisoformat(last['at'].replace('Z', '+00:00'))
+            age = ((now or datetime.now(timezone.utc)) - timestamp).total_seconds()
+            if not 0 <= age < 60:
+                return ''
+        except (KeyError, ValueError, TypeError, AttributeError):
+            return ''
+        model = last.get('upstream_model') or last.get('model')
         if not model:
             return ''
         return model_name(model, getattr(self, 'model_aliases', None))
