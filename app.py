@@ -218,6 +218,8 @@ class App(ctk.CTk):
             self.minsize(SIDEBAR_WIDTH, 500)
             self.geometry(f'{SIDEBAR_WIDTH}x{max(500, int(self._current_height))}')
         self.details_collapsed = not self.details_collapsed
+        for account in self.items:
+            self.update_account_row(account)
         self.controller.preferences['details-collapsed'] = self.details_collapsed
         self.controller.save()
         def restore_positions():
@@ -537,11 +539,12 @@ class App(ctk.CTk):
                 self.account_group_widgets.append((index, header, options))
             name = account['name']
             card = ctk.CTkFrame(self.account_list, fg_color='#202938', corner_radius=10,
-                border_width=1, border_color=ACCENT if name == self.selected else '#344155')
+                border_width=1, border_color=ACCENT if not self.details_collapsed and name == self.selected else '#344155')
             card.pack(fill='x', pady=(0, 1), padx=1)
             status = self.sidebar_account_status(account)
             button = ctk.CTkButton(card, text=self.account_heading(account),
-                height=19, anchor='w', corner_radius=6, fg_color='#303e59' if account['name'] == self.selected else CARD,
+                height=19, anchor='w', corner_radius=6, fg_color='#303e59' if not self.details_collapsed and account['name'] == self.selected else CARD,
+                hover=not self.details_collapsed,
                 hover_color='#334158', text_color=TEXT, font=('Segoe UI', 12, 'bold'), command=lambda a=account: self.select(a))
             button.pack(fill='x', pady=(1, 0), padx=5)
             countdown = {}
@@ -861,9 +864,10 @@ class App(ctk.CTk):
             return
         status = self.sidebar_account_status(account)
         widgets['card'].configure(border_width=1,
-            border_color=ACCENT if account['name'] == self.selected else '#344155')
+            border_color=ACCENT if not self.details_collapsed and account['name'] == self.selected else '#344155')
         widgets['button'].configure(text=self.account_heading(account),
-            fg_color='#303e59' if account['name'] == self.selected else CARD)
+            fg_color='#303e59' if not self.details_collapsed and account['name'] == self.selected else CARD,
+            hover=not self.details_collapsed)
         if account.get('access_issue') == 'verification':
             if not widgets['verification_frame'].winfo_manager():
                 widgets['verification_frame'].pack(fill='x', padx=5, pady=(0, 3), after=widgets['button'])
@@ -1020,7 +1024,7 @@ class App(ctk.CTk):
         canvas = button._canvas
         scale = button._get_widget_scaling()
         heading = button.cget('text')
-        layout = (families, model, heading, button.winfo_width(), button.winfo_height(), scale)
+        layout = (families, model, heading, button.winfo_width(), button.winfo_height(), scale, button.cget('fg_color'))
         if widgets.get('badge_layout') != layout:
             canvas.delete('active_badge')
             images = widgets.setdefault('badge_images', {})
@@ -1116,6 +1120,8 @@ class App(ctk.CTk):
         return self.controller.preferences.get('labels', {}).get(account['name']) or account.get('email') or 'Google account'
 
     def select(self, account):
+        if self.details_collapsed:
+            return
         self.selected = account['name']
         self.loaded(self.items)
 

@@ -1,4 +1,8 @@
-# Gemini Accounts 1.2.0 — Model selection and compact weekly countdowns
+# Gemini Accounts 1.3.0 — Accurate activity indicators and compact account selection
+
+- Account selection for details works only while the right panel is open. Compact mode has no selected-card background, selection border or hover highlight; verification controls remain usable. Expanding restores the selected details without rebuilding the interface.
+- Gemini / Claude badges and animated borders clear when their gateway requests finish or wait for quota. Status updates every second. Model names disappear from card headers after one minute without a recent request.
+- Automatic ranking prefers available accounts with the nearest **5h** reset for the ranked provider. Weekly quota determines eligibility; its reset no longer overrides the five-hour order.
 
 Use **⚙ next to Gemini Accounts** to choose models independently in two lists: **Claude (Antigravity)** for available Haiku / Sonnet / Opus models, and **Gemini** for Pro Low / High, Flash and Flash Lite. New gateway requests use the selection. Updating connected client menus and defaults is optional, asks consent and requires restarting clients. Availability follows your account catalog. Explicit cheap Gemini Flash requests are preserved.
 
@@ -24,4 +28,4 @@ See the English [quick start](https://github.com/nikitaeight24family/GeminiAccou
 
 Demo accounts and example quota values; no personal account addresses.
 
-<img src="https://raw.githubusercontent.com/nikitaeight24family/GeminiAccounts/v1.2.0/docs/compact-panel.png" alt="Compact Gemini Accounts panel" width="320">
+<img src="https://raw.githubusercontent.com/nikitaeight24family/GeminiAccounts/v1.3.0/docs/compact-panel.png" alt="Compact Gemini Accounts panel" width="320">
