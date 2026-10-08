@@ -219,7 +219,9 @@ class App(ctk.CTk):
             self.geometry(f'{SIDEBAR_WIDTH}x{max(500, int(self._current_height))}')
         self.details_collapsed = not self.details_collapsed
         for account in self.items:
-            self.update_account_row(account)
+            widgets = self.account_widgets.get(account['name'])
+            if widgets:
+                self.update_selection_style(account, widgets)
         self.controller.preferences['details-collapsed'] = self.details_collapsed
         self.controller.save()
         def restore_positions():
@@ -863,11 +865,8 @@ class App(ctk.CTk):
         if not widgets:
             return
         status = self.sidebar_account_status(account)
-        widgets['card'].configure(border_width=1,
-            border_color=ACCENT if not self.details_collapsed and account['name'] == self.selected else '#344155')
-        widgets['button'].configure(text=self.account_heading(account),
-            fg_color='#303e59' if not self.details_collapsed and account['name'] == self.selected else CARD,
-            hover=not self.details_collapsed)
+        self.update_selection_style(account, widgets)
+        widgets['button'].configure(text=self.account_heading(account))
         if account.get('access_issue') == 'verification':
             if not widgets['verification_frame'].winfo_manager():
                 widgets['verification_frame'].pack(fill='x', padx=5, pady=(0, 3), after=widgets['button'])
@@ -1118,6 +1117,11 @@ class App(ctk.CTk):
 
     def display_name(self, account):
         return self.controller.preferences.get('labels', {}).get(account['name']) or account.get('email') or 'Google account'
+
+    def update_selection_style(self, account, widgets):
+        selected = not self.details_collapsed and account['name'] == self.selected
+        widgets['card'].configure(border_width=1, border_color=ACCENT if selected else '#344155')
+        widgets['button'].configure(fg_color='#303e59' if selected else CARD, hover=not self.details_collapsed)
 
     def select(self, account):
         if self.details_collapsed:
