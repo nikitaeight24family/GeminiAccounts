@@ -12,6 +12,7 @@ from pathlib import Path
 from backend import Controller, dpapi
 import yaml
 from model_context import strip_context_suffix
+from response_guard import StreamProbe, usable_message, add_role_guidance
 
 PING = b'event: ping\ndata: {"type":"ping"}\n\n'
 HOP = {'connection', 'transfer-encoding', 'content-length', 'keep-alive',
@@ -209,8 +210,15 @@ class Handler(BaseHTTPRequestHandler):
             self.forward(body)
             return
         stream = bool(request.get('stream'))
+        guarded = self.path.split('?')[0] == '/v1/messages'
+        if guarded:
+            self.server.refresh_aliases()
+            if self.server.aliases.get(model, model).startswith('gemini-'):
+                request = add_role_guidance(request)
+                body = json.dumps(request, ensure_ascii=False).encode()
         ident = secrets.token_hex(8)
         started = False
+        empty_retries = 0
         with self.server.lock:
             self.server.jobs[ident] = {'model': model, 'state': 'running', 'since': time.time(), 'retry_at': None}
         try:
@@ -247,6 +255,20 @@ class Handler(BaseHTTPRequestHandler):
                             continue
                         self.deliver(response, error, started, stream)
                         return
+                    if guarded and response.status == 200:
+                        try:
+                            valid = self.deliver_validated(response, stream)
+                        except ValueError:
+                            self.recovery_error(stream)
+                            return
+                        if not valid:
+                            empty_retries += 1
+                            if empty_retries <= 2:
+                                with self.server.lock:
+                                    self.server.jobs[ident].update(recovery_reason='empty_response', attempt=empty_retries + 1)
+                                continue
+                            self.recovery_error(stream)
+                        return
                     self.deliver(response, None, started, stream)
                     return
                 finally:
@@ -276,6 +298,45 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             conn.close()
             raise
+
+    def deliver_validated(self, response, stream):
+        """Retry only before any assistant content or tool call reaches the client."""
+        if not stream:
+            data = self.await_upstream(response.read, False)
+            try:
+                value = json.loads(data)
+                valid = usable_message(value)
+            except (ValueError, AttributeError, TypeError):
+                valid = False
+            if valid:
+                self.deliver(response, data, self.response_started, False)
+            return valid
+        probe = StreamProbe()
+        while True:
+            data = self.await_upstream(lambda: response.read1(65536), True)
+            if not data:
+                break
+            probe.feed(data)
+            if probe.usable or probe.error:
+                if not self.response_started:
+                    self.start_stream(True)
+                self.chunk(bytes(probe.buffer))
+                # Continue the original stream; never retry a tool already exposed.
+                self.deliver(response, None, True, True)
+                return True
+            if probe.terminal:
+                break
+        return False
+
+    def recovery_error(self, stream):
+        error = {'type': 'error', 'error': {'type': 'api_error',
+            'message': 'The model returned no usable answer after 3 attempts. Retry the request; no tool call was delivered.'}}
+        if not self.response_started:
+            self.json_reply(502, error)
+        else:
+            self.chunk((b'event: error\ndata: ' + json.dumps(error).encode() + b'\n\n') if stream else json.dumps(error).encode())
+            self.wfile.write(b'0\r\n\r\n')
+            self.wfile.flush()
 
     def deliver(self, response, body, started=False, stream=False):
         if not started:

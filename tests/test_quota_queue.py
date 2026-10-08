@@ -35,6 +35,13 @@ class Mock(BaseHTTPRequestHandler):
                 b'event: message_stop\ndata: {"type":"message_stop"}\n\n') if self.server.status == 200 else b'{"error":{"type":"authentication_error","message":"Denied"}}'
         if self.path == '/v1/responses' and self.server.status == 200:
             data = b'event: response.completed\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\n'
+        if self.server.calls <= getattr(self.server, 'empty_attempts', 0):
+            data = (b'event: message_start\ndata: {"type":"message_start","message":{"id":"empty"}}\n\n'
+                    b'event: message_stop\ndata: {"type":"message_stop"}\n\n')
+        if getattr(self.server, 'tool_response', False):
+            data = (b'event: message_start\ndata: {"type":"message_start","message":{"id":"tool"}}\n\n'
+                    b'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"Bash","id":"real-tool","input":{}}}\n\n'
+                    b'event: message_stop\ndata: {"type":"message_stop"}\n\n')
         self.send_response(self.server.status); self.send_header('Content-Type', 'text/event-stream'); self.send_header('Content-Length', str(len(data))); self.end_headers()
         time.sleep(getattr(self.server, 'body_delay', 0))
         self.wfile.write(data)
@@ -99,6 +106,43 @@ class QueueTests(unittest.TestCase):
     def test_other_model_does_not_wait(self):
         response = self.post(model='claude')
         self.assertNotIn(PING, response.read()); self.assertEqual(self.backend.calls, 1)
+    def test_empty_completion_retries_without_exposing_empty_message(self):
+        self.backend.files = []
+        self.backend.empty_attempts = 2
+        response = self.post()
+        data = response.read()
+        self.assertEqual(self.backend.calls, 3)
+        self.assertNotIn(b'"id":"empty"', data)
+        self.assertEqual(data.count(b'event: message_start'), 1)
+        self.assertIn(b'"text":"OK"', data)
+    def test_repeated_empty_completion_reports_failure_instead_of_success(self):
+        self.backend.files = []
+        self.backend.empty_attempts = 100
+        response = self.post()
+        self.assertEqual(response.status, 502)
+        data = response.read()
+        self.assertIn(b'after 3 attempts', data)
+        self.assertNotIn(b'message_stop', data)
+        self.assertEqual(self.backend.calls, 3)
+    def test_real_tool_call_is_delivered_once_without_retry(self):
+        self.backend.files = []
+        self.backend.tool_response = True
+        response = self.post()
+        data = response.read()
+        self.assertIn(b'real-tool', data)
+        self.assertEqual(self.backend.calls, 1)
+    def test_gemini_role_guard_preserves_user_message_and_tools(self):
+        self.backend.files = []
+        self.gate.aliases['alias'] = 'gemini-pro-agent'
+        self.client.request('POST', '/v1/messages', json.dumps({'model':'alias','stream':True,
+            'system':'Original instructions','messages':[{'role':'user','content':'Fix the bot'}],
+            'tools':[{'name':'Bash','input_schema':{'type':'object'}}]}), {'x-api-key':'client'})
+        self.client.getresponse().read()
+        request = self.backend.last_request
+        self.assertEqual(request['messages'], [{'role':'user','content':'Fix the bot'}])
+        self.assertEqual(request['tools'][0]['name'], 'Bash')
+        self.assertEqual(request['system'][0]['text'], 'Original instructions')
+        self.assertIn('Keep those roles distinct', request['system'][1]['text'])
     def test_invalid_client_key_never_waits(self):
         response = self.post(key='wrong'); self.assertEqual(response.status, 401)
         response.read(); self.assertEqual(self.backend.calls, 0)

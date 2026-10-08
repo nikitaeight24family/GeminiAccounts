@@ -1,4 +1,8 @@
-# Gemini Accounts 1.3.0 — Accurate activity indicators and compact account selection
+# Gemini Accounts 1.3.1 — Empty-response recovery
+
+- Empty Anthropic completions are withheld and retried at most twice. If all three attempts are empty, the gateway returns an explicit error instead of successful silence. Thinking alone does not count as a usable answer.
+- Real text and tool calls continue streaming as soon as they appear. Delivered tool calls are never retried by this protection. Quota-wait heartbeats and cancellation remain supported.
+- Gemini requests receive a role clarification that distinguishes the assistant from the user and text inside screenshots, while retaining original history, system instructions and tools. This reduces impersonation risk; it does not guarantee model behavior.
 
 - Account selection for details works only while the right panel is open. Compact mode has no selected-card background, selection border or hover highlight; verification controls remain usable. Expanding restores the selected details without rebuilding the interface.
 - Gemini / Claude badges and animated borders clear when their gateway requests finish or wait for quota. Status updates every second. Model names disappear from card headers after one minute without a recent request.
@@ -30,4 +34,4 @@ See the English [quick start](https://github.com/nikitaeight24family/GeminiAccou
 
 Demo accounts and example quota values; no personal account addresses.
 
-<img src="https://raw.githubusercontent.com/nikitaeight24family/GeminiAccounts/v1.3.0/docs/compact-panel.png" alt="Compact Gemini Accounts panel" width="320">
+<img src="https://raw.githubusercontent.com/nikitaeight24family/GeminiAccounts/v1.3.1/docs/compact-panel.png" alt="Compact Gemini Accounts panel" width="320">
