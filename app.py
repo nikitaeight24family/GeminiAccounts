@@ -1365,6 +1365,8 @@ class App(ctk.CTk):
                            if any(str(path.resolve()) in backups for path in paths)]
         if managed_codex and 'codex' not in managed_clients:
             managed_clients.append('codex')
+        if self.integrations.legacy_desktop_preset() and 'claude_desktop' not in managed_clients:
+            managed_clients.append('claude_desktop')
         update_codex = ctk.BooleanVar(value=bool(managed_clients))
         ctk.CTkCheckBox(window, text='Update connected client model menus (asks permission)',
             variable=update_codex, state='normal' if managed_clients else 'disabled').pack(anchor='w', padx=24, pady=(16, 10))

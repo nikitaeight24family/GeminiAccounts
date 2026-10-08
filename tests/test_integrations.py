@@ -56,6 +56,37 @@ class IntegrationTests(unittest.TestCase):
             self.client.apply(['codex'])
         self.assertEqual(path.read_text(), 'not valid TOML')
 
+    def test_legacy_model_labels_follow_aliases_and_restore_exactly(self):
+        library = self.client.local / 'Claude-3p' / 'configLibrary'
+        legacy = '5010c5ea-93a5-425b-aba1-6b85f3a14292'
+        library.mkdir(parents=True)
+        self.client.write_json(library / '_meta.json', {'appliedId': legacy})
+        path = library / (legacy + '.json')
+        self.client.write_json(path, {
+            'inferenceGatewayBaseUrl': 'http://127.0.0.1:8317',
+            'inferenceGatewayApiKey': 'keep-key',
+            'inferenceModels': [{'name': 'claude-sonnet-4-5', 'labelOverride': 'Gemini Pro', 'isFamilyDefault': True}]})
+        original = path.read_bytes()
+        self.controller.model_aliases = lambda: {'claude-sonnet-4-5': 'gemini-pro-agent'}
+        self.assertEqual(self.client.paths()['claude_desktop'][2], path)
+        self.assertTrue(self.client.refresh_desktop_model_labels())
+        preset = self.client.read_json(path)
+        self.assertEqual(preset['inferenceModels'][0]['labelOverride'], 'Gemini · 3.1 Pro High')
+        self.assertEqual(preset['inferenceModels'][0]['name'], 'claude-sonnet-4-5')
+        self.assertEqual(preset['inferenceGatewayApiKey'], 'keep-key')
+        self.assertFalse(self.client.refresh_desktop_model_labels())
+        self.client.restore()
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_unrelated_gateway_is_not_adopted(self):
+        library = self.client.local / 'Claude-3p' / 'configLibrary'
+        legacy = '5010c5ea-93a5-425b-aba1-6b85f3a14292'
+        self.client.write_json(library / '_meta.json', {'appliedId': legacy})
+        self.client.write_json(library / (legacy + '.json'), {'inferenceGatewayBaseUrl': 'https://example.com',
+            'inferenceModels': [{'name': 'other', 'labelOverride': 'Gemini Pro'}]})
+        self.assertIsNone(self.client.legacy_desktop_preset())
+        self.assertFalse(self.client.refresh_desktop_model_labels())
+
     def test_installer_creates_fresh_keys_and_retains_config_on_update(self):
         payload = self.root / 'payload'
         payload.mkdir()

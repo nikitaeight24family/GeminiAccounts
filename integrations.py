@@ -34,12 +34,53 @@ class Integrations:
 
     def paths(self):
         library = self.local / 'Claude-3p' / 'configLibrary'
+        preset_id = self.legacy_desktop_preset() or PRESET_ID
         return {
             'claude_cli': [self.home / '.claude' / 'settings.json'],
             'codex': [self.home / '.codex' / 'config.toml', self.home / '.codex' / 'gemini-accounts.config.toml'],
             'claude_desktop': [self.local / 'Claude-3p' / 'claude_desktop_config.json',
-                               library / '_meta.json', library / (PRESET_ID + '.json')],
+                               library / '_meta.json', library / (preset_id + '.json')],
         }
+
+    def legacy_desktop_preset(self):
+        """Recognize our original localhost preset without adopting unrelated gateways."""
+        library = self.local / 'Claude-3p' / 'configLibrary'
+        try:
+            preset_id = self.read_json(library / '_meta.json').get('appliedId', '')
+            if not re.fullmatch(r'[a-fA-F0-9-]{36}', preset_id):
+                return None
+            preset = self.read_json(library / (preset_id + '.json'))
+            models = preset.get('inferenceModels', [])
+            if (preset.get('inferenceGatewayBaseUrl', '').rstrip('/') == 'http://127.0.0.1:8317'
+                    and any(m.get('labelOverride', '').startswith('Gemini') for m in models)):
+                return preset_id
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        return None
+
+    def refresh_desktop_model_labels(self):
+        """Refresh display labels only; preserve model IDs, credentials and defaults."""
+        if not self.legacy_desktop_preset():
+            return False
+        path = self.paths()['claude_desktop'][2]
+        preset = self.read_json(path)
+        aliases = self.controller.model_aliases()
+        from model_names import model_name
+        changed = False
+        for entry in preset.get('inferenceModels', []):
+            model = aliases.get(entry['name'], entry['name'])
+            family = 'Gemini' if model.startswith('gemini-') else 'Claude' if model.startswith('claude-') else ''
+            if not family:
+                continue
+            label = family + ' · ' + model_name(model, {})
+            if entry.get('labelOverride') != label:
+                entry['labelOverride'] = label
+                changed = True
+        if changed:
+            with self.lock:
+                self.remember([path])
+                self.write_json(path, preset)
+        return changed
 
     def backups(self):
         if not self.backup_path.exists():
@@ -158,9 +199,10 @@ class Integrations:
         })
         meta = self.read_json(meta_path)
         entries = meta.setdefault('entries', [])
-        if not any(e.get('id') == PRESET_ID for e in entries):
-            entries.append({'id': PRESET_ID, 'name': 'Gemini Accounts'})
-        meta['appliedId'] = PRESET_ID
+        preset_id = preset.stem
+        if not any(e.get('id') == preset_id for e in entries):
+            entries.append({'id': preset_id, 'name': 'Gemini Accounts'})
+        meta['appliedId'] = preset_id
         self.write_json(meta_path, meta)
         settings = self.read_json(desktop)
         settings['deploymentMode'] = '3p'
