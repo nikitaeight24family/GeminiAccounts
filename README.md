@@ -78,3 +78,7 @@ python -m unittest tests.test_console tests.test_accounts tests.test_activity te
 Windows build: `build-release.ps1`. Terminal binary: `python -m PyInstaller --onefile --name gemini-accounts --collect-all tzdata console.py`. GitHub Actions builds and tests Windows, Mac Apple Silicon / Intel and Linux editions. Native CLIProxyAPI is pinned to **8.0.16**, with committed SHA-256 checksums and its license included. Client configuration interfaces may change with client updates.
 
 Documentation: [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-advanced), [Claude Code environment variables](https://code.claude.com/docs/en/env-vars), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
+
+### Diagnostic logs
+
+Request lifecycle logging is automatic, including active requests, quota waits, upstream attempts, streaming progress, cancellations and failures. **Routing statistics → Save diagnostic log…** exports a ZIP with rotated JSONL logs, request history and a live state snapshot. No prompts, generated text, authentication tokens or client configuration files are included. Logs contain account names. Terminal: `./gemini-accounts diagnostics --output diagnostics.zip` (Windows: `GeminiAccounts-CLI.exe diagnostics --output diagnostics.zip`). The export also works when services are offline.

@@ -71,6 +71,19 @@ class QueueTests(unittest.TestCase):
         self.assertIn(b'"id":"real"', data)
         self.assertIn(b'"text":"OK"', data)
         self.assertEqual(self.backend.calls, 1)
+    def test_diagnostics_capture_wait_resume_and_finished_request(self):
+        self.backend.files = [account(seconds=.35)]
+        data = self.post().read()
+        deadline = time.monotonic() + 1
+        while self.gate.snapshot()['jobs'] and time.monotonic() < deadline:
+            time.sleep(.01)
+        events = self.gate.diagnostics.snapshot()['events']
+        phases = {event['event'] for event in events}
+        self.assertTrue({'received', 'validated', 'waiting_provider', 'upstream_started', 'upstream_headers', 'content_available', 'finished'} <= phases, phases)
+        self.assertIn(b'OK', data)
+        self.assertEqual(len({event['request_id'] for event in events}), 1)
+        self.assertNotIn('client', json.dumps(events))
+
     def test_reset_automatically_resumes(self):
         self.backend.files = [account(seconds=.2)]
         response = self.post(); data = response.read()

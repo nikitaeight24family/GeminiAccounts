@@ -264,6 +264,8 @@ def parser():
     setup.add_argument('--yes', action='store_true', help='explicitly approve the listed configuration changes')
     restore = commands.add_parser('restore', help='restore original client files and reset preferences')
     restore.add_argument('--yes', action='store_true', help='explicitly approve replacing configs with their backups')
+    diagnostic = commands.add_parser('diagnostics', help='save request diagnostics without credentials')
+    diagnostic.add_argument('--output', required=True, help='destination ZIP file')
     return root
 
 
@@ -271,6 +273,15 @@ def main(argv=None):
     args = parser().parse_args(argv)
     controller = Controller()
     terminal = Terminal(controller)
+    if args.command == 'diagnostics':
+        from gateway_diagnostics import export_diagnostics
+        key_path = controller.data_dir / 'management-key.dpapi'
+        if key_path.exists():
+            from backend import dpapi
+            controller.key = dpapi(key_path.read_bytes(), decrypt=True).decode()
+            controller.base = 'http://127.0.0.1:8318'
+        print('Saved: ' + str(export_diagnostics(controller, args.output)))
+        return 0
     # Restoration remains available even when the native service is offline.
     if args.command == 'restore':
         return 0 if terminal.restore(args.yes) else 1

@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageTk
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 from tkinter import Canvas, font as tkfont
 from backend import Controller, AccountError
 from activity import Activity
@@ -162,6 +162,7 @@ class App(ctk.CTk):
         self.detail.pack(fill='both', expand=True)
         self.stats_view = ctk.CTkScrollableFrame(self.body, fg_color='transparent')
         self.stats_title = self.label(self.stats_view, 'Automatic routing', 22, bold=True)
+        self.button(self.stats_view, 'Save diagnostic log…', self.save_diagnostic_log).pack(anchor='w', pady=(0, 10))
         self.stats_strategy = self.label(self.stats_view, 'Starting monitoring…', 13, MUTED)
         self.label(self.stats_view, 'Priority: earliest reset among available accounts', 15, bold=True)
         self.policy_control = ctk.CTkSegmentedButton(self.stats_view, values=['Current model', 'Gemini', 'Claude / GPT'], command=self.set_policy_group)
@@ -319,6 +320,15 @@ class App(ctk.CTk):
         self.stats_view.pack_forget()
         view = self.stats_view if value == 'Routing statistics' else self.detail
         view.pack(fill='both', expand=True, before=self.notice)
+
+    def save_diagnostic_log(self):
+        from gateway_diagnostics import export_diagnostics
+        destination = filedialog.asksaveasfilename(parent=self, title='Save diagnostic log',
+            initialfile='GeminiAccounts-diagnostics-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '.zip',
+            defaultextension='.zip', filetypes=[('Diagnostic archive', '*.zip')])
+        if destination:
+            self.work(lambda: export_diagnostics(self.controller, destination),
+                lambda path: messagebox.showinfo('Diagnostic log saved', str(path), parent=self))
 
     def start_activity(self):
         def enable():

@@ -13,6 +13,8 @@ from backend import Controller, dpapi
 import yaml
 from model_context import strip_context_suffix
 from response_guard import StreamProbe, usable_message
+from gateway_diagnostics import Diagnostics
+from provider_errors import failure_reason, provider_error_metadata
 
 PING = b'event: ping\ndata: {"type":"ping"}\n\n'
 HOP = {'connection', 'transfer-encoding', 'content-length', 'keep-alive',
@@ -64,6 +66,7 @@ class QueueServer(ThreadingHTTPServer):
         self.client_keys = client_keys
         self.aliases = aliases
         self.jobs = {}
+        self.diagnostics = Diagnostics()
         self.lock = threading.Lock()
         self.poll_seconds = 3
         self.heartbeat_seconds = 10
@@ -112,7 +115,7 @@ class QueueServer(ThreadingHTTPServer):
 
     def snapshot(self):
         with self.lock:
-            return {'jobs': [dict(j, upstream_model=self.aliases.get(j['model'], j['model'])) for j in self.jobs.values()], 'poll_seconds': self.poll_seconds}
+            return {'jobs': [dict(j, upstream_model=self.aliases.get(j['model'], j['model'])) for j in self.jobs.values()], 'poll_seconds': self.poll_seconds, 'diagnostics_enabled': True, 'log_write_error': self.diagnostics.write_error}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -121,12 +124,23 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass  # Never log credentials, request bodies, or Google verification links.
 
+    def trace(self, event, **fields):
+        elapsed = round(time.monotonic() - self.trace_started, 3)
+        fields['elapsed_seconds'] = elapsed
+        fields.setdefault('response_bytes', self.response_bytes)
+        self.server.diagnostics.record(self.request_id, event, **fields)
+        with self.server.lock:
+            job = self.server.jobs.get(self.request_id)
+            if job is not None:
+                job.update(phase=event, elapsed_seconds=elapsed, last_event_at=time.time())
+
     def chunk(self, data):
         self.wfile.write(('%x\r\n' % len(data)).encode() + data + b'\r\n')
         self.wfile.flush()
 
     def await_upstream(self, operation, stream, cleanup=None):
         """Keep the client alive while upstream headers or the next bytes are pending."""
+        pending_since = time.monotonic()
         results = queue.Queue()
         cancelled = threading.Event()
         def run():
@@ -146,6 +160,7 @@ class Handler(BaseHTTPRequestHandler):
                         raise error
                     return value
                 except queue.Empty:
+                    self.trace('upstream_pending', pending_seconds=round(time.monotonic() - pending_since, 3))
                     if stream:
                         if not self.response_started:
                             self.start_stream(True)
@@ -179,14 +194,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_request(self):
         self.response_started = False
+        self.request_id = secrets.token_hex(8)
+        self.trace_started = time.monotonic()
+        self.response_bytes = 0
         self.keepalive = PING if self.path.split('?')[0] == '/v1/messages' else b': keep-alive\n\n'
         tokens = [self.headers.get('x-api-key', ''), self.headers.get('Authorization', '').removeprefix('Bearer ')]
-        if self.path == '/v0/management/quota-wait':
+        if self.path in ('/v0/management/quota-wait', '/v0/management/diagnostics'):
             if not any(secrets.compare_digest(token.encode(), self.server.key.encode()) for token in tokens):
                 self.json_reply(401, {'error': {'type': 'authentication_error', 'message': 'Unauthorized'}})
                 return
-            self.json_reply(200, self.server.snapshot())
+            self.json_reply(200, self.server.snapshot() if self.path.endswith('quota-wait') else dict(self.server.diagnostics.snapshot(), **self.server.snapshot()))
             return
+        self.trace('received', method=self.command, path=self.path.split('?')[0])
         size = int(self.headers.get('Content-Length', '0'))
         body = self.rfile.read(size) if size else None
         inference = self.command == 'POST' and self.path.split('?')[0] in ('/v1/messages', '/v1/responses', '/v1/chat/completions')
@@ -194,6 +213,7 @@ class Handler(BaseHTTPRequestHandler):
             self.forward(body)
             return
         if not any(secrets.compare_digest(token.encode(), key.encode()) for token in tokens for key in self.server.client_keys):
+            self.trace('authentication_rejected', status=401)
             self.json_reply(401, {'error': {'type': 'authentication_error', 'message': 'Invalid API key'}})
             return
         try:
@@ -211,7 +231,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         stream = bool(request.get('stream'))
         guarded = self.path.split('?')[0] == '/v1/messages'
-        ident = secrets.token_hex(8)
+        ident = self.request_id
+        attempt = 0
+        self.trace('validated', model=model, stream=stream, request_bytes=size)
         started = False
         empty_retries = 0
         with self.server.lock:
@@ -220,12 +242,18 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 try:
                     self.server.refresh_aliases()
-                    reset = quota_wait(self.server.accounts(), model, self.server.aliases)
+                    accounts = self.server.accounts()
+                    reset = quota_wait(accounts, model, self.server.aliases)
                 except (OSError, ValueError, http.client.HTTPException):
                     reset = None
                 if reset:
                     with self.server.lock:
+                        was_waiting = self.server.jobs[ident].get('state') == 'waiting'
                         self.server.jobs[ident].update(state='waiting', retry_at=reset)
+                    if not was_waiting:
+                        self.trace('waiting_provider', retry_at=reset, wait_seconds=round(max(0, reset-time.time()), 3),
+                            accounts=[{'name': a.get('name'), 'disabled': bool(a.get('disabled')), 'unavailable': bool(a.get('unavailable')),
+                                       'cooldowns': [{k: c.get(k) for k in ('scope', 'model_key', 'reason', 'http_status', 'retry_at')} for c in a.get('cooldowns') or []]} for a in accounts])
                     if not started:
                         self.start_stream(stream)
                         started = True
@@ -236,12 +264,16 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 with self.server.lock:
                     self.server.jobs[ident].update(state='running', retry_at=None)
+                attempt += 1
+                self.trace('upstream_started', attempt=attempt, model=model, upstream_model=self.server.aliases.get(model, model))
                 conn, response = self.await_upstream(lambda: self.open_upstream(body), stream,
                                                      cleanup=lambda result: result[0].close())
                 started = self.response_started
+                self.trace('upstream_headers', attempt=attempt, status=response.status)
                 try:
                     if response.status in (429, 403, 503):
                         error = response.read()
+                        self.trace('provider_rejected', status=response.status, reason=failure_reason(response.status, error) or 'Provider rejected request', **provider_error_metadata(error))
                         try:
                             reset = quota_wait(self.server.accounts(), model, self.server.aliases)
                         except (OSError, ValueError, http.client.HTTPException):
@@ -257,6 +289,7 @@ class Handler(BaseHTTPRequestHandler):
                             self.recovery_error(stream)
                             return
                         if not valid:
+                            self.trace('empty_response', attempt=attempt)
                             empty_retries += 1
                             if empty_retries <= 2:
                                 with self.server.lock:
@@ -268,9 +301,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 finally:
                     conn.close()
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError) as error:
+            self.trace('connection_ended', exception_type=type(error).__name__)
             self.close_connection = True
-        except (OSError, http.client.HTTPException):
+        except (OSError, http.client.HTTPException) as exception:
+            self.trace('upstream_error', exception_type=type(exception).__name__)
             error = {'type': 'error', 'error': {'type': 'api_error', 'message': 'Local inference service unavailable'}}
             try:
                 if self.response_started:
@@ -281,6 +316,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
         finally:
+            self.trace('finished', attempt=attempt)
             with self.server.lock:
                 self.server.jobs.pop(ident, None)
 
@@ -311,8 +347,13 @@ class Handler(BaseHTTPRequestHandler):
             data = self.await_upstream(lambda: response.read1(65536), True)
             if not data:
                 break
+            self.response_bytes += len(data)
+            if not probe.buffer:
+                self.trace('first_upstream_bytes')
+            self.trace('stream_progress')
             probe.feed(data)
             if probe.usable or probe.error:
+                self.trace('content_available', terminal=probe.terminal, error=probe.error)
                 if not self.response_started:
                     self.start_stream(True)
                 self.chunk(bytes(probe.buffer))
@@ -321,9 +362,11 @@ class Handler(BaseHTTPRequestHandler):
                 return True
             if probe.terminal:
                 break
+        self.trace('stream_without_answer', terminal=probe.terminal)
         return False
 
     def recovery_error(self, stream):
+        self.trace('recovery_exhausted', status=502)
         error = {'type': 'error', 'error': {'type': 'api_error',
             'message': 'The model returned no usable answer after 3 attempts. Retry the request; no tool call was delivered.'}}
         if not self.response_started:
@@ -358,6 +401,8 @@ class Handler(BaseHTTPRequestHandler):
                 data = self.await_upstream(lambda: response.read1(65536), stream)
                 if not data:
                     break
+                self.response_bytes += len(data)
+                self.trace('stream_progress')
                 self.chunk(data)
         self.wfile.write(b'0\r\n\r\n')
         self.wfile.flush()
@@ -383,6 +428,8 @@ def main():
     aliases = {a['alias']: a['name'] for a in config.get('oauth', {}).get('model-alias', {}).get('antigravity', [])}
     keys = config.get('access', {}).get('api-keys', [])
     server = QueueServer(('127.0.0.1', 8317), ('127.0.0.1', config['server']['port']), key, keys, aliases)
+    server.diagnostics = Diagnostics(controller.data_dir / 'gateway-diagnostics.jsonl')
+    server.diagnostics.record('service', 'started', phase='ready')
     server.verifications_path = controller.verification_path
     server.serve_forever()
 

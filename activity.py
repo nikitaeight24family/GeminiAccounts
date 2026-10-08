@@ -3,12 +3,14 @@ import json
 import re
 from datetime import datetime, timezone
 from backend import atomic_write
-from provider_errors import failure_reason
+from provider_errors import failure_reason, provider_error_metadata
+from gateway_diagnostics import Diagnostics
 
 
 class Activity:
     def __init__(self, path):
         self.path = path
+        self.diagnostics = Diagnostics(path.with_name('provider-diagnostics.jsonl'))
         try:
             self.state = json.loads(path.read_text('utf-8'))
         except (OSError, ValueError):
@@ -86,7 +88,7 @@ class Activity:
             if failed and code == 403 and issues.get(name) == 'verification':
                 reason = 'Google requires account verification; this is not a quota error'
             switched = not failed and previous and timestamp >= previous['at'] and previous['name'] != name
-            if not failed and attempt and attempt['name'] != name:
+            if attempt and attempt['name'] != name:
                 switched = True
                 reason = 'Retry using another account: ' + self.reason(attempt['code'])
             elif switched:
@@ -96,6 +98,9 @@ class Activity:
                      'code': code, 'tokens': tokens, 'latency_ms': latency, 'switch': bool(switched), 'reason': reason,
                      'from': attempt['name'] if switched and attempt else previous['name'] if switched else None}
             self.state['events'].append(event)
+            self.diagnostics.record(identifier, 'provider_attempt', model=model, upstream_model=upstream_model,
+                account=name, from_account=event['from'], status=code, tokens_count=tokens, latency_ms=latency,
+                failed=failed, switch=bool(switched), reason=reason, **provider_error_metadata(failure.get('body')))
             if failed and trace:
                 self.state['attempts'][trace] = {'name': name, 'code': code, 'model': model}
             else:
