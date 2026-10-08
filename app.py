@@ -474,7 +474,17 @@ class App(ctk.CTk):
             own = stats.get(key, {})
             count = own.get('success', 0) + own.get('failed', 0)
             average = own.get('latency_ms', 0) / count / 1000 if count else 0
-            status = 'Paused' if account['disabled'] else 'Waiting / restricted' if account.get('unavailable') or account.get('cooldowns') else 'Available'
+            status = 'Paused' if account['disabled'] else (account.get('restriction_reason') or 'Waiting / restricted') if account.get('unavailable') or account.get('cooldowns') else 'Available'
+            retries = []
+            for cooldown in account.get('cooldowns') or []:
+                try:
+                    retry = datetime.fromisoformat(cooldown['retry_at'].replace('Z', '+00:00'))
+                    if retry > datetime.now(timezone.utc):
+                        retries.append(retry)
+                except (KeyError, ValueError, TypeError, AttributeError):
+                    pass
+            if retries:
+                status += ' • next provider retry in ' + self.time_until_reset(min(retries).isoformat())
             self.activity_rows[key].configure(text=f"{name(key)} • {status}\nProxy since startup: {account.get('success') or 0} successful / {account.get('failed') or 0} errors\nObserved: {count} attempts • {own.get('tokens', 0):,} tokens • average {average:.1f} s" + (' • last ' + self.activity_time(own['last']) if own.get('last') else ''))
         mode = self.journal_filter.get()
         events = [e for e in state['events'] if mode == 'All events' or (mode == 'Switches' and e['switch']) or (mode == 'Errors' and e['failed'])]

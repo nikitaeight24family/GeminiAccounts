@@ -1,37 +1,15 @@
-# Gemini Accounts 1.3.1 — Empty-response recovery
+# Gemini Accounts 1.3.2 — Provider restriction diagnostics
 
-- Empty Anthropic completions are withheld and retried at most twice. If all three attempts are empty, the gateway returns an explicit error instead of successful silence. Thinking alone does not count as a usable answer.
-- Real text and tool calls continue streaming as soon as they appear. Delivered tool calls are never retried by this protection. Quota-wait heartbeats and cancellation remain supported.
-- Gemini requests receive a role clarification that distinguishes the assistant from the user and text inside screenshots, while retaining original history, system instructions and tools. This reduces impersonation risk; it does not guarantee model behavior.
+- Request history distinguishes temporary request rate limits, unavailable model capacity and exhausted model quota when Google's structured error identifies the cause. Unknown 429 errors stay explicitly unknown. Raw error bodies and credentials are not saved in the activity journal.
+- Routing statistics show the provider restriction reason and the next reported retry countdown separately from remaining quota. A full quota bar does not mean the model is currently accepting requests.
+- Removes the extra role clarification previously injected into Gemini system prompts. Original client instructions are preserved.
+- Requests separately marked Gemini thought summaries when thinking is already enabled, preserving explicit visibility settings. This does not establish that the previously reported reasoning leak is fixed; provider behavior remains unverified.
+- Retains empty-response recovery, cancellable quota waits, model selection, configuration backups and restoration.
 
-- Account selection for details works only while the right panel is open. Compact mode has no selected-card background, selection border or hover highlight; verification controls remain usable. Expanding restores the selected details without rebuilding the interface.
-- Gemini / Claude badges and animated borders clear when their gateway requests finish or wait for quota. Status updates every second. Model names disappear from card headers after one minute without a recent request.
-- Automatic ranking prefers available accounts with the nearest **5h** reset for the ranked provider. Weekly quota determines eligibility; its reset no longer overrides the five-hour order.
-- Existing localhost Claude Desktop presets are recognized when updating connected model menus. Display names include the actual model version and Low / High variant instead of generic Pro / Flash labels. Original presets remain restorable.
-- Model-specific context setup enables Claude's **1M** extended-context budget for supported Gemini models and keeps Antigravity Claude 4.6 at its catalog limit of **200K**. CLI suffixes are normalized by the gateway before forwarding requests. The Windows installer offers to update already connected client configurations with consent and backups.
+**This update does not remove Google's 429 restrictions or guarantee a successful response.** If Pro is restricted, choose an available Flash model in **⚙ → Gemini** and retry. The gateway does not silently substitute a different model.
 
-Use **⚙ next to Gemini Accounts** to choose models independently in two lists: **Claude (Antigravity)** for available Haiku / Sonnet / Opus models, and **Gemini** for Pro Low / High, Flash and Flash Lite. New gateway requests use the selection. Updating connected client menus and defaults is optional, asks consent and requires restarting clients. Availability follows your account catalog. Explicit cheap Gemini Flash requests are preserved.
+**Windows:** download `GeminiAccounts-Setup.exe`, close ongoing requests, and run the installer. Existing Google sign-ins and original client configuration backups are preserved. New users: **Install → Add Google account → approve Connect applications**, then restart the selected client.
 
-Weekly **1w** countdowns now show days only, including markers inside the pooled quota bar. Less than one day is shown as `< 1d`. Five-hour countdowns retain hours and minutes.
+**Terminal:** download and extract the CLI archive for your platform, run `GeminiAccounts-CLI.exe` on Windows or `./gemini-accounts` on Mac / Linux, then use the menu to sign in and approve application setup. Keep it running while using connected clients.
 
-The gateway refreshes model mappings while waiting for quota. Request history keeps the original model after a selection change. Terminal mode includes a **Models** menu and the `models --gemini MODEL_ID --claude MODEL_ID` command.
-
-The desktop interface, installer, messages and documentation are fully in English. Existing accounts and backups are preserved.
-
-**Windows desktop:** download `GeminiAccounts-Setup.exe` → **Install** → **Add Google account** → approve **Connect applications**.
-
-**Terminal:** download the CLI archive for Windows x64, Mac Apple Silicon / Intel, or Linux x64 → extract → run `GeminiAccounts-CLI.exe` on Windows or `./gemini-accounts` on Mac / Linux. Python is included. First launch downloads a checksum-verified native service. Use the menu to sign in and approve setup; keep it open while working.
-
-Includes account and pooled 5h / 1w quotas, forecasts, reset countdowns, independent Gemini / Claude subscriptions, last requested models, verification controls, native failover and streaming quota waits.
-
-Setup always requires consent. Desktop **Restore previous settings / reset preferences** or terminal `restore` returns original client configs and preserves Google sign-ins. Later config edits are replaced by the backup after confirmation.
-
-Windows supports Claude Desktop Code, Claude Code CLI and Codex Desktop / CLI. Mac terminal mode supports Claude Code CLI and Codex CLI. Mac executables are not notarized; macOS may require approval in Privacy & Security. Source mode is also available.
-
-See the English [quick start](https://github.com/nikitaeight24family/GeminiAccounts#readme) and [terminal guide](https://github.com/nikitaeight24family/GeminiAccounts/blob/main/CLI.md). Google Antigravity determines eligibility, models and quotas. Clients are installed separately. `SHA256SUMS.txt` lists release checksums.
-
-### Compact desktop panel
-
-Demo accounts and example quota values; no personal account addresses.
-
-<img src="https://raw.githubusercontent.com/nikitaeight24family/GeminiAccounts/v1.3.1/docs/compact-panel.png" alt="Compact Gemini Accounts panel" width="320">
+Includes Windows desktop installer and CLI archives for Windows x64, macOS Apple Silicon / Intel and Linux x64. Mac executables are not notarized. See the [quick start](https://github.com/nikitaeight24family/GeminiAccounts#readme) and [terminal guide](https://github.com/nikitaeight24family/GeminiAccounts/blob/main/CLI.md). Release checksums are in `SHA256SUMS.txt`.

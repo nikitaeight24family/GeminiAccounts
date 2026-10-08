@@ -131,7 +131,7 @@ class QueueTests(unittest.TestCase):
         data = response.read()
         self.assertIn(b'real-tool', data)
         self.assertEqual(self.backend.calls, 1)
-    def test_gemini_role_guard_preserves_user_message_and_tools(self):
+    def test_gemini_guard_preserves_user_messages_system_and_tools(self):
         self.backend.files = []
         self.gate.aliases['alias'] = 'gemini-pro-agent'
         self.client.request('POST', '/v1/messages', json.dumps({'model':'alias','stream':True,
@@ -141,8 +141,7 @@ class QueueTests(unittest.TestCase):
         request = self.backend.last_request
         self.assertEqual(request['messages'], [{'role':'user','content':'Fix the bot'}])
         self.assertEqual(request['tools'][0]['name'], 'Bash')
-        self.assertEqual(request['system'][0]['text'], 'Original instructions')
-        self.assertIn('Keep those roles distinct', request['system'][1]['text'])
+        self.assertEqual(request['system'], 'Original instructions')
     def test_invalid_client_key_never_waits(self):
         response = self.post(key='wrong'); self.assertEqual(response.status, 401)
         response.read(); self.assertEqual(self.backend.calls, 0)

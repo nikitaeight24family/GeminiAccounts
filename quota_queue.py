@@ -12,7 +12,7 @@ from pathlib import Path
 from backend import Controller, dpapi
 import yaml
 from model_context import strip_context_suffix
-from response_guard import StreamProbe, usable_message, add_role_guidance
+from response_guard import StreamProbe, usable_message
 
 PING = b'event: ping\ndata: {"type":"ping"}\n\n'
 HOP = {'connection', 'transfer-encoding', 'content-length', 'keep-alive',
@@ -211,11 +211,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         stream = bool(request.get('stream'))
         guarded = self.path.split('?')[0] == '/v1/messages'
-        if guarded:
-            self.server.refresh_aliases()
-            if self.server.aliases.get(model, model).startswith('gemini-'):
-                request = add_role_guidance(request)
-                body = json.dumps(request, ensure_ascii=False).encode()
         ident = secrets.token_hex(8)
         started = False
         empty_retries = 0

@@ -1,5 +1,5 @@
 import unittest
-from response_guard import StreamProbe, usable_message, add_role_guidance
+from response_guard import StreamProbe, usable_message
 
 
 class ResponseGuardTests(unittest.TestCase):
@@ -14,10 +14,3 @@ class ResponseGuardTests(unittest.TestCase):
     def test_whitespace_text_is_empty_but_tools_are_real_output(self):
         self.assertFalse(usable_message({'content':[{'type':'text','text':' \n'}]}))
         self.assertTrue(usable_message({'content':[{'type':'tool_use','name':'Read'}]}))
-
-    def test_system_cache_blocks_preserved_and_guard_idempotent(self):
-        request = {'system':[{'type':'text','text':'Original','cache_control':{'type':'ephemeral'}}]}
-        result = add_role_guidance(add_role_guidance(request))
-        self.assertEqual(len(result['system']), 2)
-        self.assertEqual(result['system'][0], request['system'][0])
-        self.assertEqual(len(request['system']), 1)

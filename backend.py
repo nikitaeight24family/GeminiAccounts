@@ -116,6 +116,8 @@ class Controller:
         if not config_path.exists():
             raise AccountError('The local Gemini connection is not installed.')
         config = yaml.safe_load(config_path.read_text('utf-8-sig'))
+        from native_reasoning import ensure_summary_rule
+        reasoning_changed = ensure_summary_rule(config)
         host = config.get('server', {}).get('host', '')
         if host not in ('127.0.0.1', 'localhost'):
             raise AccountError('The connection must be restricted to this computer.')
@@ -132,7 +134,7 @@ class Controller:
             matches = current.startswith('$2') and bcrypt.checkpw(self.key.encode(), current.encode())
         except ValueError:
             matches = False
-        if not matches or management.get('allow-remote', False):
+        if not matches or management.get('allow-remote', False) or reasoning_changed:
             backup = self.data_dir / 'proxy-before-manager.yaml'
             if not backup.exists():
                 atomic_write(backup, config_path.read_bytes())
@@ -201,6 +203,12 @@ class Controller:
             if item.get('provider', item.get('type')) != 'antigravity':
                 continue
             account = {k: item.get(k) for k in allowed}
+            from provider_errors import failure_reason
+            try:
+                failure = json.loads(item.get('status_message') or '{}').get('error', {})
+                account['restriction_reason'] = failure_reason(failure.get('code'), item.get('status_message'))
+            except (ValueError, TypeError, AttributeError):
+                account['restriction_reason'] = None
             issue = self.access_issue(item.get('status_message'))
             if issue.get('access_issue') == 'verification':
                 self.remember_verification(account['name'], issue)

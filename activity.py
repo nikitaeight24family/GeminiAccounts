@@ -3,6 +3,7 @@ import json
 import re
 from datetime import datetime, timezone
 from backend import atomic_write
+from provider_errors import failure_reason
 
 
 class Activity:
@@ -20,7 +21,7 @@ class Activity:
     @staticmethod
     def reason(code):
         if code == 429:
-            return 'Google returned 429: quota / rate limit'
+            return failure_reason(code)
         if code in (401, 403):
             return f'Google returned {code}: access denied'
         if code >= 500:
@@ -80,7 +81,8 @@ class Activity:
             attempt = self.state['attempts'].get(trace) if trace else None
             if attempt and attempt.get('model') != model:
                 attempt = None
-            reason = self.reason(code) if failed else 'Response received'
+            failure = record.get('fail') or {}
+            reason = (failure_reason(code, failure.get('body')) or self.reason(code)) if failed else 'Response received'
             if failed and code == 403 and issues.get(name) == 'verification':
                 reason = 'Google requires account verification; this is not a quota error'
             switched = not failed and previous and timestamp >= previous['at'] and previous['name'] != name
