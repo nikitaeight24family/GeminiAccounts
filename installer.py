@@ -14,6 +14,7 @@ from tkinter import messagebox
 import bcrypt
 import yaml
 from backend import dpapi, atomic_write, Controller
+from integrations import Integrations
 
 
 def prepare_update(root):
@@ -94,7 +95,20 @@ def main():
         button.configure(state='disabled', text='Installing…')
         window.update_idletasks()
         try:
+            controller = Controller(proxy_dir=root / 'ClaudeGemini', data_dir=root / 'GeminiAccounts')
+            integrations = Integrations(controller)
+            backups = integrations.backups()
+            clients = [name for name, paths in integrations.paths().items()
+                       if any(str(p.resolve()) in backups for p in paths)]
+            if integrations.legacy_desktop_preset() and 'claude_desktop' not in clients:
+                clients.append('claude_desktop')
+            update_clients = clients and messagebox.askyesno('Update connected applications?',
+                'Update connected client model names and context windows?\n\n'
+                'This modifies their configuration files. Original settings are backed up and can be restored '
+                'from Gemini Accounts. Restart clients afterwards to load the changes.', parent=window)
             executable = install(payload, root)
+            if update_clients:
+                integrations.apply(clients)
             subprocess.Popen([str(executable)], creationflags=subprocess.CREATE_NO_WINDOW)
             window.destroy()
         except Exception as error:

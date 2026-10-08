@@ -10,6 +10,7 @@ import tomllib
 from pathlib import Path
 
 from backend import atomic_write, dpapi, AccountError, storage_root
+from model_context import extended_context, client_model_id
 
 PRESET_ID = '228c90e2-d605-4ba1-b695-12a49c93a766'
 BEGIN = '# BEGIN Gemini Accounts managed provider'
@@ -76,6 +77,10 @@ class Integrations:
             if entry.get('labelOverride') != label:
                 entry['labelOverride'] = label
                 changed = True
+            for flag in ('supports1m', 'prefer1m'):
+                if entry.get(flag, False) != extended_context(model):
+                    entry[flag] = extended_context(model)
+                    changed = True
         if changed:
             with self.lock:
                 self.remember([path])
@@ -142,13 +147,16 @@ class Integrations:
     def configure_claude_cli(self, key):
         path = self.paths()['claude_cli'][0]
         settings = self.read_json(path)
+        families = self.controller.selected_family_models()
+        gemini = client_model_id('claude-sonnet-4-5', families['gemini'])
+        claude = client_model_id('claude-selected', families['claude'])
         settings.setdefault('env', {}).update({
             'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317',
             'ANTHROPIC_AUTH_TOKEN': key, 'ANTHROPIC_API_KEY': '',
-            'ANTHROPIC_MODEL': 'claude-sonnet-4-5',
-            'ANTHROPIC_DEFAULT_SONNET_MODEL': 'claude-sonnet-4-5',
-            'ANTHROPIC_DEFAULT_HAIKU_MODEL': 'claude-selected' if self.controller.preferences.get('claude-model') else 'claude-haiku-4-5',
-            'ANTHROPIC_DEFAULT_OPUS_MODEL': 'claude-selected' if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
+            'ANTHROPIC_MODEL': gemini,
+            'ANTHROPIC_DEFAULT_SONNET_MODEL': gemini,
+            'ANTHROPIC_DEFAULT_HAIKU_MODEL': claude if self.controller.preferences.get('claude-model') else client_model_id('claude-haiku-4-5', self.controller.model_aliases().get('claude-haiku-4-5', 'gemini-3-flash')),
+            'ANTHROPIC_DEFAULT_OPUS_MODEL': claude if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
             'API_TIMEOUT_MS': '604800000', 'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
         })
         self.write_json(path, settings)
@@ -194,7 +202,11 @@ class Integrations:
             'inferenceGatewayBaseUrl': 'http://127.0.0.1:8317',
             'claudeAiImport': {'bannerBehavior': 'detect', 'exportEnabled': True, 'enabled': True},
             'inferenceModels': [
-                {'name': name, 'labelOverride': label, 'anthropicFamilyTier': tier, 'isFamilyDefault': default}
+                {'name': name, 'labelOverride': label, 'anthropicFamilyTier': tier, 'isFamilyDefault': default,
+                 'supports1m': extended_context(family_models['gemini'] if tier == 'sonnet' else
+                     family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking'),
+                 'prefer1m': extended_context(family_models['gemini'] if tier == 'sonnet' else
+                     family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking')}
                 for name, label, tier, default in models],
         })
         meta = self.read_json(meta_path)

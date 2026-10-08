@@ -4,6 +4,7 @@
 - Gemini / Claude badges and animated borders clear when their gateway requests finish or wait for quota. Status updates every second. Model names disappear from card headers after one minute without a recent request.
 - Automatic ranking prefers available accounts with the nearest **5h** reset for the ranked provider. Weekly quota determines eligibility; its reset no longer overrides the five-hour order.
 - Existing localhost Claude Desktop presets are recognized when updating connected model menus. Display names include the actual model version and Low / High variant instead of generic Pro / Flash labels. Original presets remain restorable.
+- Model-specific context setup enables Claude's **1M** extended-context budget for supported Gemini models and keeps Antigravity Claude 4.6 at its catalog limit of **200K**. CLI suffixes are normalized by the gateway before forwarding requests. The Windows installer offers to update already connected client configurations with consent and backups.
 
 Use **⚙ next to Gemini Accounts** to choose models independently in two lists: **Claude (Antigravity)** for available Haiku / Sonnet / Opus models, and **Gemini** for Pro Low / High, Flash and Flash Lite. New gateway requests use the selection. Updating connected client menus and defaults is optional, asks consent and requires restarting clients. Availability follows your account catalog. Explicit cheap Gemini Flash requests are preserved.
 

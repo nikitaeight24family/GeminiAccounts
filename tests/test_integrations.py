@@ -74,9 +74,23 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(preset['inferenceModels'][0]['labelOverride'], 'Gemini · 3.1 Pro High')
         self.assertEqual(preset['inferenceModels'][0]['name'], 'claude-sonnet-4-5')
         self.assertEqual(preset['inferenceGatewayApiKey'], 'keep-key')
+        self.assertTrue(preset['inferenceModels'][0]['supports1m'])
+        self.assertTrue(preset['inferenceModels'][0]['prefer1m'])
         self.assertFalse(self.client.refresh_desktop_model_labels())
         self.client.restore()
         self.assertEqual(path.read_bytes(), original)
+
+    def test_context_setup_keeps_claude_and_gemini_separate(self):
+        self.controller.preferences.update({'gemini-model': 'gemini-pro-agent', 'claude-model': 'claude-sonnet-4-6'})
+        self.client.apply(['claude_cli', 'claude_desktop'])
+        env = self.client.read_json(self.client.paths()['claude_cli'][0])['env']
+        self.assertEqual(env['ANTHROPIC_MODEL'], 'claude-sonnet-4-5[1m]')
+        self.assertEqual(env['ANTHROPIC_DEFAULT_OPUS_MODEL'], 'claude-selected')
+        models = self.client.read_json(self.client.paths()['claude_desktop'][2])['inferenceModels']
+        self.assertTrue(models[0]['supports1m'])
+        self.assertTrue(models[0]['prefer1m'])
+        self.assertFalse(models[1]['supports1m'])
+        self.assertFalse(models[1]['prefer1m'])
 
     def test_unrelated_gateway_is_not_adopted(self):
         library = self.client.local / 'Claude-3p' / 'configLibrary'

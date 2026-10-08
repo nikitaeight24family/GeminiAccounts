@@ -27,7 +27,7 @@ class Mock(BaseHTTPRequestHandler):
         data = json.dumps(value).encode()
         self.send_response(200); self.send_header('Content-Length', str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
-        self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        self.server.last_request = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
         self.server.calls += 1
         time.sleep(getattr(self.server, 'header_delay', 0))
         data = (b'event: message_start\ndata: {"type":"message_start","message":{"id":"real"}}\n\n'
@@ -69,6 +69,13 @@ class QueueTests(unittest.TestCase):
         response = self.post(); data = response.read()
         self.assertTrue(data.startswith(PING))
         self.assertIn(b'message_stop', data); self.assertEqual(self.backend.calls, 1)
+    def test_extended_context_suffix_preserves_quota_wait_and_upstream_model(self):
+        self.backend.files = [account(seconds=.15)]
+        response = self.post(model='alias[1m]')
+        data = response.read()
+        self.assertIn(PING, data)
+        self.assertIn(b'message_stop', data)
+        self.assertEqual(self.backend.last_request['model'], 'alias')
     def test_responses_wait_uses_comments_and_resumes_with_real_response(self):
         self.backend.files = [account(seconds=.15)]
         self.client.request('POST', '/v1/responses', json.dumps({'model':'alias','stream':True,'input':'hello'}), {'x-api-key':'client'})

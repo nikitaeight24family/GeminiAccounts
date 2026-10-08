@@ -11,6 +11,7 @@ from pathlib import Path
 
 from backend import Controller, dpapi
 import yaml
+from model_context import strip_context_suffix
 
 PING = b'event: ping\ndata: {"type":"ping"}\n\n'
 HOP = {'connection', 'transfer-encoding', 'content-length', 'keep-alive',
@@ -27,6 +28,7 @@ def deadline(item):
 def quota_wait(files, model, aliases, now=None):
     """Wait only for actual quota blocks, scoped to the requested upstream model."""
     now = time.time() if now is None else now
+    model = strip_context_suffix(model)
     model = aliases.get(model, model)
     quota = []
     enabled = [a for a in files if not a.get('disabled') and
@@ -198,6 +200,11 @@ class Handler(BaseHTTPRequestHandler):
             model = request['model']
             if not isinstance(model, str):
                 raise ValueError()
+            normalized = strip_context_suffix(model)
+            if normalized != model:
+                model = normalized
+                request['model'] = model
+                body = json.dumps(request, ensure_ascii=False).encode()
         except (ValueError, KeyError, TypeError):
             self.forward(body)
             return
