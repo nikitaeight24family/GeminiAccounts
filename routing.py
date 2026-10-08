@@ -57,7 +57,6 @@ def rank_accounts(accounts, caches, group, now=None):
         known = [b for b in buckets if valid(b.get('remaining'))]
         zero = [b for b in known if b['remaining'] == 0]
         resets = [reset_date(b.get('reset')) for b in known]
-        upcoming = [date for date in resets if date and date > now]
         expired = any(date and date <= now for date in resets)
         if zero:
             blocked_dates = [reset_date(b.get('reset')) for b in zero]
@@ -71,9 +70,11 @@ def rank_accounts(accounts, caches, group, now=None):
             reset = None
             tier, reason = 2, 'No fresh complete quota data'
         else:
-            reset = min(upcoming) if upcoming else None
+            # Available accounts are ordered by their five-hour reset only.
+            # Weekly quota determines eligibility, never the preferred 5h window.
+            reset = reset_date(next(b.get('reset') for b in known if b['window'] == '5h'))
             tier = 0 if reset else 1
-            reason = 'Quota available; earliest reset' if reset else 'Quota available; reset time unknown'
+            reason = 'Quota available; nearest 5h reset' if reset else 'Quota available; 5h reset time unknown'
         cooldowns = []
         for cooldown in account.get('cooldowns') or []:
             model = cooldown.get('model_key', '')

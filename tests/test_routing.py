@@ -7,6 +7,20 @@ from routing import rank_accounts, quota_projection
 
 
 class RoutingTests(unittest.TestCase):
+    def test_nearest_five_hour_reset_wins_independently_of_weekly_reset(self):
+        now = datetime(2026, 10, 8, tzinfo=timezone.utc)
+        accounts = [{'name': 'a'}, {'name': 'b'}]
+        caches = {}
+        for name, gemini_hours, claude_hours, week_hours in [('a', 4, 1, .1), ('b', 1, 4, 100)]:
+            caches[name] = {'at': now, 'data': {'groups': [
+                {'kind': group, 'buckets': [
+                    {'window': '5h', 'remaining': .5, 'reset': (now + timedelta(hours=hours)).isoformat()},
+                    {'window': 'weekly', 'remaining': .5, 'reset': (now + timedelta(hours=week_hours)).isoformat()}]}
+                for group, hours in [('gemini', gemini_hours), ('claude', claude_hours)]]}}
+        self.assertEqual(rank_accounts(accounts, caches, 'gemini', now)[0]['name'], 'b')
+        self.assertEqual(rank_accounts(accounts, caches, 'claude', now)[0]['name'], 'a')
+        self.assertEqual(rank_accounts(accounts, caches, 'gemini', now)[0]['reset'], (now + timedelta(hours=1)).isoformat())
+
     def test_weekly_projection_restores_used_portions_at_cumulative_percentages(self):
         now = datetime(2026, 10, 7, tzinfo=timezone.utc)
         entries = [

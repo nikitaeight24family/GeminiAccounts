@@ -48,7 +48,7 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 - Compact cards, sorted by Gemini's five-hour reset, with verification accounts pinned separately.
 - Pooled Gemini 5h / 1w bars with vertical markers for projected quota after exhausted windows reset.
 - Last requested model in card headers; independent last-used Gemini and Claude subscription badges.
-- Prioritizes available accounts with the earliest reset. Native failover switches exhausted accounts. Gemini and Claude can use different accounts simultaneously.
+- Prioritizes available accounts by the nearest **5h** reset for the ranked model family. Weekly quota determines whether the account can be used; its countdown does not change the five-hour order. Native failover switches exhausted accounts. Gemini and Claude can use different accounts simultaneously.
 - Request, failure and switch statistics with reasons.
 - Streaming keep-alives while waiting for genuine quota blocks; the real response follows when quota is available. Client cancellation cancels the wait. Pending requests are not saved to disk.
 - Waits three minutes after detecting a full 5h quota before a minimal `Hi` request with one output token through Gemini Flash / GPT-OSS, unless client work already starts the window. Exhausted weekly quotas are skipped.
