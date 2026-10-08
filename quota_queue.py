@@ -66,6 +66,7 @@ class QueueServer(ThreadingHTTPServer):
         self.client_keys = client_keys
         self.aliases = aliases
         self.jobs = {}
+        self.updating = False
         self.diagnostics = Diagnostics()
         self.lock = threading.Lock()
         self.poll_seconds = 3
@@ -199,9 +200,25 @@ class Handler(BaseHTTPRequestHandler):
         self.response_bytes = 0
         self.keepalive = PING if self.path.split('?')[0] == '/v1/messages' else b': keep-alive\n\n'
         tokens = [self.headers.get('x-api-key', ''), self.headers.get('Authorization', '').removeprefix('Bearer ')]
-        if self.path in ('/v0/management/quota-wait', '/v0/management/diagnostics'):
+        if self.path in ('/v0/management/quota-wait', '/v0/management/diagnostics', '/v0/management/update-lock'):
             if not any(secrets.compare_digest(token.encode(), self.server.key.encode()) for token in tokens):
                 self.json_reply(401, {'error': {'type': 'authentication_error', 'message': 'Unauthorized'}})
+                return
+            if self.path.endswith('update-lock'):
+                if self.command not in ('POST', 'DELETE'):
+                    self.json_reply(405, {'error':'Use POST or DELETE'})
+                    return
+                if self.command == 'DELETE':
+                    with self.server.lock:
+                        self.server.updating = False
+                    self.json_reply(200, {'locked':False})
+                    return
+                with self.server.lock:
+                    if self.server.jobs:
+                        self.json_reply(409, {'error':'Requests are running'})
+                        return
+                    self.server.updating = True
+                self.json_reply(200, {'locked':True})
                 return
             self.json_reply(200, self.server.snapshot() if self.path.endswith('quota-wait') else dict(self.server.diagnostics.snapshot(), **self.server.snapshot()))
             return
@@ -237,6 +254,9 @@ class Handler(BaseHTTPRequestHandler):
         started = False
         empty_retries = 0
         with self.server.lock:
+            if self.server.updating:
+                self.json_reply(503, {'error': {'type':'api_error', 'message':'Gateway updating. Retry shortly.'}})
+                return
             self.server.jobs[ident] = {'model': model, 'state': 'running', 'since': time.time(), 'retry_at': None}
         try:
             while True:

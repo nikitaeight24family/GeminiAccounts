@@ -84,6 +84,22 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(len({event['request_id'] for event in events}), 1)
         self.assertNotIn('client', json.dumps(events))
 
+    def test_update_lock_blocks_new_requests_and_can_release(self):
+        self.client.request('POST', '/v0/management/update-lock', headers={'Authorization':'Bearer admin'})
+        self.assertEqual(self.client.getresponse().status, 200)
+        self.client.close()
+        self.client = http.client.HTTPConnection(*self.gate.server_address, timeout=3)
+        response = self.post()
+        self.assertEqual(response.status, 503)
+        response.read()
+        self.assertEqual(self.backend.calls, 0)
+        self.client.request('DELETE', '/v0/management/update-lock', headers={'Authorization':'Bearer admin'})
+        response = self.client.getresponse()
+        self.assertEqual(response.status, 200)
+        response.read()
+        self.backend.files = []
+        self.assertIn(b'OK', self.post().read())
+
     def test_reset_automatically_resumes(self):
         self.backend.files = [account(seconds=.2)]
         response = self.post(); data = response.read()

@@ -163,6 +163,11 @@ class App(ctk.CTk):
         self.stats_view = ctk.CTkScrollableFrame(self.body, fg_color='transparent')
         self.stats_title = self.label(self.stats_view, 'Automatic routing', 22, bold=True)
         self.button(self.stats_view, 'Save diagnostic log…', self.save_diagnostic_log).pack(anchor='w', pady=(0, 10))
+        self.button(self.stats_view, 'Send diagnostic log…', self.send_diagnostic_log).pack(anchor='w', pady=(0, 10))
+        self.update_button = self.button(self.stats_view, 'Check for updates', self.check_for_updates)
+        self.update_button.pack(anchor='w', pady=(0, 10))
+        self.available_update = None
+        self.pending_update = None
         self.stats_strategy = self.label(self.stats_view, 'Starting monitoring…', 13, MUTED)
         self.label(self.stats_view, 'Priority: earliest reset among available accounts', 15, bold=True)
         self.policy_control = ctk.CTkSegmentedButton(self.stats_view, values=['Current model', 'Gemini', 'Claude / GPT'], command=self.set_policy_group)
@@ -195,6 +200,7 @@ class App(ctk.CTk):
         self.after(15000, self.tick_countdowns)
         self.after(150, self.animate_active_borders)
         self.after(200, self.poll_gateway_jobs)
+        self.after(30000, self.check_for_updates)
         if self.controller.preferences.get('details-collapsed'):
             self.restore_details_job = self.after(180, self.toggle_details)
 
@@ -320,6 +326,75 @@ class App(ctk.CTk):
         self.stats_view.pack_forget()
         view = self.stats_view if value == 'Routing statistics' else self.detail
         view.pack(fill='both', expand=True, before=self.notice)
+
+    def check_for_updates(self):
+        from updater import check_update
+        self.update_button.configure(state='disabled', text='Checking updates…')
+        def done(release):
+            self.available_update = release
+            self.update_button.configure(state='normal', text='Update to ' + release['version'] if release else 'Up to date · check again',
+                command=self.install_update if release else self.check_for_updates)
+        self.work(check_update, done)
+        self.after(30000, lambda: self.update_button.configure(state='normal') if not self.closed else None)
+
+    def install_update(self):
+        if not self.available_update:
+            return
+        from updater import download_update
+        self.update_button.configure(state='disabled', text='Downloading update…')
+        def downloaded(path):
+            self.pending_update = path
+            self.apply_pending_update()
+        self.work(lambda: download_update(self.controller, self.available_update), downloaded)
+        self.after(180000, lambda: self.update_button.configure(state='normal') if not self.closed and not self.pending_update else None)
+
+    def apply_pending_update(self):
+        if self.closed or not self.pending_update:
+            return
+        # Do not trust the controller's error fallback as proof of an idle gateway.
+        import json
+        import urllib.request
+        def idle():
+            request = urllib.request.Request('http://127.0.0.1:8317/v0/management/quota-wait',
+                headers={'Authorization':'Bearer ' + self.controller.key})
+            try:
+                with urllib.request.urlopen(request, timeout=3) as response:
+                    return not json.load(response).get('jobs')
+            except OSError:
+                return False
+        def done(is_idle):
+            if is_idle and not self.busy and not self.pending_login:
+                from updater import launch_update
+                launch_update(self.controller, self.pending_update)
+                self.update_button.configure(text='Installing and restarting…')
+                self.after(30000, lambda: self.update_button.configure(state='normal', text='Retry update', command=self.install_update) if not self.closed else None)
+            else:
+                self.update_button.configure(text='Update ready · waiting for requests…')
+                self.after(5000, self.apply_pending_update)
+        self.work(idle, done)
+
+    def send_diagnostic_log(self):
+        from gateway_diagnostics import send_diagnostics
+        endpoint = self.controller.preferences.get('diagnostics-endpoint', '')
+        if not endpoint:
+            dialog = ctk.CTkInputDialog(text='HTTPS diagnostic upload endpoint:', title='Diagnostic recipient')
+            endpoint = dialog.get_input()
+        if not endpoint:
+            return
+        from urllib.parse import urlparse
+        parsed = urlparse(endpoint)
+        if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+            messagebox.showerror('Invalid recipient', 'Use an HTTPS URL without embedded credentials.', parent=self)
+            return
+        if not messagebox.askyesno('Send diagnostic log?',
+            'Recipient: ' + endpoint + '\n\nThe ZIP contains request phases, models, errors, timings, account cooldowns and active requests. '
+            'Email addresses are replaced with account labels. Prompts, generated text, passwords and authentication tokens are excluded. '
+            '\n\nSend this diagnostic archive now? No automatic uploads will be enabled.', parent=self):
+            return
+        self.controller.preferences['diagnostics-endpoint'] = endpoint
+        self.controller.save()
+        self.work(lambda: send_diagnostics(self.controller, endpoint),
+            lambda status: messagebox.showinfo('Diagnostic log sent', 'Server accepted the archive (HTTP ' + str(status) + ').', parent=self))
 
     def save_diagnostic_log(self):
         from gateway_diagnostics import export_diagnostics

@@ -42,7 +42,7 @@ class Diagnostics:
                     'log_path': str(self.path) if self.path else None}
 
 
-def export_diagnostics(controller, destination):
+def export_diagnostics(controller, destination, anonymize=False):
     """Copy a bounded diagnostic bundle; never traverse auth or configuration files."""
     import platform
     import zipfile
@@ -63,8 +63,20 @@ def export_diagnostics(controller, destination):
                 report[key] = [{k: a.get(k) for k in allowed} for a in report[key]]
         except Exception as error:
             report[key] = {'unavailable': type(error).__name__}
+    aliases = {}
+    def protect(data):
+        if not anonymize:
+            return data
+        import re
+        def replacement(match):
+            identity = match.group(0).lower()
+            if identity not in aliases:
+                aliases[identity] = 'account-' + str(len(aliases) + 1)
+            return aliases[identity]
+        return re.sub(r'[A-Za-z0-9.!#$%&*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}',
+                      replacement, data.decode('utf-8')).encode('utf-8')
     with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr('snapshot.json', json.dumps(report, ensure_ascii=False, indent=2))
+        archive.writestr('snapshot.json', protect(json.dumps(report, ensure_ascii=False, indent=2).encode()))
         for path in sorted(excluded):
             if path.is_file():
                 # Read bytes once: the writer may rotate while an export is in progress.
@@ -72,5 +84,26 @@ def export_diagnostics(controller, destination):
                     data = path.read_bytes()
                 except FileNotFoundError:
                     continue
-                archive.writestr(path.name, data)
+                archive.writestr(path.name, protect(data))
     return destination
+
+
+def send_diagnostics(controller, endpoint):
+    """Invoked by the UI only after the owner explicitly confirms this export."""
+    import tempfile
+    import urllib.request
+    from urllib.parse import urlparse
+    parsed = urlparse(endpoint)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
+        raise ValueError('Use an HTTPS endpoint without embedded credentials.')
+    with tempfile.TemporaryDirectory() as directory:
+        path = export_diagnostics(controller, __import__('pathlib').Path(directory) / 'diagnostics.zip', anonymize=True)
+        request = urllib.request.Request(endpoint, data=path.read_bytes(), method='POST',
+            headers={'Content-Type':'application/zip', 'User-Agent':'GeminiAccounts-Diagnostics'})
+        # Do not follow redirects: approval applies to the displayed recipient only.
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+        opener = urllib.request.build_opener(NoRedirect)
+        with opener.open(request, timeout=60) as response:
+            return response.status

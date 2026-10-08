@@ -56,3 +56,15 @@ class DiagnosticsTests(unittest.TestCase):
         metadata = provider_error_metadata(body)
         self.assertEqual(metadata['retry_delay'], '3s')
         self.assertNotIn('SECRET', json.dumps(metadata))
+
+    def test_anonymized_export_replaces_account_addresses_consistently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'gateway-diagnostics.jsonl').write_text('{"account":"owner@example.com"}\n')
+            controller = SimpleNamespace(data_dir=root, quota_wait_status=lambda: {'jobs':[]},
+                accounts=lambda: [{'name':'owner@example.com','disabled':False}])
+            result = export_diagnostics(controller, root / 'export.zip', anonymize=True)
+            with zipfile.ZipFile(result) as archive:
+                for name in archive.namelist():
+                    self.assertNotIn('owner@example.com', archive.read(name).decode())
+                    self.assertIn('account-1', archive.read(name).decode())

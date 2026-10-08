@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import urllib.error
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
@@ -17,7 +18,7 @@ from backend import dpapi, atomic_write, Controller
 from integrations import Integrations
 
 
-def prepare_update(root):
+def prepare_update(root, automatic=False):
     root = Path(root)
     secret = root / 'GeminiAccounts' / 'management-key.dpapi'
     if secret.exists():
@@ -28,20 +29,27 @@ def prepare_update(root):
                 if json.load(response).get('jobs'):
                     raise RuntimeError('Requests are running. Wait for them to finish before updating.')
         except OSError:
-            pass
+            if automatic:
+                raise RuntimeError('Cannot verify that the gateway is idle. Update postponed.')
+        if automatic:
+            request = urllib.request.Request('http://127.0.0.1:8317/v0/management/update-lock',
+                data=b'', headers={'Authorization': 'Bearer ' + key}, method='POST')
+            with urllib.request.urlopen(request, timeout=3) as response:
+                if not json.load(response).get('locked'):
+                    raise RuntimeError('Could not reserve the gateway for updating.')
     env = os.environ.copy()
     env['GEMINI_ACCOUNTS_UPDATE_PATHS'] = json.dumps([str(root / 'GeminiAccounts' / 'GeminiAccounts.exe'), str(root / 'ClaudeGemini' / 'GeminiQuotaQueue.exe'), str(root / 'ClaudeGemini' / 'cli-proxy-api.exe')])
     subprocess.run(['powershell.exe', '-NoProfile', '-Command', '$paths=ConvertFrom-Json $env:GEMINI_ACCOUNTS_UPDATE_PATHS; Get-CimInstance Win32_Process | Where-Object {$_.ExecutablePath -in $paths} | ForEach-Object {Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue}'], env=env, creationflags=subprocess.CREATE_NO_WINDOW, check=True)
 
 
-def install(payload, root, shortcuts=True):
+def install(payload, root, shortcuts=True, automatic=False):
     payload, root = Path(payload), Path(root)
     manager, proxy = root / 'GeminiAccounts', root / 'ClaudeGemini'
     manager.mkdir(parents=True, exist_ok=True)
     proxy.mkdir(parents=True, exist_ok=True)
     (proxy / 'auth').mkdir(exist_ok=True)
     if shortcuts and (proxy / 'config.yaml').exists():
-        prepare_update(root)
+        prepare_update(root, automatic=automatic)
     for name, dest in [('GeminiAccounts.exe', manager), ('GeminiQuotaQueue.exe', proxy),
                        ('cli-proxy-api.exe', proxy), ('start-proxy.ps1', proxy), ('CLIProxyAPI-LICENSE.txt', proxy)]:
         for attempt in range(15):
@@ -89,6 +97,29 @@ def install(payload, root, shortcuts=True):
 def main():
     payload = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'payload'
     root = Controller().data_dir.parent
+    if '--auto-update' in sys.argv:
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--auto-update', action='store_true')
+        parser.add_argument('--root', required=True)
+        args = parser.parse_args()
+        root = Path(args.root).resolve()
+        controller = Controller(proxy_dir=root / 'ClaudeGemini', data_dir=root / 'GeminiAccounts')
+        from gateway_diagnostics import Diagnostics
+        log = Diagnostics(controller.data_dir / 'gateway-diagnostics.jsonl')
+        try:
+            executable = install(payload, root, automatic=True)
+            subprocess.Popen([str(executable)], creationflags=subprocess.CREATE_NO_WINDOW)
+        except Exception as error:
+            log.record('update', 'update_failed', exception_type=type(error).__name__)
+            try:
+                key = dpapi((controller.data_dir / 'management-key.dpapi').read_bytes(), decrypt=True).decode()
+                request = urllib.request.Request('http://127.0.0.1:8317/v0/management/update-lock',
+                    headers={'Authorization':'Bearer ' + key}, method='DELETE')
+                urllib.request.urlopen(request, timeout=3).close()
+            except Exception:
+                pass
+        return
     window = tk.Tk()
     window.title('Install Gemini Accounts')
     window.geometry('510x270')
