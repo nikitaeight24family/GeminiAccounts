@@ -4,7 +4,7 @@ Google Antigravity account manager with Gemini / Claude quota monitoring and a l
 
 ## Windows desktop: three steps
 
-<img src="docs/compact-panel.png" alt="Compact panel with verification controls, model names, independent Gemini and Claude selections, and pooled quotas" width="320">
+<img src="docs/compact-panel.png" alt="Current compact panel with demo accounts, verification controls, recent model names, and pooled quotas" width="320">
 
 Screenshot uses demo accounts and example quota values.
 
