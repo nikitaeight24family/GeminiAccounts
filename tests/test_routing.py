@@ -35,6 +35,21 @@ class RoutingTests(unittest.TestCase):
         self.assertAlmostEqual(result[1]['remaining'], 1)
         self.assertEqual(quota_projection(entries, now), [])
 
+    def test_weekly_exhaustion_blocks_full_partial_and_expired_five_hour_buckets(self):
+        now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+        week = (now + timedelta(days=3)).isoformat()
+        for remaining in (0, .5, 1):
+            for hours in (-1, 2):
+                with self.subTest(remaining=remaining, hours=hours):
+                    result = quota_projection([{'remaining': remaining,
+                        'reset': (now + timedelta(hours=hours)).isoformat(),
+                        'weekly_remaining': 0, 'weekly_reset': week}], now)
+                    self.assertEqual(result, [{'reset': week, 'remaining': 1}])
+        later = (now + timedelta(days=4)).isoformat()
+        self.assertEqual(quota_projection([{'remaining': 0, 'reset': later,
+            'weekly_remaining': 0, 'weekly_reset': week}], now)[0]['reset'], later)
+        self.assertEqual(quota_projection([{'remaining': 1, 'weekly_remaining': 0}], now), [])
+
     def test_projection_restores_each_account_and_waits_for_weekly_reset(self):
         now = datetime(2026, 10, 7, tzinfo=timezone.utc)
         def entry(remaining, hours, weekly=1):

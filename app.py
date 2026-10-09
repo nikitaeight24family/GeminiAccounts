@@ -834,7 +834,7 @@ class App(ctk.CTk):
                     bucket = next(b for b in group['buckets'] if b['window'] == '5h')
                     value = bucket.get('remaining')
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1:
-                        values.append(value)
+                        values.append(0 if weekly_value == 0 else value)
                         entries.append({'remaining': value, 'reset': bucket.get('reset'),
                             'weekly_remaining': weekly.get('remaining'), 'weekly_reset': weekly.get('reset')})
         # Equal account shares: 100% means every included account is full.

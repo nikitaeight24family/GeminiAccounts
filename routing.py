@@ -16,23 +16,31 @@ def quota_projection(entries, now=None, exhausted_only=True):
     now = now or datetime.now(timezone.utc)
     if not entries:
         return []
-    total = sum(entry['remaining'] for entry in entries)
+    total = sum(0 if entry.get('weekly_remaining') == 0 else entry['remaining'] for entry in entries)
     increases = {}
     for entry in entries:
-        if entry['remaining'] >= 1 or (exhausted_only and entry['remaining'] != 0):
-            continue
-        moment = reset_date(entry.get('reset'))
-        if not moment or moment <= now:
-            continue
         weekly = entry.get('weekly_remaining')
-        if weekly is None:
-            continue
+        moment = reset_date(entry.get('reset'))
         if weekly == 0:
+            # A full 5h bucket is unusable while the weekly bucket is empty.
             weekly_reset = reset_date(entry.get('weekly_reset'))
             if not weekly_reset or weekly_reset <= now:
                 continue
-            moment = max(moment, weekly_reset)
-        increases[moment] = increases.get(moment, 0) + 1 - entry['remaining']
+            if moment:
+                moment = max(moment, weekly_reset)
+                increase = 1
+            else:
+                moment = weekly_reset
+                increase = entry['remaining']
+            if increase <= 0:
+                continue
+        else:
+            if entry['remaining'] >= 1 or (exhausted_only and entry['remaining'] != 0):
+                continue
+            if weekly is None or not moment or moment <= now:
+                continue
+            increase = 1 - entry['remaining']
+        increases[moment] = increases.get(moment, 0) + increase
     result = []
     for moment, increase in sorted(increases.items()):
         total += increase
