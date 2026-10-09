@@ -35,6 +35,22 @@ class RoutingTests(unittest.TestCase):
         self.assertAlmostEqual(result[1]['remaining'], 1)
         self.assertEqual(quota_projection(entries, now), [])
 
+    def test_provider_weekly_lock_overrides_dust_remaining_without_crossing_families(self):
+        from routing import quota_entry
+        now = datetime(2026, 10, 9, tzinfo=timezone.utc)
+        week = (now + timedelta(days=4)).isoformat()
+        bucket = {'remaining': 1, 'reset': (now + timedelta(hours=2)).isoformat()}
+        weekly = {'remaining': .0023603332, 'reset': week}
+        account = {'cooldowns': [{'scope': 'model', 'model_key': 'gemini-pro-agent',
+                    'reason': 'quota', 'retry_at': week}]}
+        entry = quota_entry(account, bucket, weekly, 'gemini', now)
+        self.assertEqual(entry['remaining'], 0)
+        self.assertEqual(quota_projection([entry], now), [{'remaining': 1, 'reset': week}])
+        account['cooldowns'][0]['model_key'] = 'claude-opus-4-6-thinking'
+        self.assertEqual(quota_entry(account, bucket, weekly, 'gemini', now)['remaining'], 1)
+        account['cooldowns'][0].update(model_key='gemini-pro-agent', retry_at=(now - timedelta(seconds=1)).isoformat())
+        self.assertEqual(quota_entry(account, bucket, weekly, 'gemini', now)['remaining'], 1)
+
     def test_weekly_exhaustion_blocks_full_partial_and_expired_five_hour_buckets(self):
         now = datetime(2026, 10, 9, tzinfo=timezone.utc)
         week = (now + timedelta(days=3)).isoformat()

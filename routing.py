@@ -11,6 +11,26 @@ def reset_date(value):
         return None
 
 
+def quota_entry(account, bucket, weekly, group, now=None):
+    """Apply explicit provider quota restrictions before pooling a model family."""
+    now = now or datetime.now(timezone.utc)
+    entry = {'remaining': bucket['remaining'], 'reset': bucket.get('reset'),
+             'weekly_remaining': weekly.get('remaining'), 'weekly_reset': weekly.get('reset')}
+    blocked = []
+    for cooldown in account.get('cooldowns') or []:
+        model = str(cooldown.get('model_key') or '').lower()
+        matches = cooldown.get('scope') == 'credential' or (
+            model.startswith('gemini') if group == 'gemini' else model.startswith(('claude', 'gpt')))
+        retry = reset_date(cooldown.get('retry_at'))
+        if matches and cooldown.get('reason') == 'quota' and retry and retry > now:
+            blocked.append(retry)
+    if blocked:
+        entry['remaining'] = 0
+        reset = reset_date(entry['reset'])
+        entry['reset'] = max(blocked + ([reset] if reset else [])).isoformat()
+    return entry
+
+
 def quota_projection(entries, now=None, exhausted_only=True):
     """Potential pooled quota after known resets; usage can change this estimate."""
     now = now or datetime.now(timezone.utc)

@@ -17,7 +17,7 @@ from tkinter import messagebox, filedialog, simpledialog
 from tkinter import Canvas, font as tkfont
 from backend import Controller, AccountError
 from activity import Activity
-from routing import rank_accounts, quota_projection
+from routing import rank_accounts, quota_projection, quota_entry
 from integrations import Integrations
 from model_names import model_name
 
@@ -834,9 +834,9 @@ class App(ctk.CTk):
                     bucket = next(b for b in group['buckets'] if b['window'] == '5h')
                     value = bucket.get('remaining')
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1:
-                        values.append(0 if weekly_value == 0 else value)
-                        entries.append({'remaining': value, 'reset': bucket.get('reset'),
-                            'weekly_remaining': weekly.get('remaining'), 'weekly_reset': weekly.get('reset')})
+                        entry = quota_entry(account, bucket, weekly, 'gemini')
+                        values.append(0 if weekly_value == 0 else entry['remaining'])
+                        entries.append(entry)
         # Equal account shares: 100% means every included account is full.
         weekly_remaining = sum(weekly_values) / len(weekly_values) if weekly_values else None
         weekly_title = 'Gemini · 1w · pooled remaining'
