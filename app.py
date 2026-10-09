@@ -601,8 +601,8 @@ class App(ctk.CTk):
         accounts = sorted(self.items, key=lambda a: (a.get('access_issue') != 'verification',
             0 if a.get('access_issue') == 'verification' else self.account_reset_order(a['name'])))
         names = [a['name'] for a in accounts]
-        layout = [(a['name'], a.get('access_issue') == 'verification') for a in accounts]
-        pending_count = sum(pending for _, pending in layout)
+        layout = [(a['name'], (a.get('access_issue') == 'verification', self.quota_layout(a['name']))) for a in accounts]
+        pending_count = sum(a.get('access_issue') == 'verification' for a in accounts)
         if len(names) < 11:
             self.account_list._scrollbar.grid_remove()
         else:
@@ -674,13 +674,14 @@ class App(ctk.CTk):
             self.account_widgets[account['name']] = widgets
             groups = self.quota_groups(account['name'])
             for group in groups:
-                for bucket in sorted(group['buckets'], key=lambda b: b['window'] != '5h'):
+                visible_buckets = sorted(self.visible_quota_buckets(group), key=lambda b: b['window'] != '5h')
+                for bucket in visible_buckets:
                     remaining = bucket.get('remaining')
                     text = self.sidebar_quota_text(group, bucket)
                     header = ctk.CTkFrame(quota_frame, fg_color='transparent')
                     header.pack(fill='x', padx=3, pady=(3 if group['kind'] == 'claude' and bucket['window'] == '5h' else 0, 0))
                     header.grid_columnconfigure(2, weight=1)
-                    icon = ctk.CTkLabel(header, text='', image=self.provider_icons[group['kind']] if bucket['window'] == '5h' else None, height=14, width=14)
+                    icon = ctk.CTkLabel(header, text='', image=self.provider_icons[group['kind']] if bucket is visible_buckets[0] else None, height=14, width=14)
                     icon.grid(row=0, column=0, padx=(0, 4))
                     label = ctk.CTkLabel(header, text=text, height=14, width=76, font=('Segoe UI', 11), text_color=self.quota_color(remaining), anchor='w')
                     label.grid(row=0, column=1, sticky='w')
@@ -814,6 +815,18 @@ class App(ctk.CTk):
                 buckets.get('weekly', {'window': 'weekly'})]})
         return result
 
+    @staticmethod
+    def visible_quota_buckets(group):
+        weekly = next((bucket.get('remaining') for bucket in group['buckets']
+                       if bucket.get('window') == 'weekly'), None)
+        hide_five_hour = isinstance(weekly, (int, float)) and not isinstance(weekly, bool) and 0 <= weekly < .01
+        return [bucket for bucket in group['buckets']
+                if not (hide_five_hour and bucket.get('window') == '5h')]
+
+    def quota_layout(self, name):
+        return tuple((group['kind'], bucket['window']) for group in self.quota_groups(name)
+                     for bucket in self.visible_quota_buckets(group))
+
     def update_total_quota(self):
         accounts = [a for a in self.items if not a.get('disabled')]
         values = []
@@ -835,7 +848,10 @@ class App(ctk.CTk):
                     value = bucket.get('remaining')
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1:
                         entry = quota_entry(account, bucket, weekly, 'gemini')
-                        values.append(0 if weekly_value == 0 else entry['remaining'])
+                        depleted_weekly = isinstance(weekly_value, (int, float)) and not isinstance(weekly_value, bool) and 0 <= weekly_value < .01
+                        values.append(0 if depleted_weekly else entry['remaining'])
+                        if depleted_weekly:
+                            entry['weekly_remaining'] = 0
                         entries.append(entry)
         # Equal account shares: 100% means every included account is full.
         weekly_remaining = sum(weekly_values) / len(weekly_values) if weekly_values else None
@@ -975,7 +991,7 @@ class App(ctk.CTk):
         else:
             widgets['verification_frame'].pack_forget()
         for group in self.quota_groups(account['name']):
-            for bucket in group['buckets']:
+            for bucket in self.visible_quota_buckets(group):
                 label, bar = widgets['quotas'][(group['kind'], bucket['window'])]
                 remaining = bucket.get('remaining')
                 label.configure(text=self.sidebar_quota_text(group, bucket), text_color=self.quota_color(remaining))
@@ -1015,7 +1031,7 @@ class App(ctk.CTk):
         # Fixed scales keep long waits red even when they are the earliest in the pool.
         bounds = {'5h': (0, 5 * 3600), 'weekly': (0, 7 * 86400)}
         for group in self.quota_groups(name):
-            for bucket in group['buckets']:
+            for bucket in self.visible_quota_buckets(group):
                 label = widgets['countdown'][(group['kind'], bucket['window'])]
                 duration = self.time_until_reset(bucket.get('reset'), now, days_only=bucket['window'] == 'weekly')
                 text = duration
@@ -1254,9 +1270,10 @@ class App(ctk.CTk):
         self.quota_updated = self.label(self.detail, 'Loading Google quotas…', 12, MUTED)
         self.quota_updated.configure(wraplength=0)
         data = (cached or {}).get('data', {})
+        self.detail_quota_layout = self.quota_layout(account['name'])
         for group in self.quota_groups(account['name']):
             self.label(self.detail, group['name'], 15, bold=True)
-            for bucket in sorted(group['buckets'], key=lambda b: b['window'] != '5h'):
+            for bucket in sorted(self.visible_quota_buckets(group), key=lambda b: b['window'] != '5h'):
                 self.detail_quota_widgets[(group['kind'], bucket['window'])] = self.quota_row('Weekly quota' if bucket['window'] == 'weekly' else '5-hour quota', bucket)
         self.label(self.detail, 'Bars show remaining quota: full = 100%. Missing percentages are shown as No data.', 12, MUTED)
         actions = ctk.CTkFrame(self.detail, fg_color='transparent')
@@ -1366,8 +1383,11 @@ class App(ctk.CTk):
             self.quota_updated.configure(text=text[:92] + ('…' if len(text) > 92 else ''), text_color='#ffbd93')
         else:
             self.quota_updated.configure(text_color=MUTED)
+        if getattr(self, 'detail_quota_layout', None) != self.quota_layout(self.selected):
+            self.draw_detail()
+            return
         for group in self.quota_groups(self.selected):
-            for bucket in group['buckets']:
+            for bucket in self.visible_quota_buckets(group):
                 self.update_quota_row(self.detail_quota_widgets[(group['kind'], bucket['window'])], bucket)
         for model, widgets in self.model_widgets.items():
             self.update_quota_row(widgets, data.get('models', {}).get(model))

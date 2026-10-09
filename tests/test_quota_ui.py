@@ -22,6 +22,15 @@ class QuotaUITests(unittest.TestCase):
         self.controller_patch.stop()
         self.temp.cleanup()
 
+    def test_five_hour_rows_hide_below_one_percent_weekly(self):
+        group = {'buckets': [{'window': '5h', 'remaining': 1},
+                             {'window': 'weekly', 'remaining': .0099}]}
+        self.assertEqual([b['window'] for b in App.visible_quota_buckets(group)], ['weekly'])
+        group['buckets'][1]['remaining'] = .01
+        self.assertEqual([b['window'] for b in App.visible_quota_buckets(group)], ['5h', 'weekly'])
+        group['buckets'][1]['remaining'] = None
+        self.assertEqual(len(App.visible_quota_buckets(group)), 2)
+
     def test_model_picker_offers_high_and_other_families_and_applies_exact_id(self):
         import customtkinter as ctk
         from integrations import Integrations
