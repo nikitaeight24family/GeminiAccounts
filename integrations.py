@@ -87,6 +87,27 @@ class Integrations:
                 self.write_json(path, preset)
         return changed
 
+    def repair_desktop_fast_slot(self):
+        """Explicit repair of our preset, preserving credentials and all other slots."""
+        if not self.legacy_desktop_preset():
+            return False
+        path = self.paths()['claude_desktop'][2]
+        preset = self.read_json(path)
+        models = preset.setdefault('inferenceModels', [])
+        flash = {'name': 'gemini-3-flash', 'labelOverride': 'Gemini · 3 Flash',
+                 'anthropicFamilyTier': 'haiku', 'isFamilyDefault': True,
+                 'supports1m': True, 'prefer1m': True}
+        indices = [i for i, m in enumerate(models) if m.get('anthropicFamilyTier') == 'haiku'
+                   or m.get('name') in ('claude-haiku-4-5', 'gemini-3-flash')]
+        if len(indices) == 1 and models[indices[0]] == flash:
+            return False
+        models[:] = [m for i, m in enumerate(models) if i not in indices]
+        models.insert(indices[0] if indices else len(models), flash)
+        with self.lock:
+            self.remember([path])
+            self.write_json(path, preset)
+        return True
+
     def backups(self):
         if not self.backup_path.exists():
             return {}
@@ -155,7 +176,7 @@ class Integrations:
             'ANTHROPIC_AUTH_TOKEN': key, 'ANTHROPIC_API_KEY': '',
             'ANTHROPIC_MODEL': gemini,
             'ANTHROPIC_DEFAULT_SONNET_MODEL': gemini,
-            'ANTHROPIC_DEFAULT_HAIKU_MODEL': claude if self.controller.preferences.get('claude-model') else client_model_id('claude-haiku-4-5', self.controller.model_aliases().get('claude-haiku-4-5', 'gemini-3-flash')),
+            'ANTHROPIC_DEFAULT_HAIKU_MODEL': client_model_id('gemini-3-flash', 'gemini-3-flash'),
             'ANTHROPIC_DEFAULT_OPUS_MODEL': claude if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
             'API_TIMEOUT_MS': '604800000', 'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
         })
@@ -194,7 +215,8 @@ class Integrations:
         from model_names import model_name
         models = [('claude-sonnet-4-5', 'Gemini · ' + model_name(family_models['gemini'], {}), 'sonnet', True),
                   ('claude-selected' if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
-                   'Claude · ' + model_name(family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking', {}), 'opus', True)]
+                   'Claude · ' + model_name(family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking', {}), 'opus', True),
+                  ('gemini-3-flash', 'Gemini · 3 Flash', 'haiku', True)]
         self.write_json(preset, {
             'deploymentDisplayName': 'Gemini Accounts', 'inferenceCredentialKind': 'static',
             'modelDiscoveryEnabled': False, 'inferenceGatewayAuthScheme': 'bearer',
@@ -203,9 +225,9 @@ class Integrations:
             'claudeAiImport': {'bannerBehavior': 'detect', 'exportEnabled': True, 'enabled': True},
             'inferenceModels': [
                 {'name': name, 'labelOverride': label, 'anthropicFamilyTier': tier, 'isFamilyDefault': default,
-                 'supports1m': extended_context(family_models['gemini'] if tier == 'sonnet' else
+                 'supports1m': extended_context('gemini-3-flash' if tier == 'haiku' else family_models['gemini'] if tier == 'sonnet' else
                      family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking'),
-                 'prefer1m': extended_context(family_models['gemini'] if tier == 'sonnet' else
+                 'prefer1m': extended_context('gemini-3-flash' if tier == 'haiku' else family_models['gemini'] if tier == 'sonnet' else
                      family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking')}
                 for name, label, tier, default in models],
         })

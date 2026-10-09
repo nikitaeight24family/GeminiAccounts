@@ -91,6 +91,22 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(models[0]['prefer1m'])
         self.assertFalse(models[1]['supports1m'])
         self.assertFalse(models[1]['prefer1m'])
+        self.assertEqual(models[2]['name'], 'gemini-3-flash')
+        self.assertEqual(env['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'gemini-3-flash[1m]')
+
+    def test_fast_slot_repair_preserves_other_models_and_restores_backup(self):
+        self.client.apply(['claude_desktop'])
+        path = self.client.paths()['claude_desktop'][2]
+        preset = self.client.read_json(path)
+        preset['inferenceModels'][2]['name'] = 'claude-haiku-4-5'
+        preset['inferenceModels'][2]['labelOverride'] = 'Gemini · 3.1 Pro High'
+        self.client.write_json(path, preset)
+        self.assertTrue(self.client.repair_desktop_fast_slot())
+        changed = self.client.read_json(path)
+        self.assertEqual(changed['inferenceModels'][:2], preset['inferenceModels'][:2])
+        self.assertEqual(changed['inferenceModels'][2]['name'], 'gemini-3-flash')
+        self.assertEqual(changed['inferenceGatewayApiKey'], preset['inferenceGatewayApiKey'])
+        self.assertFalse(self.client.repair_desktop_fast_slot())
 
     def test_unrelated_gateway_is_not_adopted(self):
         library = self.client.local / 'Claude-3p' / 'configLibrary'
