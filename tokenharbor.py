@@ -1,5 +1,6 @@
 """Optional TokenHarbor free-route connection for Claude clients."""
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -24,6 +25,16 @@ class TokenHarbor:
     def config(self):
         path = self.controller.proxy_dir / 'config.yaml'
         return path, yaml.safe_load(path.read_text('utf-8-sig'))
+
+    @staticmethod
+    def write_live_config(path, data):
+        """Keep the watched file in place so CLIProxyAPI reloads its configuration."""
+        with path.open('r+b') as config_file:
+            config_file.seek(0)
+            config_file.write(data)
+            config_file.truncate()
+            config_file.flush()
+            os.fsync(config_file.fileno())
 
     def connected(self):
         try:
@@ -116,7 +127,7 @@ class TokenHarbor:
                                'anthropicFamilyTier': 'haiku', 'isFamilyDefault': False,
                                'supports1m': True, 'prefer1m': True})
             try:
-                atomic_write(path, yaml.safe_dump(config, sort_keys=False).encode())
+                self.write_live_config(path, yaml.safe_dump(config, sort_keys=False).encode())
                 # CLIProxyAPI hot-reloads the file; confirm its model menu includes the new route.
                 for _ in range(20):
                     try:
@@ -144,7 +155,7 @@ class TokenHarbor:
                 if preset_path:
                     self.integrations.write_json(preset_path, preset)
             except Exception:
-                atomic_write(path, previous)
+                self.write_live_config(path, previous)
                 if preset_path:
                     atomic_write(preset_path, original_preset)
                 raise
@@ -159,7 +170,7 @@ class TokenHarbor:
             removed = len(kept) != len(groups)
             if removed:
                 config['api-keys']['claude'] = kept
-                atomic_write(path, yaml.safe_dump(config, sort_keys=False).encode())
+                self.write_live_config(path, yaml.safe_dump(config, sort_keys=False).encode())
             if update_desktop:
                 preset_path = self.approved_desktop_preset()
                 if preset_path:

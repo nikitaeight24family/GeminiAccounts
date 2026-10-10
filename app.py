@@ -1675,7 +1675,6 @@ class App(ctk.CTk):
                        'The selected model remains unchanged until you choose Haiku in Claude. Continue?')
             if not messagebox.askyesno('Connect TokenHarbor?', warning, parent=window):
                 return
-            entry.delete(0, 'end')
             connect_button.configure(state='disabled')
             status.configure(text='Checking the free model and connecting…', text_color=MUTED)
             def perform():
@@ -1691,6 +1690,7 @@ class App(ctk.CTk):
                 if error:
                     status.configure(text=error, text_color='#ffbd93')
                     return
+                entry.delete(0, 'end')
                 disconnect_button.configure(state='normal')
                 status.configure(text='Free model connected. Choose it in Claude Code /model or the Code tab.',
                                  text_color=GREEN)
