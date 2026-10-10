@@ -616,6 +616,7 @@ class App(ctk.CTk):
             return
         for child in frame.winfo_children():
             child.destroy()
+        self.tokenharbor_widgets = []
         client = TokenHarbor(self.controller, self.integrations)
         keys = client.keys()
         header = ctk.CTkLabel(frame, text=f'TokenHarbor · keys {len(keys)}', height=18,
@@ -631,6 +632,7 @@ class App(ctk.CTk):
                 anchor='w', font=('Segoe UI', 11), text_color=TEXT).pack(fill='x', padx=8, pady=(3, 0))
             ctk.CTkLabel(card, text='Haiku 5.5 Free · gateway rotation', height=17,
                 anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(fill='x', padx=8, pady=(0, 3))
+            self.tokenharbor_widgets.append(card)
         add = self.button(frame, '+ Add TokenHarbor account', lambda: self.tokenharbor_settings(self))
         add.configure(height=24, fg_color='#303e59')
         add.pack(fill='x', padx=1, pady=(2, 0))
@@ -1308,6 +1310,15 @@ class App(ctk.CTk):
             elif widgets.pop('rainbow_size', None):
                 card._canvas.delete('rainbow')
                 widgets.pop('rainbow_segments', None)
+        harbor_active = any(job.get('state') == 'running' and
+                            'tokenharbor' in (job.get('model') or '').lower()
+                            for job in getattr(self, 'gateway_jobs', []))
+        for card in getattr(self, 'tokenharbor_widgets', []):
+            card.configure(border_color=ACCENT if harbor_active else '#344155')
+            if harbor_active:
+                card.configure(border_width=2)
+            else:
+                card.configure(border_width=1)
         self.after(100, self.animate_active_borders)
 
     def display_name(self, account):
