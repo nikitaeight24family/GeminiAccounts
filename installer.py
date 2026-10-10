@@ -15,7 +15,6 @@ from tkinter import messagebox
 import bcrypt
 import yaml
 from backend import dpapi, atomic_write, Controller
-from integrations import Integrations
 
 
 def prepare_update(root, automatic=False):
@@ -133,34 +132,13 @@ def main():
     window.geometry('510x270')
     window.configure(bg='#191f2b')
     tk.Label(window, text='Gemini Accounts', font=('Segoe UI', 24, 'bold'), bg='#191f2b', fg='#edf2fa').pack(pady=(25, 15))
-    tk.Label(window, text='Account manager and local Claude / Codex connection.\nClient settings are changed only with your consent.\nUpdating restarts Gemini Accounts services.\nSaved sign-ins and configurations are preserved.', font=('Segoe UI', 11), bg='#191f2b', fg='#9daec4').pack()
+    tk.Label(window, text='Account manager and local Claude connection.\nConnect applications explicitly from Gemini Accounts after installation.\nUpdating restarts Gemini Accounts services.\nSaved sign-ins and configurations are preserved.', font=('Segoe UI', 11), bg='#191f2b', fg='#9daec4').pack()
     def perform():
         button.configure(state='disabled', text='Installing…')
         window.update_idletasks()
         try:
             controller = Controller(proxy_dir=root / 'ClaudeGemini', data_dir=root / 'GeminiAccounts')
-            integrations = Integrations(controller)
-            backups = integrations.backups()
-            clients = [name for name, paths in integrations.paths().items()
-                       if any(str(p.resolve()) in backups for p in paths)]
-            codex_config = integrations.paths()['codex'][0]
-            try:
-                managed_codex = '# BEGIN Gemini Accounts managed provider' in codex_config.read_text('utf-8-sig')
-            except OSError:
-                managed_codex = False
-            if not managed_codex and 'codex' in clients:
-                clients.remove('codex')
-            if integrations.legacy_desktop_preset() and 'claude_desktop' not in clients:
-                clients.append('claude_desktop')
-            update_clients = clients and messagebox.askyesno('Update connected applications?',
-                'Update connected client model names and context windows?\n\n'
-                'This modifies their configuration files. Original settings are backed up and can be restored '
-                'from Gemini Accounts. Restart clients afterwards to load the changes.', parent=window)
-            if update_clients:
-                integrations.available_model_choices = integrations.gemini_model_choices()
             executable = install(payload, root)
-            if update_clients:
-                integrations.apply(clients)
             subprocess.Popen([str(executable)], creationflags=subprocess.CREATE_NO_WINDOW)
             window.destroy()
         except Exception as error:
