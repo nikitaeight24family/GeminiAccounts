@@ -99,10 +99,6 @@ class App(ctk.CTk):
         self.add_button = self.button(self.sidebar, '+  Add Google account', self.add_account, primary=True)
         self.add_button.configure(height=30)
         self.add_button.pack(fill='x', padx=16, pady=(0, 6))
-        tokenharbor_button = self.button(self.sidebar, 'TokenHarbor · Haiku 5.5 Free',
-                                         lambda: self.tokenharbor_settings(self))
-        tokenharbor_button.configure(height=30)
-        tokenharbor_button.pack(fill='x', padx=16, pady=(0, 6))
         self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.tokenharbor_accounts.pack(fill='x', padx=12, pady=(0, 5))
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
