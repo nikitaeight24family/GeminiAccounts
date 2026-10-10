@@ -103,6 +103,8 @@ class App(ctk.CTk):
                                          lambda: self.tokenharbor_settings(self))
         tokenharbor_button.configure(height=30)
         tokenharbor_button.pack(fill='x', padx=16, pady=(0, 6))
+        self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        self.tokenharbor_accounts.pack(fill='x', padx=12, pady=(0, 5))
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
         self.account_list.pack(fill='both', expand=True, padx=12)
         self.account_list._scrollbar.grid_remove()
@@ -607,7 +609,34 @@ class App(ctk.CTk):
             self.journal_content = content
         self.stats_observed.configure(text='Monitoring since ' + self.activity_time(state['since']) + ' (local time). The log persists after closing; monitoring runs while the application is open. The latest 2000 events are kept.')
 
+    def draw_tokenharbor_accounts(self):
+        """Show configured TokenHarbor keys beside Google accounts."""
+        frame = getattr(self, 'tokenharbor_accounts', None)
+        if frame is None:
+            return
+        for child in frame.winfo_children():
+            child.destroy()
+        client = TokenHarbor(self.controller, self.integrations)
+        keys = client.keys()
+        header = ctk.CTkLabel(frame, text=f'TokenHarbor · keys {len(keys)}', height=18,
+            anchor='w', font=('Segoe UI', 11, 'bold'), text_color='#f7ca70')
+        header.pack(fill='x', padx=6, pady=(2, 3))
+        if not keys:
+            ctk.CTkLabel(frame, text='No TokenHarbor keys connected', height=17,
+                anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(fill='x', padx=8, pady=(0, 3))
+        for key in keys:
+            card = ctk.CTkFrame(frame, fg_color='#202938', corner_radius=8, border_width=1, border_color='#344155')
+            card.pack(fill='x', padx=1, pady=(0, 2))
+            ctk.CTkLabel(card, text='●  ' + key[:7] + '…' + key[-4:], height=20,
+                anchor='w', font=('Segoe UI', 11), text_color=TEXT).pack(fill='x', padx=8, pady=(3, 0))
+            ctk.CTkLabel(card, text='Haiku 5.5 Free · gateway rotation', height=17,
+                anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(fill='x', padx=8, pady=(0, 3))
+        add = self.button(frame, '+ Add TokenHarbor account', lambda: self.tokenharbor_settings(self))
+        add.configure(height=24, fg_color='#303e59')
+        add.pack(fill='x', padx=1, pady=(2, 0))
+
     def draw_account_list(self):
+        self.draw_tokenharbor_accounts()
         self.update_total_quota()
         accounts = sorted(self.items, key=self.account_sort_key)
         names = [a['name'] for a in accounts]
@@ -1714,6 +1743,7 @@ class App(ctk.CTk):
                 entry.delete(0, 'end')
                 disconnect_button.configure(state='normal')
                 refresh_keys()
+                self.draw_tokenharbor_accounts()
                 status.configure(text='Free model connected. Choose it in Claude Code /model or the Code tab.',
                                  text_color=GREEN)
                 if desktop_updated and messagebox.askyesno('Reload Claude model menu?',
@@ -1735,6 +1765,7 @@ class App(ctk.CTk):
                     status.configure(text='TokenHarbor removed. Restart Claude Desktop to refresh its menu.',
                                      text_color=GREEN)
                     disconnect_button.configure(state='disabled')
+                self.draw_tokenharbor_accounts()
             self.work(client.disconnect, done, mutation=True)
         disconnect_button = self.button(window, 'Remove TokenHarbor connection', disconnect)
         disconnect_button.configure(state='normal' if client.connected() else 'disabled')
