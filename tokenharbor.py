@@ -44,6 +44,16 @@ class TokenHarbor:
         except (OSError, ValueError, AttributeError, yaml.YAMLError):
             return False
 
+    def keys(self):
+        try:
+            _, config = self.config()
+            group = next((g for g in config.get('api-keys', {}).get('claude', [])
+                          if g.get('name') == PROVIDER), {})
+            return [item.get('api-key') for item in group.get('keys', [])
+                    if isinstance(item, dict) and item.get('api-key')]
+        except (OSError, ValueError, AttributeError, yaml.YAMLError):
+            return []
+
     @staticmethod
     def verify_key(key):
         """Exercise the exact free Anthropic route before saving a credential."""
@@ -65,12 +75,14 @@ class TokenHarbor:
             raise AccountError('Could not reach TokenHarbor to check the free model.') from error
 
     @staticmethod
-    def group(key):
+    def group(keys):
+        if isinstance(keys, str):
+            keys = [keys]
         return {'name': PROVIDER, 'base-url': BASE_URL,
                 'models': [{'name': UPSTREAM_MODEL, 'alias': CLIENT_MODEL,
                             'display-name': DISPLAY_NAME, 'max-context-length': 1000000,
                             'force-mapping': True}],
-                'keys': [{'api-key': key}]}
+                'keys': [{'api-key': key} for key in keys]}
 
     def approved_desktop_preset(self):
         if not self.integrations.legacy_desktop_preset():
@@ -115,8 +127,11 @@ class TokenHarbor:
                    config.get('oauth', {}).get('model-alias', {}).values()
                    for item in channel):
                 raise AccountError('A Google model already uses the TokenHarbor model name.')
+            existing = self.keys()
+            if key not in existing:
+                existing.append(key)
             groups[:] = [group for group in groups if group.get('name') != PROVIDER]
-            groups.append(self.group(key))
+            groups.append(self.group(existing))
             preset_path = self.approved_desktop_preset()
             preset = self.integrations.read_json(preset_path) if preset_path else None
             original_preset = preset_path.read_bytes() if preset_path else None
@@ -160,6 +175,19 @@ class TokenHarbor:
                     atomic_write(preset_path, original_preset)
                 raise
             return bool(preset_path)
+
+    def remove_key(self, key):
+        with self.integrations.lock:
+            path, config = self.config()
+            groups = config.get('api-keys', {}).get('claude', [])
+            remaining = [item for item in self.keys() if item != key]
+            if remaining:
+                for group in groups:
+                    if group.get('name') == PROVIDER:
+                        group['keys'] = [{'api-key': item} for item in remaining]
+                self.write_live_config(path, yaml.safe_dump(config, sort_keys=False).encode())
+                return True
+        return self.disconnect()
 
     def disconnect(self, update_desktop=True):
         """Remove only the managed provider and its managed Claude menu entry."""

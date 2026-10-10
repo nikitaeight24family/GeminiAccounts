@@ -1650,6 +1650,27 @@ class App(ctk.CTk):
                               text_color=GREEN if client.connected() else MUTED,
                               wraplength=520, justify='left')
         status.pack(anchor='w', padx=24)
+        keys_frame = ctk.CTkFrame(window, fg_color='transparent')
+        keys_frame.pack(fill='x', padx=24, pady=(10, 0))
+        ctk.CTkLabel(keys_frame, text='Connected TokenHarbor keys (rotated by gateway)',
+                     text_color=TEXT, anchor='w').pack(fill='x')
+        def refresh_keys():
+            for child in keys_frame.winfo_children()[1:]:
+                child.destroy()
+            keys = client.keys()
+            if not keys:
+                ctk.CTkLabel(keys_frame, text='No keys connected', text_color=MUTED).pack(anchor='w', pady=3)
+            for key in keys:
+                row = ctk.CTkFrame(keys_frame, fg_color='transparent')
+                row.pack(fill='x', pady=2)
+                masked = key[:7] + '…' + key[-4:]
+                ctk.CTkLabel(row, text=masked, text_color=MUTED, anchor='w').pack(side='left', fill='x', expand=True)
+                self.button(row, 'Remove', lambda value=key: remove_key(value)).pack(side='right')
+        def remove_key(key):
+            if not messagebox.askyesno('Remove TokenHarbor key', 'Remove this key from the local gateway?', parent=window):
+                return
+            self.work(lambda: client.remove_key(key), lambda _: (refresh_keys(), status.configure(text='TokenHarbor key removed.', text_color=GREEN)), mutation=True)
+        refresh_keys()
         ctk.CTkLabel(window,
                      text='Free account API: 60 requests/minute, 1,800/hour.\n'
                           'Haiku campaign allowance and expiry: see TokenHarbor dashboard.',
@@ -1692,6 +1713,7 @@ class App(ctk.CTk):
                     return
                 entry.delete(0, 'end')
                 disconnect_button.configure(state='normal')
+                refresh_keys()
                 status.configure(text='Free model connected. Choose it in Claude Code /model or the Code tab.',
                                  text_color=GREEN)
                 if desktop_updated and messagebox.askyesno('Reload Claude model menu?',
