@@ -66,6 +66,7 @@ class App(ctk.CTk):
         self.drawn_models = None
         self.busy = False
         self.pending_login = None
+        self.model_route_error = None
         self.login_url = None
         self.activity = Activity(self.controller.data_dir / 'activity.json')
         self.activity_state = copy.deepcopy(self.activity.state)
@@ -284,6 +285,11 @@ class App(ctk.CTk):
         def load():
             if prepare or not self.controller.key:
                 self.controller.prepare()
+            if prepare:
+                try:
+                    self.integrations.reconcile_desktop_routes()
+                except (AccountError, OSError, ValueError) as error:
+                    self.model_route_error = str(error)
             return self.controller.accounts()
         self.work(load, self.loaded, mutation=True)
 
@@ -294,6 +300,8 @@ class App(ctk.CTk):
             self.after(500, self.connection_settings)
         self.items = items
         self.service.configure(text='●  Connected', text_color=GREEN)
+        if self.model_route_error:
+            self.notice.configure(text=self.model_route_error, text_color='#ffbd93')
         if self.selected not in {a['name'] for a in items}:
             self.selected = items[0]['name'] if items else None
         enabled = [a for a in items if not a['disabled']]

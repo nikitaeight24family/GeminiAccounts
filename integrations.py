@@ -66,6 +66,36 @@ class Integrations:
         if updated != entries:
             self.controller.request('/oauth-model-alias', 'PATCH', {'provider': 'antigravity', 'aliases': updated})
 
+    def reconcile_desktop_routes(self):
+        """Restore gateway routes for a previously approved Claude Desktop preset."""
+        if not self.legacy_desktop_preset():
+            return False
+        preset_path = self.paths()['claude_desktop'][2]
+        if str(preset_path.resolve()) not in self.backups():
+            return False
+        preset = self.read_json(preset_path)
+        routes = {entry.get('name') for entry in preset.get('inferenceModels', [])
+                  if isinstance(entry, dict) and isinstance(entry.get('name'), str)
+                  and re.fullmatch(r'claude-(?:sonnet|haiku)-4-5-ga-[a-z0-9-]+', entry['name'])}
+        if not routes:
+            return False
+        catalog_path = self.controller.proxy_dir / 'cliproxy-models.json'
+        catalog = self.read_json(catalog_path)
+        models = {entry['id'] for entry in catalog.get('antigravity', [])
+                  if isinstance(entry, dict) and isinstance(entry.get('id'), str)
+                  and entry['id'].startswith('gemini-')}
+        models.add(self.controller.selected_family_models()['gemini'])
+        known = {self.claude_desktop_route(model): model for model in models}
+        unresolved = routes - known.keys()
+        if unresolved:
+            raise AccountError('Connected Claude models are missing from the gateway catalog. Reconnect Claude Desktop from the application.')
+        live = self.controller.request('/oauth-model-alias').get('oauth-model-alias') or {}
+        aliases = {entry.get('alias'): entry.get('name') for entry in live.get('antigravity', [])}
+        if all(aliases.get(route) == known[route] for route in routes):
+            return False
+        self.configure_desktop_routes([known[route] for route in sorted(routes)], replace=False)
+        return True
+
     def detected(self):
         return {
             'claude_desktop': self.windows_desktop and any((self.local / p).exists() for p in ('AnthropicClaude', 'Claude-3p', 'Claude')),

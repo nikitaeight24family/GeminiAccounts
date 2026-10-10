@@ -140,6 +140,23 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(next(item['name'] for item in self.routes if item['alias'] == low), 'gemini-3.1-pro-low')
         self.assertFalse(any(item['alias'] == 'claude-sonnet-4-6' for item in self.routes))
 
+    def test_approved_desktop_routes_are_restored_after_gateway_restart(self):
+        self.client.write_json(self.controller.proxy_dir / 'cliproxy-models.json',
+                               {'antigravity': [{'id': 'gemini-3.1-pro-low'}, {'id': 'gemini-3-flash'}]})
+        self.client.apply(['claude_desktop'])
+        expected = {entry['alias']: entry['name'] for entry in self.routes if '-ga-' in entry['alias']}
+        self.assertTrue(expected)
+        self.routes = [entry for entry in self.routes if '-ga-' not in entry['alias']]
+        self.assertTrue(self.client.reconcile_desktop_routes())
+        self.assertEqual({entry['alias']: entry['name'] for entry in self.routes if '-ga-' in entry['alias']}, expected)
+        self.assertFalse(self.client.reconcile_desktop_routes())
+
+    def test_desktop_routes_are_not_created_without_approved_setup(self):
+        self.client.write_json(self.controller.proxy_dir / 'cliproxy-models.json',
+                               {'antigravity': [{'id': 'gemini-3-flash'}]})
+        self.assertFalse(self.client.reconcile_desktop_routes())
+        self.assertEqual(self.routes, [])
+
     def test_fast_slot_repair_preserves_other_models_and_restores_backup(self):
         self.client.apply(['claude_desktop'])
         path = self.client.paths()['claude_desktop'][2]
