@@ -198,6 +198,7 @@ class Integrations:
             try:
                 for client in clients:
                     getattr(self, 'configure_' + client)(key)
+                self.clear_shadowed_routes()
             except Exception:
                 for path, data in before.items():
                     if data is None:
@@ -206,6 +207,22 @@ class Integrations:
                         atomic_write(path, data)
                 raise
         return clients
+
+    def clear_shadowed_routes(self):
+        """Old model-picker aliases must not hijack explicit client model choices."""
+        try:
+            choices = set(self.controller.family_model_choices()['claude'])
+        except (AccountError, OSError, KeyError, ValueError):
+            return
+        choices.discard('claude-sonnet-4-5')  # Gateway's Gemini default slot.
+        if not choices:
+            return
+        payload = self.controller.request('/oauth-model-alias').get('oauth-model-alias') or {}
+        entries = payload.get('antigravity', [])
+        direct = [entry for entry in entries if entry.get('alias') not in choices]
+        if len(direct) != len(entries):
+            self.controller.request('/oauth-model-alias', 'PATCH',
+                                    {'provider': 'antigravity', 'aliases': direct})
 
     def configure_claude_cli(self, key):
         path = self.paths()['claude_cli'][0]
@@ -267,7 +284,11 @@ class Integrations:
         models = catalog.get('models')
         if not isinstance(models, list) or not models:
             return False
-        choices = self.gemini_model_choices()
+        try:
+            available = self.controller.family_model_choices()
+            choices = available['gemini'] + available['claude']
+        except (AccountError, OSError, KeyError, ValueError):
+            choices = self.gemini_model_choices()
         from model_names import model_name, reasoning_level
         existing = {entry.get('slug') for entry in models}
         template = models[0]
@@ -275,10 +296,12 @@ class Integrations:
             if model in existing:
                 continue
             entry = copy.deepcopy(template)
-            entry.update(slug=model, display_name='Gemini ' + model_name(model, {}),
+            family = 'Gemini ' if model.startswith('gemini-') else 'Claude '
+            entry.update(slug=model, display_name=family + model_name(model, {}),
                          description='Antigravity via Gemini Accounts', priority=50,
                          model_messages={}, base_instructions='You are a helpful coding assistant.',
-                         context_window=1048576, max_context_window=1048576,
+                         context_window=1048576 if model.startswith('gemini-') else 200000,
+                         max_context_window=1048576 if model.startswith('gemini-') else 200000,
                          additional_speed_tiers=[], service_tiers=[], availability_nux=None,
                          upgrade=None)
             effort = reasoning_level(model)
@@ -292,21 +315,32 @@ class Integrations:
         desktop, meta_path, preset = self.paths()['claude_desktop']
         family_models = self.controller.selected_family_models()
         from model_names import model_name
-        models = [('claude-sonnet-4-5', 'Gemini · ' + model_name(family_models['gemini'], {}), 'sonnet', True),
-                  ('claude-selected' if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
-                   'Claude · ' + model_name(family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking', {}), 'opus', True),
+        preferred_claude = family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking'
+        models = [(self.claude_desktop_route(family_models['gemini']),
+                   'Gemini · ' + model_name(family_models['gemini'], {}), 'sonnet', True),
+                  (preferred_claude, 'Claude · ' + model_name(preferred_claude, {}), 'opus', True),
                   (self.claude_desktop_route('gemini-3-flash'), 'Gemini · 3 Flash', 'haiku', True)]
-        choices = self.gemini_model_choices()
+        try:
+            choices = self.controller.family_model_choices()
+        except (AccountError, OSError, KeyError, ValueError):
+            choices = {'gemini': [], 'claude': []}
         seen = {item[0] for item in models}
-        for model in choices:
+        for model in choices['gemini']:
+            if model == family_models['gemini']:
+                continue
             route = self.claude_desktop_route(model)
-            if (route not in seen and model != family_models['gemini'] and
-                    ('-flash-high' in model or '-flash-medium' in model or '-flash-low' in model or
-                     model in ('gemini-3-flash-agent', 'gemini-3.5-flash-extra-low'))):
-                models.append((route, 'Gemini · ' + model_name(model, {}), 'sonnet', False))
+            if route not in seen:
+                tier = 'haiku' if 'flash' in model or 'lite' in model else 'sonnet'
+                models.append((route, 'Gemini · ' + model_name(model, {}), tier, False))
                 seen.add(route)
-        routed = ['gemini-3-flash'] + [model for model in choices if self.claude_desktop_route(model) in seen
-                  and model != 'gemini-3-flash']
+        for model in choices['claude']:
+            if model == preferred_claude or model in seen:
+                continue
+            tier = 'opus' if '-opus-' in model else 'haiku' if '-haiku-' in model else 'sonnet'
+            models.append((model, 'Claude · ' + model_name(model, {}), tier, False))
+            seen.add(model)
+        routed = list(dict.fromkeys([family_models['gemini'], 'gemini-3-flash'] + [model for model in choices['gemini']
+                  if self.claude_desktop_route(model) in seen]))
         route_targets = {self.claude_desktop_route(model): model for model in routed}
         self.configure_desktop_routes(routed)
         self.write_json(preset, {
@@ -317,10 +351,8 @@ class Integrations:
             'claudeAiImport': {'bannerBehavior': 'detect', 'exportEnabled': True, 'enabled': True},
             'inferenceModels': [
                 {'name': name, 'labelOverride': label, 'anthropicFamilyTier': tier, 'isFamilyDefault': default,
-                 'supports1m': extended_context(route_targets.get(name, name) if name not in ('claude-sonnet-4-5', 'claude-selected') else
-                     family_models['gemini'] if name == 'claude-sonnet-4-5' else family_models['claude']),
-                 'prefer1m': extended_context(route_targets.get(name, name) if name not in ('claude-sonnet-4-5', 'claude-selected') else
-                     family_models['gemini'] if name == 'claude-sonnet-4-5' else family_models['claude'])}
+                 'supports1m': extended_context(route_targets.get(name, name)),
+                 'prefer1m': extended_context(route_targets.get(name, name))}
                 for name, label, tier, default in models],
         })
         meta = self.read_json(meta_path)

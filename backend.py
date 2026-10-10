@@ -362,10 +362,11 @@ class Controller:
         if activity_path.exists():
             from activity import Activity
             Activity(activity_path).pin_model_aliases({entry['alias']: entry['name'] for entry in entries})
-        targets = {model: claude for model in choices['claude']}
-        targets.update({'claude-sonnet-4-5': gemini, 'gemini-selected': gemini, 'claude-selected': claude})
+        targets = {'claude-sonnet-4-5': gemini, 'gemini-selected': gemini, 'claude-selected': claude}
         # A model must resolve directly to itself, never through a self-alias.
-        entries = [entry for entry in entries if entry['alias'] not in targets]
+        real_models = set(choices['claude']) - {'claude-sonnet-4-5'}
+        entries = [entry for entry in entries if entry['alias'] not in targets and
+                   entry['alias'] not in real_models]
         from model_names import model_name
         for alias, target in targets.items():
             if alias != target:

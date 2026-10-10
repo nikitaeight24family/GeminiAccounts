@@ -62,7 +62,7 @@ class ModelSelectionTests(unittest.TestCase):
     def test_family_selection_routes_claude_and_gemini_independently(self):
         result = self.controller.set_family_models('gemini-pro-agent', 'claude-opus-4-6-thinking')
         self.assertEqual(result['claude-sonnet-4-5'], 'gemini-pro-agent')
-        self.assertEqual(result['claude-sonnet-4-6'], 'claude-opus-4-6-thinking')
+        self.assertNotIn('claude-sonnet-4-6', result)
         self.assertEqual(result['claude-selected'], 'claude-opus-4-6-thinking')
         self.assertEqual(result['gemini-selected'], 'gemini-pro-agent')
         self.assertNotIn('claude-opus-4-6-thinking', result)

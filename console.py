@@ -212,27 +212,13 @@ class Terminal:
             time.sleep(2)
         raise AccountError('Google sign-in timed out. Run login again.')
 
-    def models(self, gemini=None, claude=None, interactive=False):
+    def models(self):
         choices = self.controller.family_model_choices()
-        current = self.controller.selected_family_models()
         for group in ('claude', 'gemini'):
             print('\nClaude (Antigravity)' if group == 'claude' else '\nGemini')
             for index, model in enumerate(choices[group], 1):
                 print(f'{index}. {model_name(model, {})}  [{model}]')
-        if interactive:
-            try:
-                selected = {}
-                for group in ('claude', 'gemini'):
-                    value = input(group.title() + ' model number (Enter keeps current): ').strip()
-                    if value and not 1 <= int(value) <= len(choices[group]):
-                        raise ValueError()
-                    selected[group] = choices[group][int(value) - 1] if value else current[group]
-                gemini, claude = selected['gemini'], selected['claude']
-            except (ValueError, IndexError):
-                raise AccountError('Choose a model number from the list.') from None
-        if gemini or claude:
-            self.controller.set_family_models(gemini or current['gemini'], claude or current['claude'])
-            print('Model aliases updated for new requests. To update the Codex default, run configure --clients codex (asks permission).')
+        print('\nChoose a model in your connected Claude or Codex client.')
 
     @staticmethod
     def verification_link(account):
@@ -251,9 +237,7 @@ def parser():
     commands.add_parser('serve', help='run gateway and quota monitoring; Ctrl+C stops services started here')
     commands.add_parser('status', help='show accounts, quotas, resets and last models')
     commands.add_parser('login', help='add a Google account through browser sign-in')
-    models = commands.add_parser('models', help='list or independently choose Claude and Gemini models')
-    models.add_argument('--gemini', help='Gemini model ID')
-    models.add_argument('--claude', help='Claude model ID in Antigravity')
+    commands.add_parser('models', help='list available models; choose them in connected clients')
     verify = commands.add_parser('verify', help='check verification after completing Google confirmation')
     verify.add_argument('account')
     verify.add_argument('--refresh-link', action='store_true', help='request and open a fresh verification URL')
@@ -296,7 +280,7 @@ def main(argv=None):
         elif command == 'login':
             terminal.login()
         elif command == 'models':
-            terminal.models(args.gemini, args.claude)
+            terminal.models()
         elif command == 'configure':
             return 0 if terminal.configure(args.clients, args.yes) else 1
         elif command == 'verify':
@@ -330,7 +314,7 @@ def main(argv=None):
                     raise AccountError('A local service stopped. Check the runtime logs.')
         else:
             while True:
-                print('\n1 Accounts & quotas  2 Add account  3 Connect clients  4 Restore settings  5 Verify account  6 Models  0 Exit')
+                print('\n1 Accounts & quotas  2 Add account  3 Connect clients  4 Restore settings  5 Verify account  6 List models  0 Exit')
                 choice = input('> ').strip()
                 try:
                     if choice == '0':
@@ -344,7 +328,7 @@ def main(argv=None):
                     elif choice == '4':
                         terminal.restore()
                     elif choice == '6':
-                        terminal.models(interactive=True)
+                        terminal.models()
                     elif choice == '5':
                         account = terminal.account(input('Account email: ').strip())
                         if confirm('Have you completed Google verification?'):

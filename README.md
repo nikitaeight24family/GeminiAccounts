@@ -33,9 +33,9 @@ Mac executables are not notarized. macOS may require approval in **System Settin
 
 | Client | Changes after approval |
 | --- | --- |
-| Claude Desktop on Windows | Local gateway preset for the **Code** tab; available Gemini Flash High / Medium / Low variants and Claude models. Ordinary web chats retain their own connection. |
-| Claude Code CLI, all supported platforms | Gateway URL, local key, model defaults and gateway model discovery merged into `~/.claude/settings.json`. Use `/model` to choose an available Flash reasoning level. |
-| Codex Desktop on Windows / Codex CLI | Responses API provider and a local model catalog in `~/.codex/config.toml`; available Flash reasoning levels appear as distinct model choices. The existing Codex models stay in the catalog. |
+| Claude Desktop on Windows | Local gateway preset for the **Code** tab. Choose available Gemini and Claude models in Claude's model menu. Ordinary web chats retain their own connection. |
+| Claude Code CLI, all supported platforms | Gateway URL, local key, model defaults and gateway model discovery merged into `~/.claude/settings.json`. Choose an available model with `/model`. |
+| Codex Desktop on Windows / Codex CLI | Responses API provider and a local model catalog in `~/.codex/config.toml`. Choose an available model in Codex. The existing Codex models stay in the catalog. |
 
 Before any changes, the app lists affected files and asks for consent. Projects, sign-ins and session history are preserved. History is not transferred between applications. Organizational policies may prevent third-party providers. Automatic Claude Desktop setup and desktop client restarting are Windows-only; Mac terminal mode configures Claude Code CLI and Codex CLI.
 
@@ -43,7 +43,7 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 
 ## Features
 
-- **⚙ next to Gemini Accounts → Choose models:** two independent lists: **Claude (Antigravity)** with available Haiku / Sonnet / Opus models, and **Gemini** with Pro Low / High, Flash High / Medium / Low and Lite. Flash reasoning levels are separate upstream model IDs, including the 3.5 naming used by Google. Applies to new gateway requests. Updating connected client menus and defaults is optional and asks permission; restart clients afterward. Availability follows your account catalog. Explicit Gemini Flash requests remain unchanged so quota pings stay cheap.
+- Choose models directly in Claude or Codex after connecting that application from **Connect applications**. The connection offers distinct available Gemini Pro, Flash and Claude model IDs; selecting one sends requests to that exact model. To refresh a client's model menu after account changes, open **Connect applications** again and approve reconnecting it. Client configurations change only after this explicit action.
 - Four account quota bars: Gemini / Claude, **5h / 1w**, with reset countdowns and time-based colors.
 - Compact cards, sorted by Gemini's five-hour reset, with verification accounts pinned separately.
 - Selecting an account for details works only while the right panel is open. Compact mode removes selection and hover highlights; verification buttons remain usable.

@@ -19,11 +19,8 @@ On Windows, replace `./gemini-accounts` with `.\GeminiAccounts-CLI.exe`. From so
 # Accounts, four quota values, reset times and last models
 ./gemini-accounts status
 
-# List the actual available model IDs; menu item 6 selects interactively
+# List the actual available model IDs
 ./gemini-accounts models
-
-# Select Gemini Pro High and Claude Opus independently
-./gemini-accounts models --gemini gemini-pro-agent --claude claude-opus-4-6-thinking
 
 # Configure clients with an approval prompt
 ./gemini-accounts configure --clients claude_cli codex
@@ -31,6 +28,8 @@ On Windows, replace `./gemini-accounts` with `.\GeminiAccounts-CLI.exe`. From so
 # Gateway and quota monitoring; leave running in one terminal
 ./gemini-accounts serve
 ```
+
+Choose a model from the connected Claude or Codex client after setup.
 
 Run clients in a second terminal: `claude`, `claude --resume`, `codex` or `codex resume`. **Ctrl+C** stops only service processes started by this invocation. It preserves sign-ins and session history; active requests through those services end when they stop.
 

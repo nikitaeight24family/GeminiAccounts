@@ -119,13 +119,26 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(all(any(route['alias'] == self.client.claude_desktop_route(model) and route['name'] == model
                                 for route in self.routes) for model in choices))
         codex = self.client.read_json(self.client.paths()['codex'][2])['models']
-        self.assertEqual([entry['slug'] for entry in codex], ['gpt-test'] + choices)
+        self.assertEqual([entry['slug'] for entry in codex], ['gpt-test'] + choices + ['claude-sonnet-4-6'])
         self.assertEqual([codex[i]['default_reasoning_level'] for i in range(1, 5)],
                          ['high', 'medium', 'low', 'medium'])
         config = tomllib.loads(self.client.paths()['codex'][0].read_text())
         self.assertEqual(config['model_catalog_json'], str(self.client.paths()['codex'][2].resolve()))
         self.client.restore()
         self.assertFalse(self.client.paths()['codex'][2].exists())
+
+    def test_client_menu_routes_each_model_to_itself(self):
+        self.controller.family_model_choices = lambda: {
+            'gemini': ['gemini-pro-agent', 'gemini-3.1-pro-low', 'gemini-3-flash'],
+            'claude': ['claude-sonnet-4-6', 'claude-opus-4-6-thinking']}
+        self.routes = [{'alias': 'claude-sonnet-4-6', 'name': 'claude-opus-4-6-thinking'}]
+        self.client.apply(['claude_desktop'])
+        entries = self.client.read_json(self.client.paths()['claude_desktop'][2])['inferenceModels']
+        low = self.client.claude_desktop_route('gemini-3.1-pro-low')
+        self.assertIn(low, [entry['name'] for entry in entries])
+        self.assertIn('claude-opus-4-6-thinking', [entry['name'] for entry in entries])
+        self.assertEqual(next(item['name'] for item in self.routes if item['alias'] == low), 'gemini-3.1-pro-low')
+        self.assertFalse(any(item['alias'] == 'claude-sonnet-4-6' for item in self.routes))
 
     def test_fast_slot_repair_preserves_other_models_and_restores_backup(self):
         self.client.apply(['claude_desktop'])

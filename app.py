@@ -93,9 +93,6 @@ class App(ctk.CTk):
         self.details_toggle = self.button(sidebar_header, '☰', self.toggle_details)
         self.details_toggle.configure(height=26, width=28, font=('Segoe UI', 20), fg_color='transparent')
         self.details_toggle.pack(side='right')
-        self.models_button = self.button(sidebar_header, '⚙', self.model_settings)
-        self.models_button.configure(height=26, width=24, font=('Segoe UI', 17), fg_color='transparent')
-        self.models_button.pack(side='right', padx=(0, 3))
         self.add_button = self.button(self.sidebar, '+  Add Google account', self.add_account, primary=True)
         self.add_button.configure(height=30)
         self.add_button.pack(fill='x', padx=16, pady=(0, 6))
@@ -1515,125 +1512,6 @@ class App(ctk.CTk):
             self.notice.configure(text=message, text_color=GREEN)
             self.loaded(items)
         self.work(perform, done, mutation=True)
-
-    def model_settings(self):
-        if hasattr(self, 'model_window') and self.model_window.winfo_exists():
-            self.model_window.lift()
-            return
-        window = self.model_window = ctk.CTkToplevel(self)
-        window.title('Model selection')
-        window.geometry('550x395')
-        window.configure(fg_color=PANEL)
-        window.transient(self)
-        self.label(window, 'Choose models', 23, bold=True).pack_configure(padx=24, pady=(20, 8))
-        self.label(window, 'Choose Claude and Gemini models independently.\nNew requests use your choice. Ongoing responses keep their model.', 12, MUTED).pack_configure(padx=24, pady=(0, 15))
-        controls = ctk.CTkFrame(window, fg_color='transparent')
-        controls.pack(fill='x', padx=24)
-        controls.grid_columnconfigure(1, weight=1)
-        selectors = {}
-        options = {}
-        current = self.controller.selected_family_models()
-        for row, group in enumerate(('claude', 'gemini')):
-            ctk.CTkLabel(controls, text='Claude (Antigravity)' if group == 'claude' else 'Gemini', text_color=TEXT, width=145, anchor='w').grid(row=row, column=0, pady=7)
-            selector = ctk.CTkOptionMenu(controls, values=['Loading…'], state='disabled', fg_color=CARD)
-            selector.grid(row=row, column=1, sticky='ew', pady=7)
-            selectors[group] = selector
-        codex_path = self.integrations.paths()['codex'][0]
-        try:
-            managed_codex = '# BEGIN Gemini Accounts managed provider' in codex_path.read_text('utf-8-sig')
-        except OSError:
-            managed_codex = False
-        backups = self.integrations.backups()
-        managed_clients = [client for client, paths in self.integrations.paths().items()
-                           if any(str(path.resolve()) in backups for path in paths)]
-        if not managed_codex and 'codex' in managed_clients:
-            managed_clients.remove('codex')
-        if managed_codex and 'codex' not in managed_clients:
-            managed_clients.append('codex')
-        if self.integrations.legacy_desktop_preset() and 'claude_desktop' not in managed_clients:
-            managed_clients.append('claude_desktop')
-        update_codex = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(window, text='Update connected client model menus (asks permission)',
-            variable=update_codex, state='normal' if managed_clients else 'disabled').pack(anchor='w', padx=24, pady=(16, 10))
-        status = ctk.CTkLabel(window, text='Loading the account model catalog…', text_color=MUTED, wraplength=500, justify='left')
-        status.pack(anchor='w', padx=24, pady=(0, 10))
-
-        def apply():
-            selected = {group: options[group][selector.get()] for group, selector in selectors.items()}
-            if update_codex.get():
-                paths = '\n'.join(str(p) for client in managed_clients for p in self.integrations.paths()[client])
-                if not messagebox.askyesno('Update connected client configurations?',
-                    'Model choices will change, and these client files will be configured:\n\n' + paths +
-                    '\n\nThe default model and connection settings will change. Original files are backed up. '
-                    'Restart clients to apply their updated menus and defaults. Allow these changes?', parent=window):
-                    return
-            apply_button.configure(state='disabled')
-            update_client = bool(update_codex.get())
-            def change():
-                changed = False
-                try:
-                    previous_entries = self.controller.request('/oauth-model-alias').get('oauth-model-alias', {}).get('antigravity', [])
-                    previous_preferences = copy.deepcopy(self.controller.preferences)
-                    aliases = self.controller.set_family_models(selected['gemini'], selected['claude'])
-                    changed = True
-                    if update_client:
-                        self.integrations.apply(managed_clients)
-                    return aliases, None
-                except Exception as error:
-                    if changed:
-                        try:
-                            self.controller.request('/oauth-model-alias', 'PATCH', {'provider': 'antigravity', 'aliases': previous_entries})
-                            self.controller.preferences = previous_preferences
-                            self.controller.save()
-                        except Exception:
-                            return None, 'Client setup failed and model rollback failed. Reopen model selection and check the gateway.'
-                    return None, str(error)
-            def done(result):
-                aliases, error = result
-                if not window.winfo_exists():
-                    return
-                apply_button.configure(state='normal')
-                if error:
-                    status.configure(text=error, text_color='#ffbd93')
-                    return
-                self.model_aliases = aliases
-                self.activity = Activity(self.controller.data_dir / 'activity.json')
-                self.activity_state = copy.deepcopy(self.activity.state)
-                status.configure(text='Applied to new gateway requests.' + (' Restart clients for updated menus and defaults.' if update_client else ''), text_color=GREEN)
-                self.render_activity()
-            self.work(change, done)
-
-        apply_button = self.button(window, 'Apply models', apply, primary=True)
-        apply_button.configure(state='disabled')
-        apply_button.pack(fill='x', padx=24)
-        def load():
-            try:
-                return self.controller.family_model_choices(), None
-            except Exception as error:
-                return None, str(error)
-        def loaded(result):
-            if not window.winfo_exists():
-                return
-            choices, error = result
-            if error:
-                status.configure(text=error, text_color='#ffbd93')
-                return
-            if not choices['claude'] or not choices['gemini']:
-                status.configure(text='The account catalog must include both Claude and Gemini models.', text_color='#ffbd93')
-                return
-            for group in ('claude', 'gemini'):
-                options[group] = {}
-                for model in choices[group]:
-                    label = model_name(model, {})
-                    if label in options[group]:
-                        label += ' (' + model + ')'
-                    options[group][label] = model
-                selectors[group].configure(values=list(options[group]), state='normal')
-                selected_label = next((label for label, model in options[group].items() if model == current.get(group)), next(iter(options[group])))
-                selectors[group].set(selected_label)
-            apply_button.configure(state='normal')
-            status.configure(text='Claude uses the Antigravity Claude quota. Gemini uses the Gemini quota.', text_color=MUTED)
-        self.work(load, loaded)
 
     def connection_settings(self):
         if hasattr(self, 'connection_window') and self.connection_window.winfo_exists():
