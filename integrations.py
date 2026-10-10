@@ -1,5 +1,6 @@
 """Client presets and encrypted, reversible configuration backups."""
 import base64
+import copy
 import json
 import os
 import re
@@ -8,6 +9,7 @@ import subprocess
 import threading
 import tomllib
 from pathlib import Path
+import yaml
 
 from backend import atomic_write, dpapi, AccountError, storage_root
 from model_context import extended_context, client_model_id
@@ -25,6 +27,22 @@ class Integrations:
         self.windows_desktop = os.name == 'nt' or local is not None
         self.backup_path = controller.data_dir / 'client-config-backups.dpapi'
         self.lock = threading.RLock()
+        self.available_model_choices = None
+
+    def gemini_model_choices(self):
+        if self.available_model_choices is not None:
+            return self.available_model_choices
+        try:
+            if self.controller.key is None:
+                config_path = self.controller.proxy_dir / 'config.yaml'
+                secret_path = self.controller.data_dir / 'management-key.dpapi'
+                if config_path.exists() and secret_path.exists():
+                    config = yaml.safe_load(config_path.read_text('utf-8-sig'))
+                    self.controller.base = 'http://127.0.0.1:' + str(config['server']['port'])
+                    self.controller.key = dpapi(secret_path.read_bytes(), decrypt=True).decode('ascii')
+            return self.controller.family_model_choices()['gemini']
+        except (AccountError, OSError, KeyError, ValueError, yaml.YAMLError):
+            return []
 
     def detected(self):
         return {
@@ -38,7 +56,8 @@ class Integrations:
         preset_id = self.legacy_desktop_preset() or PRESET_ID
         return {
             'claude_cli': [self.home / '.claude' / 'settings.json'],
-            'codex': [self.home / '.codex' / 'config.toml', self.home / '.codex' / 'gemini-accounts.config.toml'],
+            'codex': [self.home / '.codex' / 'config.toml', self.home / '.codex' / 'gemini-accounts.config.toml',
+                      self.home / '.codex' / 'gemini-accounts-models.json'],
             'claude_desktop': [self.local / 'Claude-3p' / 'claude_desktop_config.json',
                                library / '_meta.json', library / (preset_id + '.json')],
         }
@@ -178,6 +197,7 @@ class Integrations:
             'ANTHROPIC_DEFAULT_SONNET_MODEL': gemini,
             'ANTHROPIC_DEFAULT_HAIKU_MODEL': client_model_id('gemini-3-flash', 'gemini-3-flash'),
             'ANTHROPIC_DEFAULT_OPUS_MODEL': claude if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
+            'CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY': '1',
             'API_TIMEOUT_MS': '604800000', 'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
         })
         self.write_json(path, settings)
@@ -192,7 +212,7 @@ class Integrations:
         ])
 
     def configure_codex(self, key):
-        path, profile = self.paths()['codex']
+        path, profile, catalog_path = self.paths()['codex']
         text = path.read_text('utf-8-sig') if path.exists() else ''
         text = re.sub(re.escape(BEGIN) + r'.*?' + re.escape(END) + r'\s*', '', text, flags=re.S)
         config = tomllib.loads(text)
@@ -200,14 +220,50 @@ class Integrations:
             raise AccountError('The gemini_accounts provider name is already used by another configuration.')
         split = re.search(r'^\s*\[', text, re.M)
         root, tables = (text[:split.start()], text[split.start():]) if split else (text, '')
-        root = re.sub(r'^\s*(model|model_provider)\s*=.*\n?', '', root, flags=re.M)
+        previous_catalog = config.get('model_catalog_json')
+        root = re.sub(r'^\s*(model|model_provider|model_catalog_json)\s*=.*\n?', '', root, flags=re.M)
         model = 'gemini-selected' if self.controller.preferences.get('gemini-model') else self.controller.preferences.get('pro-model') or self.controller.model_aliases().get('claude-sonnet-4-5', 'gemini-3.1-pro-low')
         defaults = 'model = ' + json.dumps(model) + '\nmodel_provider = "gemini_accounts"\n'
+        if self.write_codex_catalog(catalog_path, previous_catalog):
+            defaults += 'model_catalog_json = ' + json.dumps(str(catalog_path.resolve())) + '\n'
         updated = defaults + root + '\n' + tables.rstrip() + '\n\n' + BEGIN + '\n' + self.provider_toml(key) + END + '\n'
         tomllib.loads(updated)
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, updated.encode())
         atomic_write(profile, (defaults + '\n' + self.provider_toml(key)).encode())
+
+    def write_codex_catalog(self, target, previous_catalog=None):
+        """Extend Codex's local catalog while keeping its existing model rows."""
+        cache = self.home / '.codex' / 'models_cache.json'
+        source = Path(previous_catalog) if previous_catalog and Path(previous_catalog) != target else cache
+        if not source.exists() and target.exists():
+            source = target
+        if not source.exists():
+            return False
+        catalog = self.read_json(source)
+        models = catalog.get('models')
+        if not isinstance(models, list) or not models:
+            return False
+        choices = self.gemini_model_choices()
+        from model_names import model_name, reasoning_level
+        existing = {entry.get('slug') for entry in models}
+        template = models[0]
+        for model in choices:
+            if model in existing:
+                continue
+            entry = copy.deepcopy(template)
+            entry.update(slug=model, display_name='Gemini ' + model_name(model, {}),
+                         description='Antigravity via Gemini Accounts', priority=50,
+                         model_messages={}, base_instructions='You are a helpful coding assistant.',
+                         context_window=1048576, max_context_window=1048576,
+                         additional_speed_tiers=[], service_tiers=[], availability_nux=None,
+                         upgrade=None)
+            effort = reasoning_level(model)
+            entry['default_reasoning_level'] = effort
+            entry['supported_reasoning_levels'] = [{'effort': effort, 'description': effort.title() + ' reasoning'}]
+            models.append(entry)
+        self.write_json(target, catalog)
+        return True
 
     def configure_claude_desktop(self, key):
         desktop, meta_path, preset = self.paths()['claude_desktop']
@@ -217,6 +273,14 @@ class Integrations:
                   ('claude-selected' if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
                    'Claude · ' + model_name(family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking', {}), 'opus', True),
                   ('gemini-3-flash', 'Gemini · 3 Flash', 'haiku', True)]
+        choices = self.gemini_model_choices()
+        seen = {item[0] for item in models}
+        for model in choices:
+            if (model not in seen and model != family_models['gemini'] and
+                    ('-flash-high' in model or '-flash-medium' in model or '-flash-low' in model or
+                     model in ('gemini-3-flash-agent', 'gemini-3.5-flash-extra-low'))):
+                models.append((model, 'Gemini · ' + model_name(model, {}), 'sonnet', False))
+                seen.add(model)
         self.write_json(preset, {
             'deploymentDisplayName': 'Gemini Accounts', 'inferenceCredentialKind': 'static',
             'modelDiscoveryEnabled': False, 'inferenceGatewayAuthScheme': 'bearer',
@@ -225,10 +289,10 @@ class Integrations:
             'claudeAiImport': {'bannerBehavior': 'detect', 'exportEnabled': True, 'enabled': True},
             'inferenceModels': [
                 {'name': name, 'labelOverride': label, 'anthropicFamilyTier': tier, 'isFamilyDefault': default,
-                 'supports1m': extended_context('gemini-3-flash' if tier == 'haiku' else family_models['gemini'] if tier == 'sonnet' else
-                     family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking'),
-                 'prefer1m': extended_context('gemini-3-flash' if tier == 'haiku' else family_models['gemini'] if tier == 'sonnet' else
-                     family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking')}
+                 'supports1m': extended_context(name if name not in ('claude-sonnet-4-5', 'claude-selected') else
+                     family_models['gemini'] if name == 'claude-sonnet-4-5' else family_models['claude']),
+                 'prefer1m': extended_context(name if name not in ('claude-sonnet-4-5', 'claude-selected') else
+                     family_models['gemini'] if name == 'claude-sonnet-4-5' else family_models['claude'])}
                 for name, label, tier, default in models],
         })
         meta = self.read_json(meta_path)

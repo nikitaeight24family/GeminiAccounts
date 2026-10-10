@@ -93,6 +93,26 @@ class IntegrationTests(unittest.TestCase):
         self.assertFalse(models[1]['prefer1m'])
         self.assertEqual(models[2]['name'], 'gemini-3-flash')
         self.assertEqual(env['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'gemini-3-flash[1m]')
+        self.assertEqual(env['CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'], '1')
+
+    def test_flash_reasoning_levels_appear_in_client_catalogs(self):
+        choices = ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-low',
+                   'gemini-3.5-flash-low']
+        self.controller.family_model_choices = lambda: {'gemini': choices, 'claude': ['claude-sonnet-4-6']}
+        cache = self.client.home / '.codex' / 'models_cache.json'
+        self.client.write_json(cache, {'models': [{'slug': 'gpt-test', 'display_name': 'GPT Test',
+            'default_reasoning_level': 'medium', 'supported_reasoning_levels': []}]})
+        self.client.apply(['claude_desktop', 'codex'])
+        desktop = self.client.read_json(self.client.paths()['claude_desktop'][2])['inferenceModels']
+        self.assertTrue(all(any(entry['name'] == model for entry in desktop) for model in choices))
+        codex = self.client.read_json(self.client.paths()['codex'][2])['models']
+        self.assertEqual([entry['slug'] for entry in codex], ['gpt-test'] + choices)
+        self.assertEqual([codex[i]['default_reasoning_level'] for i in range(1, 5)],
+                         ['high', 'medium', 'low', 'medium'])
+        config = tomllib.loads(self.client.paths()['codex'][0].read_text())
+        self.assertEqual(config['model_catalog_json'], str(self.client.paths()['codex'][2].resolve()))
+        self.client.restore()
+        self.assertFalse(self.client.paths()['codex'][2].exists())
 
     def test_fast_slot_repair_preserves_other_models_and_restores_backup(self):
         self.client.apply(['claude_desktop'])

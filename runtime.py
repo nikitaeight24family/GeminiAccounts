@@ -4,6 +4,7 @@ import io
 import json
 import os
 import platform
+import shutil
 import secrets
 import socket
 import subprocess
@@ -18,7 +19,7 @@ import bcrypt
 import yaml
 from backend import AccountError, atomic_write, dpapi
 
-VERSION = '1.3.6'
+VERSION = '1.3.7'
 UPSTREAM_VERSION = '8.0.16'
 ARCHIVES = {
     ('Windows', 'amd64'): ('windows_amd64.zip', 'e0d999703c9af70067b15bf50e6521e76392da604d1543541361e6891c676c43'),
@@ -85,6 +86,10 @@ def initialize(controller):
     auth = controller.proxy_dir / 'auth'
     auth.mkdir(exist_ok=True, mode=0o700)
     config_path = controller.proxy_dir / 'config.yaml'
+    catalog_source = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent)) / 'assets' / 'cliproxy-models.json'
+    catalog_target = controller.proxy_dir / 'cliproxy-models.json'
+    if catalog_source.exists() and (not catalog_target.exists() or catalog_target.read_bytes() != catalog_source.read_bytes()):
+        shutil.copyfile(catalog_source, catalog_target)
     if not config_path.exists():
         key, management = secrets.token_urlsafe(40), secrets.token_urlsafe(40)
         atomic_write(controller.proxy_dir / 'client-key.txt', key.encode())
@@ -105,7 +110,11 @@ def initialize(controller):
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
     from native_reasoning import remove_legacy_summary_rule
     config = yaml.safe_load(config_path.read_text('utf-8-sig'))
-    if remove_legacy_summary_rule(config):
+    changed = remove_legacy_summary_rule(config)
+    if catalog_target.exists() and config.setdefault('models', {}).get('catalog') != str(catalog_target.resolve()):
+        config['models']['catalog'] = str(catalog_target.resolve())
+        changed = True
+    if changed:
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
     return config_path
 

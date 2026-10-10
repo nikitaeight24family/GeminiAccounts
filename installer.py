@@ -51,7 +51,10 @@ def install(payload, root, shortcuts=True, automatic=False):
     if shortcuts and (proxy / 'config.yaml').exists():
         prepare_update(root, automatic=automatic)
     for name, dest in [('GeminiAccounts.exe', manager), ('GeminiQuotaQueue.exe', proxy),
-                       ('cli-proxy-api.exe', proxy), ('start-proxy.ps1', proxy), ('CLIProxyAPI-LICENSE.txt', proxy)]:
+                       ('cli-proxy-api.exe', proxy), ('start-proxy.ps1', proxy),
+                       ('CLIProxyAPI-LICENSE.txt', proxy), ('cliproxy-models.json', proxy)]:
+        if name == 'cliproxy-models.json' and not (payload / name).exists():
+            continue
         for attempt in range(15):
             try:
                 shutil.copyfile(payload / name, dest / name)
@@ -81,9 +84,14 @@ def install(payload, root, shortcuts=True, automatic=False):
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
     from native_reasoning import remove_legacy_summary_rule
     config = yaml.safe_load(config_path.read_text('utf-8-sig'))
-    if remove_legacy_summary_rule(config):
+    changed = remove_legacy_summary_rule(config)
+    catalog_path = proxy / 'cliproxy-models.json'
+    if catalog_path.exists() and config.setdefault('models', {}).get('catalog') != str(catalog_path.resolve()):
+        config['models']['catalog'] = str(catalog_path.resolve())
+        changed = True
+    if changed:
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    atomic_write(manager / 'installation.json', json.dumps({'version': '1.3.6'}).encode())
+    atomic_write(manager / 'installation.json', json.dumps({'version': '1.3.7'}).encode())
     if shortcuts:
         # PowerShell receives paths as environment data, never executable interpolation.
         env = os.environ.copy()
@@ -141,6 +149,8 @@ def main():
                 'Update connected client model names and context windows?\n\n'
                 'This modifies their configuration files. Original settings are backed up and can be restored '
                 'from Gemini Accounts. Restart clients afterwards to load the changes.', parent=window)
+            if update_clients:
+                integrations.available_model_choices = integrations.gemini_model_choices()
             executable = install(payload, root)
             if update_clients:
                 integrations.apply(clients)
