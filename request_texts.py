@@ -19,8 +19,12 @@ def _text(value):
 
 def extract_user_text(request):
     messages = request.get('messages')
-    if not isinstance(messages, list): return _text(request.get('input'))
-    return '\n\n'.join(value for message in messages if isinstance(message, dict) and message.get('role') == 'user' for value in [_text(message.get('content'))] if value)
+    if isinstance(messages, list):
+        return '\n\n'.join(value for message in messages if isinstance(message, dict) and message.get('role') == 'user' for value in [_text(message.get('content'))] if value)
+    value = request.get('input')
+    if isinstance(value, list):
+        return '\n\n'.join(value for message in value if isinstance(message, dict) and message.get('role') == 'user' for value in [_text(message.get('content') or message.get('input'))] if value)
+    return _text(value)
 
 class RequestTextStore:
     def __init__(self, path, max_bytes=20_000_000, max_chars=20_000):
