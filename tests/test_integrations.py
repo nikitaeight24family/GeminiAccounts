@@ -3,11 +3,14 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import patch
 from pathlib import Path
+import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend import Controller, AccountError
 from integrations import Integrations
 from installer import install
+from tokenharbor import TokenHarbor, CLIENT_MODEL, UPSTREAM_MODEL, PROVIDER
 
 
 class IntegrationTests(unittest.TestCase):
@@ -181,6 +184,52 @@ class IntegrationTests(unittest.TestCase):
             'inferenceModels': [{'name': 'other', 'labelOverride': 'Gemini Pro'}]})
         self.assertIsNone(self.client.legacy_desktop_preset())
         self.assertFalse(self.client.refresh_desktop_model_labels())
+
+    def test_tokenharbor_free_model_requires_explicit_connection_and_restores(self):
+        config_path = self.controller.proxy_dir / 'config.yaml'
+        config = {'server': {'host': '127.0.0.1', 'port': 8317},
+                  'access': {'api-keys': ['local-key']},
+                  'oauth': {'model-alias': {'antigravity': []}}}
+        config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
+        self.client.apply(['claude_desktop'])
+        preset_path = self.client.paths()['claude_desktop'][2]
+        before = self.client.read_json(preset_path)
+        self.assertNotIn(CLIENT_MODEL, [entry['name'] for entry in before['inferenceModels']])
+        connection = TokenHarbor(self.controller, self.client)
+        with patch.object(connection, 'verify_key'), patch.object(connection, 'model_listed', return_value=True), \
+             patch.object(connection, 'probe_gateway', return_value=True):
+            self.assertTrue(connection.connect('thk_test-key'))
+        updated = yaml.safe_load(config_path.read_text())
+        group = next(entry for entry in updated['api-keys']['claude'] if entry['name'] == PROVIDER)
+        self.assertEqual(group['models'][0]['name'], UPSTREAM_MODEL)
+        self.assertEqual(group['models'][0]['alias'], CLIENT_MODEL)
+        self.assertEqual([entry['name'] for entry in self.client.read_json(preset_path)['inferenceModels']]
+                         .count(CLIENT_MODEL), 1)
+        self.assertEqual(self.client.read_json(preset_path)['inferenceModels'][0], before['inferenceModels'][0])
+        self.client.restore()
+        restored = yaml.safe_load(config_path.read_text())
+        self.assertFalse(restored.get('api-keys', {}).get('claude'))
+        self.assertFalse(preset_path.exists())
+
+    def test_tokenharbor_does_not_touch_unapproved_claude_config(self):
+        config_path = self.controller.proxy_dir / 'config.yaml'
+        config_path.write_text(yaml.safe_dump({'server': {'host': '127.0.0.1', 'port': 8317}}), encoding='utf-8')
+        connection = TokenHarbor(self.controller, self.client)
+        with patch.object(connection, 'verify_key'), patch.object(connection, 'model_listed', return_value=True), \
+             patch.object(connection, 'probe_gateway', return_value=True):
+            self.assertFalse(connection.connect('thk_test-key'))
+        self.assertFalse(any(path.exists() for path in self.client.paths()['claude_desktop']))
+
+    def test_tokenharbor_rolls_back_if_gateway_cannot_use_free_route(self):
+        config_path = self.controller.proxy_dir / 'config.yaml'
+        config_path.write_text(yaml.safe_dump({'server': {'host': '127.0.0.1', 'port': 8317}}), encoding='utf-8')
+        original = config_path.read_bytes()
+        connection = TokenHarbor(self.controller, self.client)
+        with patch.object(connection, 'verify_key'), patch.object(connection, 'model_listed', return_value=True), \
+             patch.object(connection, 'probe_gateway', return_value=False), patch('tokenharbor.time.sleep'):
+            with self.assertRaises(AccountError):
+                connection.connect('thk_test-key')
+        self.assertEqual(config_path.read_bytes(), original)
 
     def test_installer_creates_fresh_keys_and_retains_config_on_update(self):
         payload = self.root / 'payload'

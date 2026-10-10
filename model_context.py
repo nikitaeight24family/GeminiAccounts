@@ -5,6 +5,7 @@ conservatively within Gemini's 1,048,576-token input window.
 """
 CONTEXT_WINDOWS = {
     'claude-haiku-4-5': 200000,
+    'claude-haiku-5-5-tokenharbor-free': 1000000,
     'claude-sonnet-4-6': 200000,
     'claude-opus-4-6-thinking': 200000,
     'claude-sonnet-5-5-high': 1000000,

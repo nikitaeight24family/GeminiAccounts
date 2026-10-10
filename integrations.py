@@ -13,6 +13,7 @@ import yaml
 
 from backend import atomic_write, dpapi, AccountError, storage_root
 from model_context import extended_context, client_model_id
+from tokenharbor import TokenHarbor, CLIENT_MODEL as TOKENHARBOR_MODEL, DISPLAY_NAME as TOKENHARBOR_LABEL
 
 PRESET_ID = '228c90e2-d605-4ba1-b695-12a49c93a766'
 BEGIN = '# BEGIN Gemini Accounts managed provider'
@@ -146,6 +147,8 @@ class Integrations:
         from model_names import model_name
         changed = False
         for entry in preset.get('inferenceModels', []):
+            if entry.get('name') == TOKENHARBOR_MODEL:
+                continue
             model = aliases.get(entry['name'], entry['name'])
             family = 'Gemini' if model.startswith('gemini-') else 'Claude' if model.startswith('claude-') else ''
             if not family:
@@ -174,7 +177,8 @@ class Integrations:
         flash = {'name': self.claude_desktop_route('gemini-3-flash'), 'labelOverride': 'Gemini · 3 Flash',
                  'anthropicFamilyTier': 'haiku', 'isFamilyDefault': True,
                  'supports1m': True, 'prefer1m': True}
-        indices = [i for i, m in enumerate(models) if m.get('anthropicFamilyTier') == 'haiku'
+        indices = [i for i, m in enumerate(models)
+                   if (m.get('anthropicFamilyTier') == 'haiku' and m.get('name') != TOKENHARBOR_MODEL)
                    or m.get('name') in ('claude-haiku-4-5', 'gemini-3-flash')]
         if len(indices) == 1 and models[indices[0]] == flash:
             return False
@@ -375,6 +379,8 @@ class Integrations:
             tier = 'opus' if '-opus-' in model else 'haiku' if '-haiku-' in model else 'sonnet'
             models.append((model, 'Claude · ' + model_name(model, {}), tier, False))
             seen.add(model)
+        if TokenHarbor(self.controller, self).connected():
+            models.append((TOKENHARBOR_MODEL, TOKENHARBOR_LABEL, 'haiku', False))
         routed = list(dict.fromkeys([family_models['gemini'], 'gemini-3-flash'] + [model for model in choices['gemini']
                   if self.claude_desktop_route(model) in seen]))
         route_targets = {self.claude_desktop_route(model): model for model in routed}
@@ -408,6 +414,8 @@ class Integrations:
             allowed = {str(p.resolve()) for group in self.paths().values() for p in group}
             if any(path not in allowed for path in saved):
                 raise AccountError('The backup contains an unexpected path. Restoration cancelled.')
+            if (self.controller.proxy_dir / 'config.yaml').exists():
+                TokenHarbor(self.controller, self).disconnect(update_desktop=False)
             for name, data in saved.items():
                 path = Path(name)
                 if data is None:

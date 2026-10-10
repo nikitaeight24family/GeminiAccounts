@@ -19,6 +19,7 @@ from backend import Controller, AccountError
 from activity import Activity
 from routing import rank_accounts, quota_projection, quota_entry
 from integrations import Integrations
+from tokenharbor import TokenHarbor
 from model_names import model_name
 
 BG = '#10141d'
@@ -1497,6 +1498,18 @@ class App(ctk.CTk):
         if not self.busy:
             for account in self.items:
                 self.fetch_quota(account['name'])
+            # A gateway config reload can drop Claude Desktop's approved aliases.
+            # Reconcile them without touching Claude's session files or preset.
+            def repair_routes():
+                try:
+                    self.integrations.reconcile_desktop_routes()
+                    return None
+                except (AccountError, OSError, ValueError) as error:
+                    return str(error)
+            def route_done(error):
+                if error and not self.closed:
+                    self.notice.configure(text=error, text_color='#ffbd93')
+            self.work(repair_routes, route_done)
         if not self.closed:
             self.after(60000, self.periodic_quota)
 
@@ -1527,7 +1540,7 @@ class App(ctk.CTk):
             return
         window = self.connection_window = ctk.CTkToplevel(self)
         window.title('Application connections')
-        window.geometry('620x480')
+        window.geometry('620x550')
         window.configure(fg_color=PANEL)
         window.transient(self)
         ctk.CTkLabel(window, text='Set up connections', font=('Segoe UI', 23, 'bold'), text_color=TEXT).pack(anchor='w', padx=24, pady=(22, 12))
@@ -1575,6 +1588,8 @@ class App(ctk.CTk):
             self.work(perform, applied, mutation=True)
         apply_button = self.button(window, 'Configure selected applications', apply, primary=True)
         apply_button.pack(fill='x', padx=24, pady=(8, 12))
+        self.button(window, 'Add TokenHarbor free Haiku 5.5…',
+                    lambda: self.tokenharbor_settings(window)).pack(fill='x', padx=24, pady=(0, 12))
         def restore():
             if not messagebox.askyesno('Restore previous settings?', 'Client configurations will be restored to their state before the first connection. Later edits to these files will also be replaced by the backup. Gemini Accounts preferences will return to defaults. Google sign-ins will be preserved.\n\nRestore settings?', parent=window):
                 return
@@ -1589,6 +1604,92 @@ class App(ctk.CTk):
                     self.work(lambda: self.integrations.restart_desktop(['claude_desktop', 'codex']), lambda _: status.configure(text='Applications restarted with original settings.', text_color=GREEN))
             self.work(reset, done, mutation=True)
         self.button(window, 'Restore previous settings / reset preferences', restore).pack(fill='x', padx=24)
+
+    def tokenharbor_settings(self, parent):
+        window = ctk.CTkToplevel(self)
+        window.title('TokenHarbor free model')
+        window.geometry('570x510')
+        window.configure(fg_color=PANEL)
+        window.transient(parent)
+        client = TokenHarbor(self.controller, self.integrations)
+        ctk.CTkLabel(window, text='Claude Haiku 5.5 Free', font=('Segoe UI', 23, 'bold'),
+                     text_color=TEXT).pack(anchor='w', padx=24, pady=(20, 8))
+        ctk.CTkLabel(window, text='TokenHarbor requires a Universal Key and free-model access.\n'
+                     'This is a limited-time offer with an allowance shown in TokenHarbor.\n'
+                     'Only the :free route will be connected; no paid fallback is configured.',
+                     justify='left', text_color=MUTED).pack(anchor='w', padx=24)
+        self.button(window, 'Get TokenHarbor key',
+                    lambda: webbrowser.open('https://tokenharbor.ai/signup?next=/dashboard/api-keys')).pack(
+                        fill='x', padx=24, pady=(14, 8))
+        entry = ctk.CTkEntry(window, placeholder_text='Paste thk_… Universal Key', show='*', height=36)
+        entry.pack(fill='x', padx=24, pady=(0, 8))
+        status = ctk.CTkLabel(window, text='Connected' if client.connected() else 'Not connected',
+                              text_color=GREEN if client.connected() else MUTED,
+                              wraplength=520, justify='left')
+        status.pack(anchor='w', padx=24)
+        ctk.CTkLabel(window,
+                     text='Free account API: 60 requests/minute, 1,800/hour.\n'
+                          'Haiku campaign allowance and expiry: see TokenHarbor dashboard.',
+                     text_color=MUTED, justify='left').pack(anchor='w', padx=24, pady=(8, 4))
+        self.button(window, 'View current allowance',
+                    lambda: webbrowser.open('https://tokenharbor.ai/dashboard')).pack(
+                        fill='x', padx=24, pady=(0, 6))
+        def connect():
+            secret = entry.get().strip()
+            entry.delete(0, 'end')
+            preset = client.approved_desktop_preset()
+            affected = str(self.controller.proxy_dir / 'config.yaml')
+            if preset:
+                affected += '\n' + str(preset)
+            warning = ('The app will send a short test request to TokenHarbor and update:\n\n' + affected +
+                       '\n\nYour key will be stored in the local gateway configuration. '
+                       'Requests using this model go to TokenHarbor. Its free-model terms say prompts and '
+                       'responses may be retained; free access must be enabled in your TokenHarbor account. '
+                       'Haiku Free is a limited-time offer with usage limits shown in your dashboard. '
+                       'The selected model remains unchanged until you choose Haiku in Claude. Continue?')
+            if not messagebox.askyesno('Connect TokenHarbor?', warning, parent=window):
+                return
+            connect_button.configure(state='disabled')
+            status.configure(text='Checking the free model and connecting…', text_color=MUTED)
+            def perform():
+                try:
+                    return client.connect(secret), None
+                except Exception as error:
+                    return None, str(error) if isinstance(error, AccountError) else 'Could not connect TokenHarbor.'
+            def done(result):
+                if not window.winfo_exists():
+                    return
+                desktop_updated, error = result
+                connect_button.configure(state='normal')
+                if error:
+                    status.configure(text=error, text_color='#ffbd93')
+                    return
+                disconnect_button.configure(state='normal')
+                status.configure(text='Free model connected. Choose it in Claude Code /model or the Code tab.',
+                                 text_color=GREEN)
+                if desktop_updated and messagebox.askyesno('Reload Claude model menu?',
+                        'Restart Claude Desktop to show the new model now? Running work will be interrupted.',
+                        parent=window):
+                    self.work(lambda: self.integrations.restart_desktop(['claude_desktop']),
+                              lambda _: status.configure(text='Claude Desktop restarted. Choose Haiku in the model menu.',
+                                                          text_color=GREEN))
+            self.work(perform, done, mutation=True)
+        connect_button = self.button(window, 'Connect free model', connect, primary=True)
+        connect_button.pack(fill='x', padx=24, pady=(10, 8))
+        def disconnect():
+            if not messagebox.askyesno('Remove TokenHarbor?',
+                    'Remove the TokenHarbor key and model from the local gateway and connected Claude menu?',
+                    parent=window):
+                return
+            def done(_):
+                if window.winfo_exists():
+                    status.configure(text='TokenHarbor removed. Restart Claude Desktop to refresh its menu.',
+                                     text_color=GREEN)
+                    disconnect_button.configure(state='disabled')
+            self.work(client.disconnect, done, mutation=True)
+        disconnect_button = self.button(window, 'Remove TokenHarbor connection', disconnect)
+        disconnect_button.configure(state='normal' if client.connected() else 'disabled')
+        disconnect_button.pack(fill='x', padx=24, pady=(0, 12))
 
     def rename(self, account, label):
         try:
