@@ -57,6 +57,9 @@ class Integrations:
         payload = self.controller.request('/oauth-model-alias').get('oauth-model-alias') or {}
         entries = [dict(entry) for entry in payload.get('antigravity', [])]
         desired = {self.claude_desktop_route(model): model for model in models}
+        if 'gemini-3-flash' in models:
+            # Claude Desktop probes this fixed Haiku ID before accepting a model switch.
+            desired['claude-haiku-4-5'] = 'gemini-3-flash'
         updated = [entry for entry in entries if entry.get('alias') not in desired and
                    (not replace or not entry.get('alias', '').startswith(
                        ('claude-sonnet-4-5-ga-', 'claude-haiku-4-5-ga-')))]
@@ -86,6 +89,9 @@ class Integrations:
                   and entry['id'].startswith('gemini-')}
         models.add(self.controller.selected_family_models()['gemini'])
         known = {self.claude_desktop_route(model): model for model in models}
+        if self.claude_desktop_route('gemini-3-flash') in routes:
+            routes.add('claude-haiku-4-5')
+            known['claude-haiku-4-5'] = 'gemini-3-flash'
         unresolved = routes - known.keys()
         if unresolved:
             raise AccountError('Connected Claude models are missing from the gateway catalog. Reconnect Claude Desktop from the application.')

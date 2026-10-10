@@ -144,11 +144,13 @@ class IntegrationTests(unittest.TestCase):
         self.client.write_json(self.controller.proxy_dir / 'cliproxy-models.json',
                                {'antigravity': [{'id': 'gemini-3.1-pro-low'}, {'id': 'gemini-3-flash'}]})
         self.client.apply(['claude_desktop'])
-        expected = {entry['alias']: entry['name'] for entry in self.routes if '-ga-' in entry['alias']}
+        expected = {entry['alias']: entry['name'] for entry in self.routes
+                    if '-ga-' in entry['alias'] or entry['alias'] == 'claude-haiku-4-5'}
         self.assertTrue(expected)
-        self.routes = [entry for entry in self.routes if '-ga-' not in entry['alias']]
+        self.assertEqual(expected['claude-haiku-4-5'], 'gemini-3-flash')
+        self.routes = [entry for entry in self.routes if entry['alias'] not in expected]
         self.assertTrue(self.client.reconcile_desktop_routes())
-        self.assertEqual({entry['alias']: entry['name'] for entry in self.routes if '-ga-' in entry['alias']}, expected)
+        self.assertEqual({entry['alias']: entry['name'] for entry in self.routes if entry['alias'] in expected}, expected)
         self.assertFalse(self.client.reconcile_desktop_routes())
 
     def test_desktop_routes_are_not_created_without_approved_setup(self):
