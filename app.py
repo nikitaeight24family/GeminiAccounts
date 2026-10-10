@@ -98,6 +98,10 @@ class App(ctk.CTk):
         self.add_button = self.button(self.sidebar, '+  Add Google account', self.add_account, primary=True)
         self.add_button.configure(height=30)
         self.add_button.pack(fill='x', padx=16, pady=(0, 6))
+        tokenharbor_button = self.button(self.sidebar, 'TokenHarbor · Haiku 5.5 Free',
+                                         lambda: self.tokenharbor_settings(self))
+        tokenharbor_button.configure(height=30)
+        tokenharbor_button.pack(fill='x', padx=16, pady=(0, 6))
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
         self.account_list.pack(fill='both', expand=True, padx=12)
         self.account_list._scrollbar.grid_remove()
@@ -1540,7 +1544,7 @@ class App(ctk.CTk):
             return
         window = self.connection_window = ctk.CTkToplevel(self)
         window.title('Application connections')
-        window.geometry('620x550')
+        window.geometry('620x480')
         window.configure(fg_color=PANEL)
         window.transient(self)
         ctk.CTkLabel(window, text='Set up connections', font=('Segoe UI', 23, 'bold'), text_color=TEXT).pack(anchor='w', padx=24, pady=(22, 12))
@@ -1588,8 +1592,6 @@ class App(ctk.CTk):
             self.work(perform, applied, mutation=True)
         apply_button = self.button(window, 'Configure selected applications', apply, primary=True)
         apply_button.pack(fill='x', padx=24, pady=(8, 12))
-        self.button(window, 'Add TokenHarbor free Haiku 5.5…',
-                    lambda: self.tokenharbor_settings(window)).pack(fill='x', padx=24, pady=(0, 12))
         def restore():
             if not messagebox.askyesno('Restore previous settings?', 'Client configurations will be restored to their state before the first connection. Later edits to these files will also be replaced by the backup. Gemini Accounts preferences will return to defaults. Google sign-ins will be preserved.\n\nRestore settings?', parent=window):
                 return
