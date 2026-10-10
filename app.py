@@ -615,6 +615,10 @@ class App(ctk.CTk):
         self.tokenharbor_widgets = []
         client = TokenHarbor(self.controller, self.integrations)
         keys = client.keys()
+        signature = tuple(keys)
+        if getattr(self, '_tokenharbor_key_signature', None) == signature:
+            return
+        self._tokenharbor_key_signature = signature
         header = ctk.CTkLabel(frame, text=f'TokenHarbor · keys {len(keys)}', height=18,
             anchor='w', font=('Segoe UI', 11, 'bold'), text_color='#f7ca70')
         header.pack(fill='x', padx=6, pady=(2, 3))
