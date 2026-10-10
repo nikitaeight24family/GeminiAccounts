@@ -14,6 +14,7 @@ import yaml
 from model_context import strip_context_suffix
 from response_guard import StreamProbe, usable_message
 from gateway_diagnostics import Diagnostics
+from request_texts import RequestTextStore
 from provider_errors import failure_reason, provider_error_metadata
 
 PING = b'event: ping\ndata: {"type":"ping"}\n\n'
@@ -105,6 +106,7 @@ class QueueServer(ThreadingHTTPServer):
         self.jobs = {}
         self.updating = False
         self.diagnostics = Diagnostics()
+        self.request_texts = None
         self.lock = threading.Lock()
         self.poll_seconds = 3
         self.retry_base_seconds = 5
@@ -295,6 +297,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.trace('sdk_identity_removed')
                 body = json.dumps(request, ensure_ascii=False).encode()
             requested_model = model
+            request_texts = getattr(self.server, 'request_texts', None)
+            if request_texts:
+                request_texts.record(self.request_id, model, self.path.split('?')[0], request)
             normalized = strip_context_suffix(model)
             if normalized != model:
                 model = normalized
@@ -370,9 +375,12 @@ class Handler(BaseHTTPRequestHandler):
                                     delay = max(delay, min(reported, 3600))
                             except (ValueError, TypeError):
                                 pass
-                            provider_retry_at = reset if reset else time.time() + delay
+                            # Account cooldowns are re-evaluated on every poll. Never
+                            # copy their deadline into a sticky request-level timer:
+                            # a new available account must wake this request immediately.
+                            provider_retry_at = 0 if reset else time.time() + delay
                             self.trace('rate_limit_retry_scheduled', attempt=attempt,
-                                retry_at=provider_retry_at, wait_seconds=max(0, provider_retry_at-time.time()))
+                                retry_at=reset or provider_retry_at, wait_seconds=max(0, (reset or provider_retry_at)-time.time()))
                             continue
                         if reset:
                             continue
@@ -529,6 +537,7 @@ def main():
     keys = config.get('access', {}).get('api-keys', [])
     server = QueueServer(('127.0.0.1', 8317), ('127.0.0.1', config['server']['port']), key, keys, aliases)
     server.diagnostics = Diagnostics(controller.data_dir / 'gateway-diagnostics.jsonl')
+    server.request_texts = RequestTextStore(controller.data_dir / 'request-texts.jsonl')
     server.diagnostics.record('service', 'started', phase='ready')
     server.verifications_path = controller.verification_path
     server.serve_forever()
