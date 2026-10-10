@@ -91,7 +91,7 @@ def install(payload, root, shortcuts=True, automatic=False):
         changed = True
     if changed:
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    atomic_write(manager / 'installation.json', json.dumps({'version': '1.3.7'}).encode())
+    atomic_write(manager / 'installation.json', json.dumps({'version': '1.3.8'}).encode())
     if shortcuts:
         # PowerShell receives paths as environment data, never executable interpolation.
         env = os.environ.copy()
@@ -143,6 +143,13 @@ def main():
             backups = integrations.backups()
             clients = [name for name, paths in integrations.paths().items()
                        if any(str(p.resolve()) in backups for p in paths)]
+            codex_config = integrations.paths()['codex'][0]
+            try:
+                managed_codex = '# BEGIN Gemini Accounts managed provider' in codex_config.read_text('utf-8-sig')
+            except OSError:
+                managed_codex = False
+            if not managed_codex and 'codex' in clients:
+                clients.remove('codex')
             if integrations.legacy_desktop_preset() and 'claude_desktop' not in clients:
                 clients.append('claude_desktop')
             update_clients = clients and messagebox.askyesno('Update connected applications?',

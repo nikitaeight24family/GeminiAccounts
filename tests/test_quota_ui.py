@@ -96,8 +96,9 @@ class QuotaUITests(unittest.TestCase):
                 self.assertLessEqual(last.winfo_rooty() + last.winfo_height(), canvas.winfo_rooty() + canvas.winfo_height())
                 self.assertLess(first.winfo_height() / first._get_widget_scaling(), 105)
                 app.activity_state['latest'] = {
-                    'gemini': {'name': '0', 'at': '2026-10-07T00:00:00Z', 'failed': False},
-                    'claude': {'name': '1', 'at': '2026-10-07T00:00:01Z', 'failed': False}}
+                    'gemini-3-flash': {'name': '0', 'model': 'gemini-3-flash', 'at': now.isoformat(), 'failed': False},
+                    'claude-opus-4-6-thinking': {'name': '1', 'model': 'claude-opus-4-6-thinking',
+                                               'at': now.isoformat(), 'failed': False}}
                 app.gateway_jobs = [{'model': 'gemini-3-flash', 'state': 'running'}, {'model': 'claude-opus-4-6-thinking', 'state': 'running'}]
                 app.gateway_jobs_checked = time.monotonic()
                 app.animate_active_borders()
@@ -111,7 +112,7 @@ class QuotaUITests(unittest.TestCase):
                 heading = app.account_widgets['0']['button']
                 model_items = heading._canvas.find_withtag('last_model')
                 self.assertEqual(len(model_items), 2)
-                self.assertEqual(heading._canvas.itemcget(model_items[-1], 'text'), 'Sonnet 4.6')
+                self.assertEqual(heading._canvas.itemcget(model_items[-1], 'text'), '3 Flash')
                 self.assertLess(heading._canvas.bbox(model_items[-1])[2], heading.winfo_width())
                 canvas_active = app.account_widgets['1']['card']._canvas
                 segments = canvas_active.find_withtag('rainbow')
@@ -122,15 +123,15 @@ class QuotaUITests(unittest.TestCase):
                 app.draw_rainbow_border(app.account_widgets['1'], .5)
                 self.assertNotEqual(old_colors, [canvas_active.itemcget(i, 'fill') for i in segments])
                 # A newer Gemini request leaves Claude's subscription selected.
-                app.activity_state['latest']['claude-sonnet-4-5'] = {
-                    'name': '2', 'at': '2026-10-07T00:00:02Z'}
+                app.activity_state['latest']['gemini-3-flash'] = {
+                    'name': '2', 'model': 'gemini-3-flash', 'at': datetime.now(timezone.utc).isoformat()}
                 app.animate_active_borders()
                 self.assertEqual(app.active_provider_accounts(), {'gemini': '2', 'claude': '1'})
                 self.assertFalse(first._canvas.find_withtag('rainbow'))
                 self.assertTrue(canvas_active.find_withtag('rainbow'))
                 # Both services can select the same account with both badges.
                 app.activity_state['latest']['claude-opus-4-6-thinking'] = {
-                    'name': '2', 'at': '2026-10-07T00:00:03Z'}
+                    'name': '2', 'model': 'claude-opus-4-6-thinking', 'at': datetime.now(timezone.utc).isoformat()}
                 app.animate_active_borders()
                 self.assertEqual(app.active_account_names(), {'2'})
                 self.assertEqual(app.account_widgets['2']['active_families'], ('gemini', 'claude'))

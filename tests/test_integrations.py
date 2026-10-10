@@ -18,6 +18,14 @@ class IntegrationTests(unittest.TestCase):
         self.controller.proxy_dir.mkdir()
         (self.controller.proxy_dir / 'client-key.txt').write_text('local-test-key')
         self.client = Integrations(self.controller, self.root / 'home', self.root / 'local')
+        self.routes = []
+        def management(path, method='GET', payload=None):
+            if path != '/oauth-model-alias':
+                raise AccountError('No test gateway')
+            if method == 'PATCH':
+                self.routes = payload['aliases']
+            return {'oauth-model-alias': {'antigravity': self.routes}}
+        self.controller.request = management
 
     def tearDown(self):
         self.temp.cleanup()
@@ -91,7 +99,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(models[0]['prefer1m'])
         self.assertFalse(models[1]['supports1m'])
         self.assertFalse(models[1]['prefer1m'])
-        self.assertEqual(models[2]['name'], 'gemini-3-flash')
+        self.assertEqual(models[2]['name'], self.client.claude_desktop_route('gemini-3-flash'))
+        self.assertEqual(next(x['name'] for x in self.routes if x['alias'] == models[2]['name']), 'gemini-3-flash')
         self.assertEqual(env['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'gemini-3-flash[1m]')
         self.assertEqual(env['CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'], '1')
 
@@ -104,7 +113,11 @@ class IntegrationTests(unittest.TestCase):
             'default_reasoning_level': 'medium', 'supported_reasoning_levels': []}]})
         self.client.apply(['claude_desktop', 'codex'])
         desktop = self.client.read_json(self.client.paths()['claude_desktop'][2])['inferenceModels']
-        self.assertTrue(all(any(entry['name'] == model for entry in desktop) for model in choices))
+        self.assertTrue(all(any(entry['name'] == self.client.claude_desktop_route(model) for entry in desktop)
+                            for model in choices))
+        self.assertTrue(all('gemini' not in entry['name'] for entry in desktop))
+        self.assertTrue(all(any(route['alias'] == self.client.claude_desktop_route(model) and route['name'] == model
+                                for route in self.routes) for model in choices))
         codex = self.client.read_json(self.client.paths()['codex'][2])['models']
         self.assertEqual([entry['slug'] for entry in codex], ['gpt-test'] + choices)
         self.assertEqual([codex[i]['default_reasoning_level'] for i in range(1, 5)],
@@ -124,7 +137,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(self.client.repair_desktop_fast_slot())
         changed = self.client.read_json(path)
         self.assertEqual(changed['inferenceModels'][:2], preset['inferenceModels'][:2])
-        self.assertEqual(changed['inferenceModels'][2]['name'], 'gemini-3-flash')
+        self.assertEqual(changed['inferenceModels'][2]['name'], self.client.claude_desktop_route('gemini-3-flash'))
         self.assertEqual(changed['inferenceGatewayApiKey'], preset['inferenceGatewayApiKey'])
         self.assertFalse(self.client.repair_desktop_fast_slot())
 

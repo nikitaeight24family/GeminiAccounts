@@ -1102,15 +1102,20 @@ class App(ctk.CTk):
     def active_provider_accounts(self):
         if time.monotonic() - getattr(self, 'gateway_jobs_checked', 0) > 10:
             return {}
-        running = {self.model_family(job.get('upstream_model') or
-                   getattr(self, 'model_aliases', {}).get(job.get('model'), job.get('model', '')))
+        running = {job.get('upstream_model') or
+                   getattr(self, 'model_aliases', {}).get(job.get('model'), job.get('model', ''))
                    for job in getattr(self, 'gateway_jobs', []) if job.get('state') == 'running'}
         enabled = {a['name'] for a in self.items if not a.get('disabled')}
         latest = {}
         for model, event in self.activity_state['latest'].items():
             actual = event.get('upstream_model') or getattr(self, 'model_aliases', {}).get(event.get('model') or model, event.get('model') or model)
             family = self.model_family(actual)
-            if family and family in running and not event.get('failed') and (family not in latest or event['at'] > latest[family]['at']):
+            try:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(event['at'].replace('Z', '+00:00'))).total_seconds()
+            except (KeyError, ValueError, TypeError, AttributeError):
+                continue
+            if (family and actual in running and not event.get('failed') and 0 <= age < 60
+                    and (family not in latest or event['at'] > latest[family]['at'])):
                 latest[family] = event
         return {family: event['name'] for family, event in latest.items() if event['name'] in enabled}
 
@@ -1222,10 +1227,19 @@ class App(ctk.CTk):
             return
         providers = self.active_provider_accounts()
         active = set(providers.values())
+        running_models = {}
+        for job in getattr(self, 'gateway_jobs', []):
+            if job.get('state') != 'running':
+                continue
+            actual = job.get('upstream_model') or getattr(self, 'model_aliases', {}).get(job.get('model'), job.get('model', ''))
+            family = self.model_family(actual)
+            if family:
+                running_models[family] = model_name(actual, getattr(self, 'model_aliases', None))
         for name, widgets in self.account_widgets.items():
             card = widgets['card']
             families = tuple(kind for kind in ('gemini', 'claude') if providers.get(kind) == name)
-            self.draw_active_badges(widgets, families, self.last_account_model(name))
+            self.draw_active_badges(widgets, families,
+                running_models.get(families[-1], '') if families else self.last_account_model(name))
             if name in active:
                 self.draw_rainbow_border(widgets, (time.monotonic() / 8) % 1)
             elif widgets.pop('rainbow_size', None):
@@ -1509,11 +1523,13 @@ class App(ctk.CTk):
         backups = self.integrations.backups()
         managed_clients = [client for client, paths in self.integrations.paths().items()
                            if any(str(path.resolve()) in backups for path in paths)]
+        if not managed_codex and 'codex' in managed_clients:
+            managed_clients.remove('codex')
         if managed_codex and 'codex' not in managed_clients:
             managed_clients.append('codex')
         if self.integrations.legacy_desktop_preset() and 'claude_desktop' not in managed_clients:
             managed_clients.append('claude_desktop')
-        update_codex = ctk.BooleanVar(value=bool(managed_clients))
+        update_codex = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(window, text='Update connected client model menus (asks permission)',
             variable=update_codex, state='normal' if managed_clients else 'disabled').pack(anchor='w', padx=24, pady=(16, 10))
         status = ctk.CTkLabel(window, text='Loading the account model catalog…', text_color=MUTED, wraplength=500, justify='left')
@@ -1610,7 +1626,7 @@ class App(ctk.CTk):
         detected = self.integrations.detected()
         choices = {}
         for client, title in [('claude_desktop', 'Claude Desktop · Code tab'), ('codex', 'Codex Desktop and CLI'), ('claude_cli', 'Claude Code CLI')]:
-            value = ctk.BooleanVar(value=detected[client])
+            value = ctk.BooleanVar(value=False)
             choices[client] = value
             ctk.CTkCheckBox(window, text=title + ('' if detected[client] else ' · not detected'), variable=value).pack(anchor='w', padx=26, pady=12)
         status = ctk.CTkLabel(window, text='Client sessions, projects and sign-ins are preserved.', text_color=MUTED, wraplength=560, justify='left')

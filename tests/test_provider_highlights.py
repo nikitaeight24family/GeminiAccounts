@@ -49,24 +49,34 @@ class ProviderHighlightTests(unittest.TestCase):
     def test_alias_can_select_claude_without_marking_gemini_active(self):
         view = SimpleNamespace(items=[{'name': 'a', 'disabled': False}],
             activity_state={'latest': {'claude-sonnet-4-5': {'name': 'a', 'model': 'claude-sonnet-4-5',
-                'upstream_model': 'claude-opus-4-6-thinking', 'at': '2026-10-07T00:00:00Z'}}}, model_family=App.model_family,
+                'upstream_model': 'claude-opus-4-6-thinking', 'at': datetime.now(timezone.utc).isoformat()}}}, model_family=App.model_family,
                 gateway_jobs=[{'model': 'claude-opus-4-6-thinking', 'state': 'running'}], gateway_jobs_checked=time.monotonic())
         self.assertEqual(App.active_provider_accounts(view), {'claude': 'a'})
 
     def test_independent_selections_aliases_and_disabled_latest(self):
+        now = datetime.now(timezone.utc)
         state = {'latest': {
-            'claude-sonnet-4-5': {'name': 'a', 'at': '2026-10-07T00:00:00Z'},
-            'claude-opus-4-6-thinking': {'name': 'b', 'at': '2026-10-07T00:00:01Z'}}}
+            'gemini-3-flash': {'name': 'a', 'at': (now - timedelta(seconds=3)).isoformat()},
+            'claude-opus-4-6-thinking': {'name': 'b', 'at': (now - timedelta(seconds=2)).isoformat()}}}
         view = SimpleNamespace(items=[{'name': n, 'disabled': False} for n in ('a', 'b', 'c')],
                                activity_state=state, model_family=App.model_family,
                                gateway_jobs=[{'model': 'gemini-3-flash', 'state': 'running'}, {'model': 'claude-opus-4-6-thinking', 'state': 'running'}],
                                gateway_jobs_checked=time.monotonic())
         self.assertEqual(App.active_provider_accounts(view), {'gemini': 'a', 'claude': 'b'})
-        state['latest']['gemini-3.8-flash-high'] = {'name': 'c', 'at': '2026-10-07T00:00:02Z'}
+        state['latest']['gemini-3.8-flash-high'] = {'name': 'c', 'at': (now - timedelta(seconds=1)).isoformat()}
+        self.assertEqual(App.active_provider_accounts(view), {'gemini': 'a', 'claude': 'b'})
+        state['latest']['gemini-3-flash'] = {'name': 'c', 'at': now.isoformat()}
         self.assertEqual(App.active_provider_accounts(view), {'gemini': 'c', 'claude': 'b'})
-        state['latest']['claude-sonnet-4-6'] = {'name': 'c', 'at': '2026-10-07T00:00:03Z'}
-        self.assertEqual(App.active_provider_accounts(view), {'gemini': 'c', 'claude': 'c'})
         view.items[2]['disabled'] = True
+        self.assertEqual(App.active_provider_accounts(view), {'claude': 'b'})
+
+    def test_flash_history_does_not_claim_running_pro_request(self):
+        now = datetime.now(timezone.utc).isoformat()
+        view = SimpleNamespace(items=[{'name': 'flash', 'disabled': False}], model_family=App.model_family,
+            activity_state={'latest': {'claude-haiku-4-5': {'name': 'flash', 'model': 'claude-haiku-4-5',
+                'upstream_model': 'gemini-3-flash', 'at': now}}},
+            gateway_jobs=[{'model': 'claude-sonnet-4-5', 'state': 'running'}],
+            model_aliases={'claude-sonnet-4-5': 'gemini-pro-agent'}, gateway_jobs_checked=time.monotonic())
         self.assertEqual(App.active_provider_accounts(view), {})
 
 
