@@ -616,7 +616,7 @@ class App(ctk.CTk):
         client = TokenHarbor(self.controller, self.integrations)
         keys = client.keys()
         signature = tuple(keys)
-        if getattr(self, '_tokenharbor_key_signature', None) == signature:
+        if getattr(self, '_tokenharbor_key_signature', None) == signature and frame.winfo_children():
             return
         self._tokenharbor_key_signature = signature
         header = ctk.CTkLabel(frame, text=f'TokenHarbor · keys {len(keys)}', height=18,
