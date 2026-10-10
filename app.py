@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageTk
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import messagebox, filedialog, simpledialog
 from tkinter import Canvas, font as tkfont
 from backend import Controller, AccountError
@@ -1610,7 +1611,7 @@ class App(ctk.CTk):
     def tokenharbor_settings(self, parent):
         window = ctk.CTkToplevel(self)
         window.title('TokenHarbor free model')
-        window.geometry('570x510')
+        window.geometry('570x560')
         window.configure(fg_color=PANEL)
         window.transient(parent)
         client = TokenHarbor(self.controller, self.integrations)
@@ -1625,6 +1626,26 @@ class App(ctk.CTk):
                         fill='x', padx=24, pady=(14, 8))
         entry = ctk.CTkEntry(window, placeholder_text='Paste thk_… Universal Key', show='*', height=36)
         entry.pack(fill='x', padx=24, pady=(0, 8))
+        def paste_key():
+            try:
+                secret = window.clipboard_get().strip()
+            except (tk.TclError, AttributeError):
+                status.configure(text='Clipboard is empty or unavailable.', text_color='#ffbd93')
+                return
+            if not secret:
+                status.configure(text='Clipboard is empty.', text_color='#ffbd93')
+                return
+            entry.delete(0, 'end')
+            entry.insert(0, secret)
+            entry.focus_set()
+            status.configure(text='Key pasted. You can connect the free model.', text_color=MUTED)
+        def paste_shortcut(_event):
+            paste_key()
+            return 'break'
+        entry.bind('<Control-v>', paste_shortcut)
+        entry.bind('<Control-V>', paste_shortcut)
+        entry.bind('<Shift-Insert>', paste_shortcut)
+        self.button(window, 'Paste key from clipboard', paste_key).pack(fill='x', padx=24, pady=(0, 8))
         status = ctk.CTkLabel(window, text='Connected' if client.connected() else 'Not connected',
                               text_color=GREEN if client.connected() else MUTED,
                               wraplength=520, justify='left')
@@ -1638,7 +1659,10 @@ class App(ctk.CTk):
                         fill='x', padx=24, pady=(0, 6))
         def connect():
             secret = entry.get().strip()
-            entry.delete(0, 'end')
+            if not secret:
+                status.configure(text='Paste a TokenHarbor Universal Key first.', text_color='#ffbd93')
+                entry.focus_set()
+                return
             preset = client.approved_desktop_preset()
             affected = str(self.controller.proxy_dir / 'config.yaml')
             if preset:
@@ -1651,6 +1675,7 @@ class App(ctk.CTk):
                        'The selected model remains unchanged until you choose Haiku in Claude. Continue?')
             if not messagebox.askyesno('Connect TokenHarbor?', warning, parent=window):
                 return
+            entry.delete(0, 'end')
             connect_button.configure(state='disabled')
             status.configure(text='Checking the free model and connecting…', text_color=MUTED)
             def perform():
