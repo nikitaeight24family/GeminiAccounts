@@ -31,6 +31,35 @@ class QuotaUITests(unittest.TestCase):
         group['buckets'][1]['remaining'] = None
         self.assertEqual(len(App.visible_quota_buckets(group)), 2)
 
+    def test_depleted_weekly_accounts_are_below_a_divider(self):
+        import customtkinter as ctk
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), \
+                patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
+            app = App()
+            try:
+                now = datetime.now(timezone.utc)
+                values = {'ready': (.01, 4), 'dead_late': (.009, 96), 'dead_early': (0, 48),
+                          'verify': (0, 24)}
+                for name, (remaining, hours) in values.items():
+                    app.quota_cache[name] = {'data': {'groups': [{'kind': 'gemini', 'buckets': [
+                        {'window': '5h', 'remaining': 1, 'reset': (now + timedelta(hours=1)).isoformat()},
+                        {'window': 'weekly', 'remaining': remaining,
+                         'reset': (now + timedelta(hours=hours)).isoformat()}]}]}}
+                accounts = [{'name': name, 'email': name, 'disabled': False, 'unavailable': False,
+                             'access_issue': 'verification' if name == 'verify' else None}
+                            for name in ('dead_late', 'ready', 'verify', 'dead_early')]
+                app.loaded(accounts)
+                self.assertEqual([name for name, _ in app.account_layout],
+                                 ['verify', 'ready', 'dead_early', 'dead_late'])
+                self.assertTrue(any(index == 2 and widget.cget('height') == 1
+                                    for index, widget, _ in app.account_group_widgets))
+                self.assertTrue(any(widget.cget('text') == 'Weekly quota below 1% · 2'
+                                    for _, widget, _ in app.account_group_widgets
+                                    if isinstance(widget, ctk.CTkLabel)))
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_model_picker_offers_high_and_other_families_and_applies_exact_id(self):
         import customtkinter as ctk
         from integrations import Integrations

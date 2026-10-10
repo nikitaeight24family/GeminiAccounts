@@ -598,11 +598,14 @@ class App(ctk.CTk):
 
     def draw_account_list(self):
         self.update_total_quota()
-        accounts = sorted(self.items, key=lambda a: (a.get('access_issue') != 'verification',
-            0 if a.get('access_issue') == 'verification' else self.account_reset_order(a['name'])))
+        accounts = sorted(self.items, key=self.account_sort_key)
         names = [a['name'] for a in accounts]
-        layout = [(a['name'], (a.get('access_issue') == 'verification', self.quota_layout(a['name']))) for a in accounts]
+        layout = [(a['name'], (a.get('access_issue') == 'verification',
+            self.account_weekly_depleted(a['name']), self.quota_layout(a['name']))) for a in accounts]
         pending_count = sum(a.get('access_issue') == 'verification' for a in accounts)
+        depleted_count = sum(a.get('access_issue') != 'verification' and
+                             self.account_weekly_depleted(a['name']) for a in accounts)
+        ready_count = len(accounts) - pending_count - depleted_count
         if len(names) < 11:
             self.account_list._scrollbar.grid_remove()
         else:
@@ -628,16 +631,22 @@ class App(ctk.CTk):
         self.account_group_widgets = []
         self.account_layout = layout
         for index, account in enumerate(accounts):
-            if pending_count and index in (0, pending_count):
-                pending = index == 0
-                if not pending:
+            section = None
+            if pending_count and index == 0:
+                section = ('Verification required', pending_count, '#f7ca70', False)
+            elif pending_count and ready_count and index == pending_count:
+                section = ('Ready accounts', ready_count, MUTED, True)
+            elif depleted_count and index == pending_count + ready_count:
+                section = ('Weekly quota below 1%', depleted_count, '#f7ca70', True)
+            if section:
+                title, count, color, divider = section
+                if divider:
                     separator = ctk.CTkFrame(self.account_list, height=1, fg_color='#43516a')
                     options = {'fill': 'x', 'padx': 5, 'pady': (6, 3)}
                     separator.pack(**options)
                     self.account_group_widgets.append((index, separator, options))
-                title = f'Verification required · {pending_count}' if pending else f'Ready accounts · {len(accounts) - pending_count}'
-                header = ctk.CTkLabel(self.account_list, text=title, height=19, anchor='w',
-                    font=('Segoe UI', 11, 'bold'), text_color='#f7ca70' if pending else MUTED)
+                header = ctk.CTkLabel(self.account_list, text=f'{title} · {count}', height=19, anchor='w',
+                    font=('Segoe UI', 11, 'bold'), text_color=color)
                 options = {'fill': 'x', 'padx': 6, 'pady': (0, 3)}
                 header.pack(**options)
                 self.account_group_widgets.append((index, header, options))
@@ -701,13 +710,27 @@ class App(ctk.CTk):
         marker = '!' if account.get('access_issue') else 'Ⅱ' if account.get('disabled') else '●'
         return marker + '  ' + self.display_name(account)
 
+    def account_weekly_depleted(self, name):
+        gemini = next((group for group in self.quota_groups(name) if group['kind'] == 'gemini'), {})
+        weekly = next((bucket.get('remaining') for bucket in gemini.get('buckets', [])
+                       if bucket.get('window') == 'weekly'), None)
+        return (isinstance(weekly, (int, float)) and not isinstance(weekly, bool)
+                and math.isfinite(weekly) and 0 <= weekly < .01)
+
+    def account_sort_key(self, account):
+        if account.get('access_issue') == 'verification':
+            return (0, 0)
+        return (2 if self.account_weekly_depleted(account['name']) else 1,
+                self.account_reset_order(account['name']))
+
     def account_reset_order(self, name):
         resets = []
+        window = 'weekly' if self.account_weekly_depleted(name) else '5h'
         for group in self.quota_groups(name):
             if group.get('kind') != 'gemini':
                 continue
             for bucket in group['buckets']:
-                if bucket.get('window') != '5h':
+                if bucket.get('window') != window:
                     continue
                 try:
                     reset = datetime.fromisoformat(bucket['reset'].replace('Z', '+00:00'))
