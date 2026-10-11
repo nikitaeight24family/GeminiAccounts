@@ -54,6 +54,16 @@ class TokenHarbor:
         except (OSError, ValueError, AttributeError, yaml.YAMLError):
             return []
 
+    def auth_keys(self):
+        """Map proxy usage auth indexes to configured keys without exposing them in UI logs."""
+        configured = set(self.keys())
+        try:
+            rows = self.controller.request('/claude-api-key').get('claude-api-key', [])
+            return {row['auth-index']: row['api-key'] for row in rows
+                    if row.get('api-key') in configured and row.get('auth-index')}
+        except (AccountError, OSError, KeyError, TypeError, AttributeError):
+            return {}
+
     @staticmethod
     def verify_key(key):
         """Exercise the exact free Anthropic route before saving a credential."""

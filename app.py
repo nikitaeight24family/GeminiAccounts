@@ -18,6 +18,7 @@ from tkinter import messagebox, filedialog, simpledialog
 from tkinter import Canvas, font as tkfont
 from backend import Controller, AccountError
 from activity import Activity
+from harbor_activity import HarborActivity, key_id, key_label
 from routing import rank_accounts, quota_projection, quota_entry
 from integrations import Integrations
 from tokenharbor import TokenHarbor
@@ -72,6 +73,7 @@ class App(ctk.CTk):
         self.model_route_error = None
         self.login_url = None
         self.activity = Activity(self.controller.data_dir / 'activity.json')
+        self.harbor_activity = HarborActivity(self.controller.data_dir / 'tokenharbor-activity.json')
         self.activity_state = copy.deepcopy(self.activity.state)
         self.recent_account_models = self.latest_models_by_account(self.activity_state)
         self.activity_started = False
@@ -439,6 +441,7 @@ class App(ctk.CTk):
         def fetch():
             try:
                 accounts, records, strategy = self.controller.activity_snapshot()
+                self.harbor_activity.observe(records, TokenHarbor(self.controller, self.integrations).auth_keys())
                 return accounts, copy.deepcopy(self.activity.ingest(records, accounts)), strategy, None, self.controller.quota_wait_status()
             except Exception:
                 return None, None, None, 'Cannot reach the proxy. Showing cached data.', {'jobs': []}
@@ -454,6 +457,7 @@ class App(ctk.CTk):
                 self.activity_strategy = strategy
                 self.render_activity()
                 self.draw_account_list()
+                self.update_tokenharbor_status()
                 waiting = [job for job in quota_wait.get('jobs', []) if job.get('state') == 'waiting']
                 if waiting:
                     self.service.configure(text=self.quota_wait_text(waiting), text_color='#f7ca70')
@@ -623,27 +627,64 @@ class App(ctk.CTk):
         for child in frame.winfo_children():
             child.destroy()
         self.tokenharbor_widgets = []
-        self.tokenharbor_highlight = None
+        self.tokenharbor_rows = {}
         header = self.button(frame, ('▸' if self.tokenharbor_collapsed else '▾') +
             f'  TokenHarbor · keys {len(keys)}', self.toggle_tokenharbor_accounts)
         header.configure(height=28, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         header.pack(fill='x', padx=1, pady=(2, 3))
         if self.tokenharbor_collapsed:
             return
+        self.tokenharbor_last = ctk.CTkLabel(frame, text='', height=17,
+            anchor='w', font=('Segoe UI', 10), text_color=MUTED)
+        self.tokenharbor_last.pack(fill='x', padx=8, pady=(0, 3))
         if not keys:
             ctk.CTkLabel(frame, text='No TokenHarbor keys connected', height=17,
                 anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(fill='x', padx=8, pady=(0, 3))
         for key in keys:
             card = ctk.CTkFrame(frame, fg_color='#202938', corner_radius=8, border_width=1, border_color='#344155')
             card.pack(fill='x', padx=1, pady=(0, 2))
-            ctk.CTkLabel(card, text='●  ' + key[:7] + '…' + key[-4:], height=20,
+            ctk.CTkLabel(card, text='●  ' + key_label(key), height=20,
                 anchor='w', font=('Segoe UI', 11), text_color=TEXT).pack(fill='x', padx=8, pady=(3, 0))
-            ctk.CTkLabel(card, text='Haiku 5.5 Free · gateway rotation', height=17,
-                anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(fill='x', padx=8, pady=(0, 3))
+            status = ctk.CTkLabel(card, text='', height=17,
+                anchor='w', font=('Segoe UI', 10), text_color=MUTED)
+            status.pack(fill='x', padx=8, pady=(0, 3))
             self.tokenharbor_widgets.append(card)
+            self.tokenharbor_rows[key_id(key)] = (card, status)
         add = self.button(frame, '+ Add TokenHarbor account', lambda: self.tokenharbor_settings(self))
         add.configure(height=24, fg_color='#303e59')
         add.pack(fill='x', padx=1, pady=(2, 0))
+        self.button(frame, 'Balance and reset ↗',
+                    lambda: webbrowser.open('https://tokenharbor.ai/dashboard')).pack(
+                        fill='x', padx=1, pady=(2, 0))
+        self.update_tokenharbor_status()
+
+    def update_tokenharbor_status(self):
+        if self.tokenharbor_collapsed or not getattr(self, 'tokenharbor_rows', None):
+            return
+        latest = self.harbor_activity.state.get('latest') or {}
+        self.tokenharbor_last.configure(text='Last used: ' + latest['label'] if latest else
+                                        'Key in use is identified after a response')
+        for fingerprint, (card, label) in self.tokenharbor_rows.items():
+            event = self.harbor_activity.state.get('keys', {}).get(fingerprint)
+            if not event:
+                line, color = 'No requests recorded · balance unknown', MUTED
+            else:
+                try:
+                    at = datetime.fromisoformat(event['at'].replace('Z', '+00:00')).astimezone().strftime('%H:%M')
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    at = '—'
+                if event.get('status') == 429:
+                    line, color = f'429 at {at} · limit hit · reset unknown', '#ffbd93'
+                elif event.get('failed'):
+                    line, color = f'Error {event.get("status") or "?"} at {at} · balance unknown', '#ffbd93'
+                else:
+                    line, color = f'OK at {at} · balance/reset in dashboard', MUTED
+            if label.cget('text') != line:
+                label.configure(text=line, text_color=color)
+            active = latest.get('key_id') == fingerprint
+            desired = ACCENT if active else '#344155'
+            if card.cget('border_color') != desired:
+                card.configure(border_color=desired)
 
     def toggle_tokenharbor_accounts(self):
         self.tokenharbor_collapsed = not self.tokenharbor_collapsed
@@ -1340,14 +1381,6 @@ class App(ctk.CTk):
                     card._canvas.delete('rainbow')
                     widgets.pop('rainbow_size', None)
                     widgets.pop('rainbow_segments', None)
-        harbor_active = any(job.get('state') == 'running' and
-                            'tokenharbor' in (job.get('model') or '').lower()
-                            for job in getattr(self, 'gateway_jobs', []))
-        if getattr(self, 'tokenharbor_highlight', None) != harbor_active:
-            self.tokenharbor_highlight = harbor_active
-            for card in getattr(self, 'tokenharbor_widgets', []):
-                card.configure(border_width=2 if harbor_active else 1,
-                    border_color=ACCENT if harbor_active else '#344155')
         self.after(500, self.animate_active_borders)
 
     def display_name(self, account):

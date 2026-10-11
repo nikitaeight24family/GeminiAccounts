@@ -267,6 +267,11 @@ class QuotaUITests(unittest.TestCase):
                 app.update()
                 self.assertIs(app.rename_entry, entry)
                 self.assertEqual(entry.get(), 'Unsaved name')
+                # Finish the batched paint before replacing the fixture's cache.
+                if app.quota_render_job is not None:
+                    app.after_cancel(app.quota_render_job)
+                    app.quota_render_job = None
+                    app.render_quota_updates()
                 now = datetime.now(timezone.utc)
                 app.quota_cache = {}
                 for name, minutes, days in [('0', 22, 6), ('1', 240, 7)]:
