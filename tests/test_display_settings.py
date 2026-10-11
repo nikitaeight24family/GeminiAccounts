@@ -57,6 +57,8 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertIn('AI Ultra', app.account_widgets['google']['plan'].cget('text'))
                     app.update_idletasks()
                     google_row = app.account_widgets['google']
+                    self.assertIs(google_row['button'].cget('image'), app.provider_icons['antigravity'])
+                    self.assertIs(app.google_accounts_header.cget('image'), app.provider_icons['antigravity'])
                     self.assertGreaterEqual(google_row['plan'].winfo_rooty(),
                                             google_row['button'].winfo_rooty() + google_row['button'].winfo_height())
                     self.assertIn('Pro', app.chatgpt_widgets['gpt']['plan'].cget('text'))

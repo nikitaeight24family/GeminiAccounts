@@ -22,6 +22,7 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from backend import Controller, AccountError
 from account_status import account_status
+from brand_icons import ANTIGRAVITY_PNG
 from activity import Activity
 from harbor_activity import HarborActivity, key_id, key_label
 from routing import rank_accounts, quota_projection, quota_entry
@@ -146,7 +147,7 @@ class App(ctk.CTk):
         self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.draw_chatgpt_accounts()
         self.google_accounts_header = self.button(self.sidebar, '', self.toggle_google_accounts)
-        self.google_accounts_header.configure(image=self.provider_icons['gemini'], compound='left', height=27, anchor='w',
+        self.google_accounts_header.configure(image=self.provider_icons['antigravity'], compound='left', height=27, anchor='w',
                                               font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         self.google_accounts_header.pack(fill='x', padx=13, pady=(0, 2))
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
@@ -1273,6 +1274,7 @@ class App(ctk.CTk):
                 hover=not self.details_collapsed,
                 hover_color='#334158', text_color=TEXT, font=('Segoe UI', 12, 'bold'), command=lambda a=account: self.select(a))
             button.configure(width=1)
+            button.configure(image=self.provider_icons['antigravity'], compound='left')
             button.pack(side='left', fill='x', expand=True)
             plan = ctk.CTkLabel(card, text='', height=17, width=1, corner_radius=5,
                                 fg_color='#183b32', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
@@ -1379,8 +1381,9 @@ class App(ctk.CTk):
             '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'))).convert('RGBA')
         light_openai = Image.new('RGBA', openai.size, '#243047')
         light_openai.putalpha(openai.getchannel('A'))
+        antigravity = Image.open(io.BytesIO(base64.b64decode(ANTIGRAVITY_PNG))).convert('RGBA')
         return {kind: ctk.CTkImage(light_image=light_openai if kind == 'openai' else bitmap, dark_image=bitmap, size=(14, 14))
-                for kind, bitmap in [('gemini', gemini), ('claude', claude), ('openai', openai)]}
+                for kind, bitmap in [('gemini', gemini), ('claude', claude), ('openai', openai), ('antigravity', antigravity)]}
 
     @staticmethod
     def sidebar_quota_text(group, bucket):
