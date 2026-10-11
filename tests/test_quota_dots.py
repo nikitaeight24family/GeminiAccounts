@@ -22,3 +22,9 @@ class QuotaDotTests(unittest.TestCase):
                 self.assertGreater(pixels, previous)
                 previous = pixels
         self.assertNotEqual(quota_dot(None).tobytes(), quota_dot(0).tobytes())
+
+    def test_window_labels_are_distinct_in_every_quota_state(self):
+        for light in (False, True):
+            for value in (None, 0, .3, 1):
+                self.assertNotEqual(quota_dot(value, light, '5h').tobytes(),
+                                    quota_dot(value, light, '1w').tobytes())

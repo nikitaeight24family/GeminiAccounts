@@ -431,7 +431,8 @@ class App(ctk.CTk):
 
     def draw_chatgpt_accounts(self):
         frame = self.chatgpt_accounts
-        rows = sorted(self.chatgpt_items, key=lambda item: item.get('email') or item.get('name') or '')
+        rows = sorted(self.chatgpt_items, key=lambda item: (-self.account_priority(item),
+                      item.get('email') or item.get('name') or ''))
         widgets = getattr(self, 'chatgpt_widgets', {})
         self.chatgpt_widgets = widgets
         names = {item['name'] for item in rows}
@@ -1226,13 +1227,17 @@ class App(ctk.CTk):
         self.draw_tokenharbor_accounts()
         self.update_total_quota()
         accounts = sorted(self.items, key=self.account_sort_key)
+        manual_order = any(self.account_priority(a) for a in accounts)
         names = [a['name'] for a in accounts]
         layout = [(a['name'], (a.get('access_issue') == 'verification',
-            self.account_weekly_depleted(a['name']), self.quota_layout(a['name']))) for a in accounts]
+            self.account_weekly_depleted(a['name']), self.quota_layout(a['name']), manual_order)) for a in accounts]
         pending_count = sum(a.get('access_issue') == 'verification' for a in accounts)
         depleted_count = sum(a.get('access_issue') != 'verification' and
                              self.account_weekly_depleted(a['name']) for a in accounts)
         ready_count = len(accounts) - pending_count - depleted_count
+        if manual_order:
+            pending_count = depleted_count = 0
+            ready_count = len(accounts)
         if len(names) < 11:
             self.account_list._scrollbar.grid_remove()
         else:
@@ -1394,7 +1399,7 @@ class App(ctk.CTk):
             self.draw_chatgpt_accounts()
             self.refresh_chatgpt_accounts()
         else:
-            self.update_account_row(account)
+            self.draw_account_list()
             self.policy_rows = []
             self.queue_policy()
         self.notice.configure(text='Account priority saved.', text_color=GREEN)
@@ -1407,10 +1412,14 @@ class App(ctk.CTk):
                 and math.isfinite(weekly) and 0 <= weekly < .01)
 
     def account_sort_key(self, account):
+        priority = -self.account_priority(account)
         if account.get('access_issue') == 'verification':
-            return (0, 0)
-        return (2 if self.account_weekly_depleted(account['name']) else 1,
+            return (priority, 0, 0)
+        return (priority, 2 if self.account_weekly_depleted(account['name']) else 1,
                 self.account_reset_order(account['name']))
+
+    def account_priority(self, account):
+        return self.controller.preferences.get('account-priorities', {}).get(account['name'], 0)
 
     def account_reset_order(self, name):
         resets = []
@@ -1576,12 +1585,12 @@ class App(ctk.CTk):
         self.update_compact_quotas()
 
     def make_quota_dots(self, parent, labels):
-        frame = ctk.CTkFrame(parent, fg_color='#303b50', width=len(labels) * 17, height=18, corner_radius=0)
+        frame = ctk.CTkFrame(parent, fg_color='#303b50', width=len(labels) * 21, height=22, corner_radius=0)
         frame.dot_widgets = []
         for label in labels:
-            widget = ctk.CTkLabel(frame, text='', width=14, height=18, padx=0)
+            widget = ctk.CTkLabel(frame, text='', width=19, height=22, padx=0)
             widget.dot_label = label
-            widget.pack(side='left', padx=(0, 3))
+            widget.pack(side='left', padx=(0, 2))
             widget.bind('<Button-1>', lambda event, button=parent: button.invoke())
             frame.dot_widgets.append(widget)
         return frame
@@ -1599,8 +1608,9 @@ class App(ctk.CTk):
             return
         frame.dot_values = signature
         for widget, value in zip(frame.dot_widgets, values):
-            widget.configure(image=ctk.CTkImage(light_image=quota_dot(value, True),
-                                              dark_image=quota_dot(value), size=(14, 14)))
+            label = widget.dot_label.split()[-1]
+            widget.configure(image=ctk.CTkImage(light_image=quota_dot(value, True, label),
+                                              dark_image=quota_dot(value, label=label), size=(19, 19)))
 
     def update_compact_quotas(self):
         def average(values):

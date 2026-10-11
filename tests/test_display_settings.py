@@ -10,6 +10,36 @@ from ui_locale import translate
 
 
 class DisplaySettingsTests(unittest.TestCase):
+    def test_higher_priority_accounts_move_to_top_without_recreating_cards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch('app.Controller', lambda: Controller(proxy_dir=root / 'proxy', data_dir=root / 'data')), \
+                    patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                    patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                    patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                    patch.object(App, 'check_for_updates'), patch.object(App, 'refresh_chatgpt_accounts'):
+                app = App()
+                try:
+                    app.items = [{'name': name, 'disabled': False, 'unavailable': False} for name in ('first', 'second')]
+                    app.chatgpt_items = [{'name': name, 'email': name, 'disabled': False} for name in ('a', 'b')]
+                    app.chatgpt_collapsed = False
+                    app.draw_account_list()
+                    app.draw_chatgpt_accounts()
+                    google_card = app.account_widgets['second']['card']
+                    gpt_card = app.chatgpt_widgets['b']['card']
+                    app.change_account_priority(app.items[1], 'google', 1)
+                    app.change_account_priority(app.chatgpt_items[1], 'openai', 1)
+                    self.assertEqual(app.account_layout[0][0], 'second')
+                    self.assertEqual(app._chatgpt_order[1], ('b', 'a'))
+                    self.assertIs(app.account_list.pack_slaves()[0], google_card)
+                    self.assertIs(app.chatgpt_accounts.pack_slaves()[1], gpt_card)
+                    self.assertIs(app.account_widgets['second']['card'], google_card)
+                    app.change_account_priority(app.items[0], 'google', 2)
+                    self.assertEqual(app.account_layout[0][0], 'first')
+                finally:
+                    app.closed = True
+                    app.destroy()
+
     def test_footer_stays_at_bottom_at_small_windows_and_multiple_scales(self):
         import customtkinter as native_ctk
         for scale in (1, .8, 1.25):

@@ -1,6 +1,6 @@
 """Compact quota indicators shared by collapsed sections."""
 import math
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 
 def quota_level(value):
@@ -10,7 +10,7 @@ def quota_level(value):
     return value, '#36bb87' if value >= .5 else '#edaa43' if value > .1 else '#f06472'
 
 
-def quota_dot(value, light=False):
+def quota_dot(value, light=False, label=''):
     value, color = quota_level(value)
     image = Image.new('RGBA', (64, 64))
     draw = ImageDraw.Draw(image)
@@ -19,6 +19,9 @@ def quota_dot(value, light=False):
     if value is not None and value > 0:
         draw.pieslice(bounds, start=-90, end=-90 + 360 * value, fill=color)
     draw.ellipse(bounds, outline=color, width=4)
-    if value is None:
+    if label:
+        draw.text((32, 33), label, font=ImageFont.load_default(size=23), anchor='mm',
+                  fill='#ffffff', stroke_width=2, stroke_fill='#243047')
+    elif value is None:
         draw.line((23, 32, 41, 32), fill=color, width=4)
     return image
