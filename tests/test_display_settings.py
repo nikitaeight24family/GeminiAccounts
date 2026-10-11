@@ -115,6 +115,23 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertGreaterEqual(google_row['plan'].winfo_rooty(),
                                             google_row['button'].winfo_rooty() + google_row['button'].winfo_height())
                     self.assertIn('Pro', app.chatgpt_widgets['gpt']['plan'].cget('text'))
+                    # Polling identical data must not redraw or relayout cards and controls.
+                    app.draw_account_list()
+                    app.draw_chatgpt_accounts()
+                    app.update_idletasks()
+                    from contextlib import ExitStack
+                    stable_widgets = [google_row['card'], google_row['button'], google_row['plan'],
+                                      google_row['status'], google_row['priority'],
+                                      google_row['priority'].priority_up, google_row['priority'].priority_down,
+                                      app.chatgpt_widgets['gpt']['card'], app.chatgpt_widgets['gpt']['status']]
+                    with ExitStack() as stack:
+                        redraws = [stack.enter_context(patch.object(widget, '_draw', wraps=widget._draw))
+                                   for widget in stable_widgets]
+                        for _ in range(3):
+                            app.draw_account_list()
+                            app.draw_chatgpt_accounts()
+                        for redraw in redraws:
+                            redraw.assert_not_called()
                     with patch('app.simpledialog.askinteger', side_effect=AssertionError('Priority must not open a dialog')), patch.object(app, 'queue_policy'):
                         self.assertEqual(google_row['priority'].priority_down.cget('state'), 'disabled')
                         google_row['priority'].priority_up.invoke()

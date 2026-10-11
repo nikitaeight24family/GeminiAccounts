@@ -23,6 +23,7 @@ from tkinter import font as tkfont
 from backend import Controller, AccountError
 from account_status import account_status, google_account_status
 from brand_icons import ANTIGRAVITY_PNG
+from omni_brand import omni_icon
 from quota_dots import quota_dot
 from activity import Activity
 from harbor_activity import HarborActivity, key_id, key_label
@@ -114,7 +115,9 @@ class App(ctk.CTk):
         self.grid_columnconfigure(0, minsize=round(self.sidebar._apply_widget_scaling(SIDEBAR_WIDTH)))
         sidebar_header = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         sidebar_header.pack(fill='x', padx=16, pady=(3, 4))
-        ctk.CTkLabel(sidebar_header, text='✦  Omni', height=22, font=('Segoe UI', 18, 'bold'), text_color=TEXT).pack(side='left')
+        self.omni_icon = ctk.CTkImage(light_image=omni_icon(), dark_image=omni_icon(), size=(24, 24))
+        ctk.CTkLabel(sidebar_header, text='Omni', image=self.omni_icon, compound='left', height=22,
+                     font=('Segoe UI', 18, 'bold'), text_color=TEXT).pack(side='left')
         self.details_toggle = self.button(sidebar_header, '☰', self.toggle_details)
         self.details_toggle.configure(height=26, width=28, font=('Segoe UI', 20), fg_color='transparent')
         self.details_toggle.pack(side='right')

@@ -94,6 +94,7 @@ class WidgetStyleMixin:
                                'unselected_hover_color': '#3d4b64', 'text_color': '#edf2fa'}.items():
                 kwargs.setdefault(key, value)
         self._ui_localize = kwargs.pop('localize', True)
+        self._ui_font_request = kwargs.get('font')
         self._ui_sources = {key: value for key, value in kwargs.items()
                             if key in COLOR_KEYS or key in ('text', 'placeholder_text', 'values', 'command')}
         # Constructors have not assigned master yet.
@@ -110,7 +111,21 @@ class WidgetStyleMixin:
             self._ui_sources = {}
         self._ui_sources.update({key: value for key, value in kwargs.items()
                                  if key in COLOR_KEYS or key in ('text', 'placeholder_text', 'values', 'command')})
-        return super().configure(**self._display(kwargs))
+        changed = {}
+        for key, value in self._display(kwargs).items():
+            if key == 'font':
+                if value == self._ui_font_request:
+                    continue
+                self._ui_font_request = value
+            else:
+                try:
+                    if super().cget(key) == value:
+                        continue
+                except (ValueError, AttributeError, tk.TclError):
+                    pass
+            changed[key] = value
+        if changed:
+            return super().configure(**changed)
 
 
 class SelectorMixin:
@@ -136,6 +151,16 @@ for name in ('CTk', 'CTkToplevel', 'CTkFrame', 'CTkScrollableFrame', 'CTkLabel',
     setattr(ctk, name, type(name, (WidgetStyleMixin, getattr(native_ctk, name)), {}))
 for name in ('CTkOptionMenu', 'CTkSegmentedButton', 'CTkComboBox'):
     setattr(ctk, name, type(name, (SelectorMixin, WidgetStyleMixin, getattr(native_ctk, name)), {}))
+
+
+class StableProgressBar(ctk.CTkProgressBar):
+    def set(self, value, from_variable_callback=False):
+        if self._variable is None and max(0, min(1, value)) == self.get():
+            return
+        return super().set(value, from_variable_callback=from_variable_callback)
+
+
+ctk.CTkProgressBar = StableProgressBar
 
 
 class Canvas(tk.Canvas):
