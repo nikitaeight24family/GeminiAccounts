@@ -49,10 +49,38 @@ class TokenHarbor:
             _, config = self.config()
             group = next((g for g in config.get('api-keys', {}).get('claude', [])
                           if g.get('name') == PROVIDER), {})
-            return [item.get('api-key') for item in group.get('keys', [])
+            return [item.get('api-key') for item in group.get('keys', []) + config.get('omni-paused-tokenharbor-keys', [])
                     if isinstance(item, dict) and item.get('api-key')]
         except (OSError, ValueError, AttributeError, yaml.YAMLError):
             return []
+
+    def paused_keys(self):
+        try:
+            _, config = self.config()
+            return [entry['api-key'] for entry in config.get('omni-paused-tokenharbor-keys', [])]
+        except (OSError, ValueError, AttributeError, yaml.YAMLError):
+            return []
+
+    def set_key_paused(self, key, paused):
+        with self.integrations.lock:
+            path, config = self.config()
+            groups = config.setdefault('api-keys', {}).setdefault('claude', [])
+            group = next((g for g in groups if g.get('name') == PROVIDER), None)
+            if group is None and not paused:
+                group = self.group([])
+                groups.append(group)
+            if group is None:
+                raise AccountError('TokenHarbor account no longer exists.')
+            dormant = config.setdefault('omni-paused-tokenharbor-keys', [])
+            active = group.setdefault('keys', [])
+            entries, destination = (active, dormant) if paused else (dormant, active)
+            entry = next((entry for entry in entries if entry.get('api-key') == key), None)
+            if entry is not None:
+                entries.remove(entry)
+                destination.append(entry)
+                if not active:
+                    groups.remove(group)
+                self.write_live_config(path, yaml.safe_dump(config, sort_keys=False).encode())
 
     def auth_keys(self):
         """Map proxy usage auth indexes to configured keys without exposing them in UI logs."""
@@ -137,7 +165,10 @@ class TokenHarbor:
                    config.get('oauth', {}).get('model-alias', {}).values()
                    for item in channel):
                 raise AccountError('A Google model already uses the TokenHarbor model name.')
-            existing = self.keys()
+            dormant = self.paused_keys()
+            existing = [existing_key for existing_key in self.keys() if existing_key not in dormant]
+            if key in dormant:
+                config['omni-paused-tokenharbor-keys'] = [entry for entry in config.get('omni-paused-tokenharbor-keys', []) if entry['api-key'] != key]
             if key not in existing:
                 existing.append(key)
             groups[:] = [group for group in groups if group.get('name') != PROVIDER]
@@ -190,11 +221,17 @@ class TokenHarbor:
         with self.integrations.lock:
             path, config = self.config()
             groups = config.get('api-keys', {}).get('claude', [])
-            remaining = [item for item in self.keys() if item != key]
+            dormant = [item for item in self.paused_keys() if item != key]
+            remaining = [item for item in self.keys() if item != key and item not in self.paused_keys()]
+            config['omni-paused-tokenharbor-keys'] = [{'api-key': item} for item in dormant]
             if remaining:
                 for group in groups:
                     if group.get('name') == PROVIDER:
                         group['keys'] = [{'api-key': item} for item in remaining]
+                self.write_live_config(path, yaml.safe_dump(config, sort_keys=False).encode())
+                return True
+            if dormant:
+                config['api-keys']['claude'] = [group for group in groups if group.get('name') != PROVIDER]
                 self.write_live_config(path, yaml.safe_dump(config, sort_keys=False).encode())
                 return True
         return self.disconnect()
@@ -205,7 +242,7 @@ class TokenHarbor:
             path, config = self.config()
             groups = config.get('api-keys', {}).get('claude', [])
             kept = [group for group in groups if group.get('name') != PROVIDER]
-            removed = len(kept) != len(groups)
+            removed = len(kept) != len(groups) or bool(config.pop('omni-paused-tokenharbor-keys', []))
             if removed:
                 config['api-keys']['claude'] = kept
                 self.write_live_config(path, yaml.safe_dump(config, sort_keys=False).encode())

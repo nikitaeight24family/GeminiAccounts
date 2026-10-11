@@ -2,6 +2,24 @@
 import re
 
 RU = {
+    'Keep window on top': 'Поверх всех окон',
+    'Unpin window': 'Открепить окно',
+
+    'Reserve reached': 'Граница остатка',
+
+    'Pause account': 'Приостановить аккаунт',
+    'Resume account': 'Возобновить работу',
+    'Decrease priority': 'Уменьшить приоритет',
+    'Increase priority': 'Увеличить приоритет',
+
+    'Claude sign-in': 'Вход в Claude',
+    'Complete Claude sign-in': 'Завершите вход в Claude',
+    'Complete Claude sign-in in the separate browser window. The account will appear here automatically.': 'Завершите вход в Claude в отдельном окне браузера. Аккаунт появится автоматически.',
+    'Claude sign-in cancelled.': 'Вход в Claude отменён.',
+    'Claude sign-in timed out. Try adding the account again.': 'Время ожидания входа в Claude истекло. Попробуйте снова.',
+    'Claude sign-in did not finish. Try again.': 'Вход в Claude не завершён. Попробуйте снова.',
+    'Claude account added. Reconnect applications to show its Claude models.': 'Аккаунт Claude добавлен. Переподключите приложения, чтобы увидеть его модели.',
+
     'Quota reserve reached': 'Граница остатка достигнута',
     'Saved accounts': 'Сохранённые аккаунты', 'Connect applications': 'Подключить приложения',
     'Switch accounts while continuing your Claude sessions.': 'Переключайте аккаунты, сохраняя текущие сессии.',
@@ -156,6 +174,21 @@ PHRASES = {
     'Account selected for Claude.': 'Аккаунт выбран для Claude.',
     'until Claude': 'до Claude', 'until Gemini': 'до Gemini', 'until OpenAI': 'до OpenAI',
 }
+
+
+RU.update({
+    'API accounts': 'API-аккаунты', 'Account name': 'Название аккаунта',
+    'Add API key': 'Добавить API-ключ', 'API key': 'API-ключ',
+    'API billing is separate from subscriptions. Routes: api-service/model.': 'API оплачивается отдельно от подписок. Модели: api-сервис/модель.',
+    'Key registered': 'Ключ подключён', 'Checking gateway': 'Проверка подключения',
+    'API key added. Models are available through the local gateway.': 'API-ключ добавлен. Модели доступны через локальное подключение.',
+    'Grok sign-in': 'Вход в Grok', 'Confirm the device in the separate browser window.': 'Подтвердите устройство в отдельном окне браузера.',
+    'Complete Grok sign-in in the separate browser window.': 'Завершите вход в Grok в отдельном окне браузера.',
+    'Grok sign-in timed out.': 'Время входа в Grok истекло.',
+    'Grok account added.': 'Аккаунт Grok добавлен.', 'Grok sign-in did not finish.': 'Вход в Grok не завершён.',
+    'Could not open the Grok sign-in browser.': 'Не удалось открыть браузер для входа в Grok.',
+})
+PHRASES.update({' available · quota not reported': ' доступны · квота не сообщается', ' models · ': ' моделей · '})
 
 
 def translate(text, language):

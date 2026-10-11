@@ -10,6 +10,86 @@ from ui_locale import translate
 
 
 class DisplaySettingsTests(unittest.TestCase):
+    def test_window_position_and_pin_survive_close_and_reopen(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            root = Path(directory)
+            stack.enter_context(patch('app.Controller', lambda: Controller(proxy_dir=root / 'proxy', data_dir=root / 'data')))
+            for method in ('refresh', 'fetch_quota', 'fetch_models', 'start_activity', 'queue_policy', 'check_for_updates'):
+                stack.enter_context(patch.object(App, method))
+            app = App()
+            try:
+                app.update()
+                app.geometry('+120+100')
+                app.update()
+                _, rect = app.window_rectangle()
+                expected = {'x': rect.left, 'y': rect.top}
+                app.pin_button._canvas.event_generate('<Enter>')
+                app.pin_button._canvas.event_generate('<ButtonPress-1>', x=8, y=8)
+                app.pin_button._canvas.event_generate('<ButtonRelease-1>', x=8, y=8)
+                app.update()
+                self.assertTrue(app.window_pinned)
+                self.assertTrue(app.attributes('-topmost'))
+                app.close()
+                app = App()
+                app.update()
+                _, restored = app.window_rectangle()
+                self.assertEqual({'x': restored.left, 'y': restored.top}, expected)
+                self.assertTrue(app.attributes('-topmost'))
+                app.pin_button.invoke()
+                app.update()
+                self.assertFalse(app.attributes('-topmost'))
+                app.controller.preferences['window-position'] = {'x': -99999, 'y': -99999}
+                app.show_saved_window()
+                app.update()
+                _, restored = app.window_rectangle()
+                self.assertGreater(restored.right, -99999)
+                self.assertGreater(restored.bottom, -99999)
+            finally:
+                app.closed = True
+                app.destroy()
+
+    def test_settings_respond_to_mouse_events(self):
+        from contextlib import ExitStack
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            root = Path(directory)
+            stack.enter_context(patch('app.Controller', lambda: Controller(proxy_dir=root / 'proxy', data_dir=root / 'data')))
+            for method in ('refresh', 'fetch_quota', 'fetch_models', 'start_activity', 'queue_policy', 'check_for_updates'):
+                stack.enter_context(patch.object(App, method))
+            app = App()
+            errors = []
+            app.report_callback_exception = lambda *args: errors.append(args)
+            def click(widget):
+                target = getattr(widget, '_canvas', widget)
+                target.event_generate('<Enter>')
+                target.event_generate('<ButtonPress-1>', x=8, y=8)
+                target.event_generate('<ButtonRelease-1>', x=8, y=8)
+                app.update()
+            try:
+                app.update()
+                click(app.settings_button)
+                self.assertTrue(app.display_settings.winfo_viewable())
+                for control in app.display_settings.winfo_children():
+                    if hasattr(control, '_variable') and control._variable in app.service_variables.values():
+                        provider = next(p for p, v in app.service_variables.items() if v is control._variable)
+                        click(control)
+                        self.assertFalse(app.visible_services[provider])
+                        button = {'gemini': app.add_button, 'claude': app.add_claude_button,
+                                  'openai': app.add_chatgpt_button, 'grok': app.add_grok_button,
+                                  'tokenharbor': app.add_tokenharbor_button}[provider]
+                        self.assertFalse(button.winfo_viewable())
+                        click(control)
+                        self.assertTrue(app.visible_services[provider])
+                        self.assertTrue(button.winfo_viewable())
+                click(app.theme_control._buttons_dict['Light'])
+                self.assertEqual(app.ui_style.theme, 'light')
+                click(app.language_control._buttons_dict['Русский'])
+                self.assertEqual(app.ui_style.language, 'ru')
+                self.assertFalse(errors, errors)
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_higher_priority_accounts_move_to_top_without_recreating_cards(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -225,7 +305,7 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.rename_entry.insert(0, 'Unsaved name')
                     app.service_variables['claude'].set(False)
                     app.set_service_visibility('claude')
-                    self.assertFalse(claude_row.winfo_manager())
+                    self.assertTrue(claude_row.winfo_manager())
                     self.assertEqual(app.rename_entry.get(), 'Unsaved name')
                     app.service_variables['gemini'].set(False)
                     app.set_service_visibility('gemini')

@@ -13,7 +13,7 @@
   <a href="https://github.com/nikitaeight24family/Omni/issues">Report an issue</a>
 </p>
 
-Omni manages **Google Antigravity / Gemini / Claude, ChatGPT and TokenHarbor** accounts, monitors quotas and connects **Claude Code, Claude Desktop and Codex** through a local gateway. Select an account yourself or let Omni rotate available accounts using quota reset times and your priorities.
+Omni manages **Google Antigravity / Gemini, ChatGPT, Claude, Grok and TokenHarbor** accounts, monitors quotas and connects **Claude Code, Claude Desktop and Codex** through a local gateway. Select an account yourself or let Omni rotate available accounts using quota reset times and your priorities.
 
 **Windows desktop** · **Windows / macOS / Linux terminal** · **English / Russian interface** · **Dark / light themes**
 
@@ -26,7 +26,7 @@ Omni was previously named **Gemini Accounts**. The repository retains its histor
 ## Windows desktop: three steps
 
 1. [Download Omni](https://github.com/nikitaeight24family/Omni/releases/latest/download/Omni-Setup.exe) and click **Install**. No Python or administrator access required.
-2. Click **+ Google** to sign in through a browser, or **+ ChatGPT** to sign in with a ChatGPT account. ChatGPT sign-in opens an isolated Edge/Chrome profile for each account, so multiple accounts can be added without switching the browser's everyday account. Enter the password and 2FA code on the official sign-in page. Existing Codex `auth.json` files can still be imported from the same menu.
+2. Click the small **+ in a provider strip at the bottom** and choose account sign-in or API key. Google, ChatGPT, Claude, Grok and TokenHarbor connections have their own menus. ChatGPT sign-in opens an isolated Edge/Chrome profile for each account, so multiple accounts can be added without switching the browser's everyday account. Enter the password and 2FA code on the official sign-in page. Existing Codex `auth.json` files can still be imported from the same menu.
 3. Open **Connect applications** and approve setup of installed clients. Original configs are backed up. Restarting running clients requires separate consent.
 
 A desktop shortcut is created. Updates preserve accounts and configurations; active requests block an update. Install Claude / Codex clients separately.
@@ -62,14 +62,16 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 
 | Area | What you can do |
 | --- | --- |
-| Accounts | Add multiple Google and ChatGPT accounts, use isolated ChatGPT browser logins, import Codex credentials, assign labels, pause accounts and complete provider verification. |
+| Accounts | Connect Google, ChatGPT, Claude, Grok and TokenHarbor accounts or API keys from each provider menu. Import Codex credentials, rename an account with a double-click, pause/resume with drawn icons and complete provider verification. |
 | Quotas | See separate Gemini / Claude / OpenAI **5h and 1w** windows, remaining percentages and reset countdowns. Subscription badges show the reported Google AI Pro / Ultra or ChatGPT Free / Plus / Pro plan. |
-| Priorities | Adjust each Google or ChatGPT account with an inline **↓ number ↑** control. Higher priority moves its card upward and ranks usable credentials first. Equal priorities retain automatic quota/reset ordering. |
+| Priorities | Adjust account priorities with compact drawn arrows beside the pause control. Higher priority moves its card upward and ranks usable credentials first. Equal priorities retain automatic quota/reset ordering. |
 | Quota reserves | Drag the thin marker on a per-account quota bar to set the **minimum remaining percentage**. It grows and shows a percentage while held. **70% means stop at 70% remaining**, not spend 70%. The default is **0%**. Each account, provider family and time window has its own saved boundary. |
 | Compact mode | Collapse account lists or pooled quotas. Green, orange and red circles show remaining capacity with **5h / 1w inside the circle**. Counts use **8pcs**. The bottom panel stays anchored and TokenHarbor stays last. |
 | Live activity | Identify active accounts with a full animated border, provider indicators and the recent model. Gemini and Claude can run on different Google accounts simultaneously. |
-| Privacy | The open/closed eye beside Omni hides account names across cards, details and history using stable numbered aliases. |
+| Privacy | The open/closed eye beside Omni hides account names across cards, details and history using stable numbered aliases. Double-click a hidden name to set a private alias without exposing the real identity. |
 | Settings | Click the **gear beside Omni** to open service visibility, **English / Russian** and **dark / light theme** settings, including from compact mode. Changes persist without restarting. |
+| Window | Remember the last screen position. The drawn pin beside the settings gear keeps the window above other applications; both settings persist. |
+| Reset forecasts | Expanded Google and OpenAI 5h / 1w strips show reset markers and countdowns on the pooled quota bar. |
 | Refreshes | Existing cards, bars and controls update in place. Unchanged values skip redraws, and priority changes reuse cards. |
 | Releases | The **GitHub icon in the expanded panel** opens the latest release. Windows can download and verify updates while waiting for active requests to finish. |
 | Diagnostics | Request, error and account-switch history; local diagnostic export with lifecycle logs and a live state snapshot. |
@@ -80,19 +82,19 @@ Google and OpenAI have independent account pools. Manual priority is applied amo
 
 Quota reserves are enforced through the local gateway's per-account model exclusions. A reached Gemini boundary excludes Gemini models; a reached Claude boundary excludes Claude / GPT-OSS; a reached OpenAI boundary excludes that ChatGPT credential. Other provider families and accounts remain available. Existing user exclusions are preserved, and Omni removes only its own exclusions when quota recovers or the boundary is lowered. Native quota resets and usage-reset credits restore eligibility after refreshed data confirms enough capacity.
 
-The boundary uses the provider's reported quota. Quotas refresh every minute and after relevant activity; an in-flight response can cross the boundary before the next measurement. A reserve is a stop condition for future requests, not an exact token budget. With a nonzero boundary and missing quota data, that family is held until quota data becomes available.
+The boundary uses the provider's reported quota. Configured ChatGPT reserves are refreshed before routing each generation request, independently of the desktop window. Display quotas refresh every minute and after relevant activity; an in-flight response can cross the boundary before the next measurement. A reserve is a stop condition for future requests, not an exact token budget. With a nonzero boundary and missing quota data, that family is held until quota data becomes available.
 
 Both Google and ChatGPT can start a full unused five-hour window with a minimal request after three minutes: Gemini Flash / GPT-OSS for Google, Luna for ChatGPT. Real client usage suppresses the ping, weekly exhaustion and user reserves are respected, and retries are bounded.
 
-Confirmed provider quota blocks queue affected requests with streaming keep-alives. Requests resume after a reset or when a new usable account joins. Cancelling the client cancels its wait; pending requests are not saved to disk. Reserve exclusions do not fabricate provider cooldowns.
+Confirmed provider quota blocks queue affected requests with streaming keep-alives. Requests resume after a reset or when a new usable account joins. Cancelling the client cancels its wait; pending requests are not saved to disk. Reserve exclusions do not fabricate provider cooldowns. Forwarded HTTP 429 responses use a short client retry interval so an old Retry-After deadline does not hide recovered accounts for many minutes.
 
-ChatGPT cards show **usage-reset credits**, their earliest expiry and **Use usage reset** when supported. Confirmation and a fresh availability check are required. The provider chooses the credit consumed; Omni does not automatically repeat a timed-out reset.
+ChatGPT cards show one drawn reset button per available **usage-reset credit**, in the same header row as priority and pause. Zero credits leave no label or button. Hover reveals availability and expiry. Confirmation and a fresh availability check are required. The provider chooses the credit consumed; Omni does not automatically repeat a timed-out reset.
 
 Quota exhaustion is shown as a quota status. Verification, invalid credentials, access restrictions and provider errors remain distinct, and unfamiliar status messages stay visible. Active borders clear on idle or quota wait; recent models remain visible for one minute. Desktop countdowns update every 15 seconds.
 
 ### Appearance and service visibility
 
-The gear opens **Display settings**, also available as a tab in the expanded panel. Choose whether to show **Gemini, Claude, OpenAI and TokenHarbor**. Hiding a service changes its display only; it does not pause accounts or remove them from routing. Pooled Google Gemini and OpenAI sections show their own 5h / 1w totals, exclude paused accounts and identify incomplete quota data.
+The gear opens **Display settings**, also available as a tab in the expanded panel. Choose whether to show **Gemini, Claude, OpenAI, Grok and TokenHarbor**. Hiding a service changes its display only; it does not pause accounts or remove them from routing. Pooled Google Gemini and OpenAI sections show their own 5h / 1w totals, exclude paused accounts and identify incomplete quota data.
 
 Omni uses its own orbit logo. Google accounts carry the Antigravity icon; ChatGPT accounts carry the OpenAI mark. Subscription badges sit beneath account names. Account selection applies only while details are open; compact mode keeps verification actions available.
 
@@ -131,3 +133,13 @@ Documentation: [Codex configuration](https://learn.chatgpt.com/docs/config-file/
 Request lifecycle logging is automatic, including active requests, quota waits, upstream attempts, streaming progress, cancellations and failures. **Routing statistics → Save diagnostic log…** exports a ZIP with rotated JSONL logs, request history and a live state snapshot. No prompts, generated text, authentication tokens or client configuration files are included. Logs contain account names. Terminal: `./gemini-accounts diagnostics --output diagnostics.zip` (Windows: `GeminiAccounts-CLI.exe diagnostics --output diagnostics.zip`). The export also works when services are offline.
 
 Windows desktop checks GitHub for newer releases. **Routing statistics → Update to …** downloads the verified installer, waits for active requests, replaces application files and restarts services. Client configurations are not automatically rewritten. **Send diagnostic log…** requires owner confirmation for every upload, uses the configured HTTPS recipient and replaces email addresses with account labels. The default recipient is https://logs.conch-labs.com/ingest. An upload access token is required and stored encrypted locally; no token is embedded in public builds.
+
+### Native Claude accounts
+
+Use **+ Claude** to sign in on the official Claude website in a separate browser profile. Native Claude credentials stay in the local gateway, separately from Google accounts that also provide Claude models. The Claude panel shows the provider-reported subscription (Pro, Max 5x/20x, Team or Enterprise), remaining 5h/1w quota, reset timers, statuses and active model. Missing quota or plan data remains unknown.
+
+Each account has inline priority arrows and quota reserve markers. Available Claude accounts rotate independently; the request queue can continue through Claude when Google is exhausted. Full untouched windows can be started after the same three-minute grace period using an available Haiku model; real usage, reserves and weekly exhaustion suppress that probe. Collapsed account and pooled headers retain quota circles. Claude visibility, privacy names, theme and language use the shared settings.
+
+### Native desktop migration
+
+The shipped Windows manager remains the current Python desktop application. Experimental WPF, SwiftUI and GTK clients in [`native/`](native/README.md) are development work and are not included in this release.

@@ -6,6 +6,31 @@ from ui_render import queue_for
 
 
 class RenderTests(unittest.TestCase):
+    def test_static_card_skin_survives_value_changes_and_is_shared(self):
+        root = ctk.CTk()
+        try:
+            UIStyle(root, {})
+            cards = [ctk.CTkFrame(root, width=220, height=90, corner_radius=9,
+                                  fg_color='#222a38', border_width=1, border_color='#344155') for _ in range(2)]
+            for card in cards:
+                card.pack()
+                card.pack_propagate(False)
+            value = ctk.CTkLabel(cards[0], text='50%', fg_color='transparent')
+            value.pack()
+            root.update()
+            image = cards[0]._skin_image
+            self.assertIs(image, cards[1]._skin_image)
+            self.assertEqual(len(cards[0]._canvas.find_withtag('static_skin')), 1)
+            builds = root._skin_cache.builds
+            for percent in range(51, 100):
+                value.configure(text=f'{percent}%')
+                root.update_idletasks()
+            self.assertEqual(root._skin_cache.builds, builds)
+            self.assertIs(cards[0]._skin_image, image)
+            self.assertFalse(cards[0]._canvas.find_withtag('inner_parts'))
+        finally:
+            root.destroy()
+
     def test_changes_are_merged_and_destroyed_widgets_are_discarded(self):
         root = ctk.CTk()
         try:

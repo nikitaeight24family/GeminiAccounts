@@ -35,7 +35,7 @@ def sync_quota_limits(controller, account, groups):
         return set()
     import urllib.parse
     blocked = blocked_families(preferences, account['name'], groups)
-    patterns = {'gemini': ['gemini*'], 'claude': ['claude*', 'gpt-oss*'], 'openai': ['*']}
+    patterns = {'gemini': ['gemini*'], 'claude': ['claude*', 'gpt-oss*'], 'openai': ['*'], 'claude-native': ['*']}
     desired = sorted({pattern for kind in blocked for pattern in patterns.get(kind, [])})
     # The authenticated management API reads metadata locally; tokens never enter UI/storage.
     metadata = controller.request('/auth-files/download?' + urllib.parse.urlencode({'name': account['name']}))

@@ -59,7 +59,7 @@ def account_status(account, now=None):
         return 'Sign in again', 'error', detail or 'HTTP 401'
     if '403' in http_codes:
         return 'Access denied', 'error', detail or 'HTTP 403'
-    known_quota = bool(reasons & {'quota', 'credential_quota', 'quota_exhausted', 'usage_limit'}) or any(s in signals for s in ('usage_limit_reached', 'insufficient_quota', 'quota_exhausted'))
+    known_quota = bool(reasons & {'quota', 'credential_quota', 'quota_exhausted', 'usage_limit'}) or any(s in signals for s in ('usage_limit_reached', 'insufficient_quota', 'quota_exhausted', 'credential_quota'))
     real_error = state == 'error' and bool(detail or code) and not known_quota and str(code) != '429'
     if real_error:
         return 'Request error', 'error', detail or safe_detail(code)

@@ -79,7 +79,7 @@ class QuotaUITests(unittest.TestCase):
                 self.assertEqual(app.chatgpt_widgets[gpt['name']]['heading'].cget('text'), 'OpenAI 1')
                 self.assertEqual(app.detail_heading.cget('text'), 'Google 1')
                 self.assertFalse(app.detail_email.winfo_manager())
-                self.assertEqual(entry.cget('show'), '•')
+                self.assertEqual(entry.cget('show'), '')
                 self.assertEqual(entry.get(), 'Unsaved label')
                 self.assertEqual(app.redact_private_text('Personal Google private@example.com Private GPT gpt@example.com'),
                                  'Google 1 Google 1 OpenAI 1 OpenAI 1')
@@ -204,6 +204,99 @@ class QuotaUITests(unittest.TestCase):
                 app.set_chatgpt_accounts([])
                 self.assertEqual(controls[1].cget('text'), '—')
                 self.assertEqual(controls[2].get(), 0)
+            finally:
+                app.closed = True
+                app.destroy()
+
+    def test_double_click_renames_private_alias_and_pause_resumes_same_card(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                app.chatgpt_collapsed = False
+                app.hide_account_names = True
+                item = {'name': 'gpt', 'email': 'secret@example.com', 'disabled': False,
+                        'quota': {'windows': [{'label': '5h', 'remaining': 70}], 'reset_credits': 0}}
+                app.set_chatgpt_accounts([item])
+                app.update()
+                row = app.chatgpt_widgets['gpt']
+                card = row['card']
+                height = card.winfo_height()
+                self.assertFalse(row['reset_row'].winfo_manager())
+                self.assertIs(row['priority'].master.master, row['pause'].master)
+                self.assertEqual(row['pause'].cget('text'), '')
+                target = row['heading']._label
+                for timestamp in (1000, 1100):
+                    target.event_generate('<ButtonPress-1>', x=8, y=8, time=timestamp)
+                    target.event_generate('<ButtonRelease-1>', x=8, y=8, time=timestamp+20)
+                    app.update()
+                entry = app._inline_account_editor
+                self.assertNotIn('secret', entry.get())
+                entry.delete(0, 'end')
+                entry.insert(0, 'Work')
+                entry.focus_force()
+                app.update()
+                entry.event_generate('<Return>')
+                app.update()
+                self.assertEqual(row['heading'].cget('text'), 'Work')
+                self.assertIs(card, app.chatgpt_widgets['gpt']['card'])
+                self.assertEqual(card.winfo_height(), height)
+                app.hide_account_names = False
+                self.assertEqual(app.display_name(item, 'OpenAI'), 'secret@example.com')
+                app.hide_account_names = True
+                def immediate(fn, done, mutation=False):
+                    done(fn())
+                with patch.object(app, 'work', side_effect=immediate), \
+                        patch.object(app.controller, '_set_disabled') as pause, \
+                        patch.object(app, 'refresh_chatgpt_accounts'):
+                    row['pause'].invoke()
+                    pause.assert_called_with(item, True)
+                    self.assertTrue(item['disabled'])
+                    self.assertEqual(row['pause'].cget('text'), '')
+                    self.assertIs(row['pause'].cget('image'), app.playback_icons[True])
+                    row['pause'].invoke()
+                    pause.assert_called_with(item, False)
+                    self.assertFalse(item['disabled'])
+                item['quota']['reset_credits'] = 3
+                item['quota']['reset_options'] = [{'id': 'ready'}]
+                app.set_chatgpt_accounts([item])
+                app.update()
+                self.assertEqual(len([b for b in row['reset_buttons'] if b.winfo_manager()]), 3)
+                self.assertTrue(all(b.cget('text') == '' for b in row['reset_buttons']))
+                self.assertLessEqual(card.winfo_height(), height+2)
+                self.assertLessEqual(row['reset_button']._reverse_widget_scaling(row['reset_button'].winfo_width()), 36)
+            finally:
+                app.closed = True
+                app.destroy()
+
+    def test_openai_pooled_bars_show_and_preserve_reset_markers(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                app.chatgpt_items = [{'name': 'one', 'quota': {'windows': [
+                    {'label': '5h', 'remaining': 20, 'reset_at': time.time()+3600},
+                    {'label': '1w', 'remaining': 50, 'reset_at': time.time()+86400}]}},
+                    {'name': 'two', 'quota': {'windows': [
+                    {'label': '5h', 'remaining': 0, 'reset_at': time.time()+7200},
+                    {'label': '1w', 'remaining': 40, 'reset_at': time.time()+172800}]}}]
+                app.toggle_pool_summary('openai')
+                app.update_total_quota()
+                app.update()
+                for window in ('5h', '1w'):
+                    app.draw_total_forecast(openai_window=window)
+                    canvas = app.openai_forecast_canvases[window]
+                    markers = canvas.find_withtag('forecast_time')
+                    self.assertEqual(len(markers), 2)
+                    self.assertTrue(canvas.find_withtag('forecast_label'))
+                    self.assertTrue(canvas.winfo_manager())
+                    self.assertFalse(app.openai_pool_widgets[window][2].winfo_manager())
+                    app.update_total_quota()
+                    self.assertEqual(canvas.find_withtag('forecast_time'), markers)
             finally:
                 app.closed = True
                 app.destroy()
@@ -341,9 +434,8 @@ class QuotaUITests(unittest.TestCase):
                 self.assertIs(collapsed[0], app.tokenharbor_accounts.winfo_children()[0])
                 app.toggle_tokenharbor_accounts()
                 self.assertEqual(len(app.tokenharbor_widgets), 1)
-                self.assertTrue(any('Add TokenHarbor' in child.cget('text')
-                                    for child in app.tokenharbor_accounts.winfo_children()
-                                    if isinstance(child, ctk.CTkButton)))
+                self.assertTrue(app.add_tokenharbor_button.winfo_manager())
+                self.assertIs(app.add_tokenharbor_button.master, app.tokenharbor_accounts.winfo_children()[0])
                 app.toggle_tokenharbor_accounts()
                 self.assertEqual(len(app.tokenharbor_accounts.winfo_children()), 1)
             finally:

@@ -21,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter import font as tkfont
 from backend import Controller, AccountError
-from account_status import account_status, google_account_status
+from account_status import account_status, google_account_status, safe_detail
 from brand_icons import ANTIGRAVITY_PNG, GITHUB_PNG
 from omni_brand import omni_icon
 from quota_dots import quota_dot
@@ -33,6 +33,8 @@ from routing import rank_accounts, quota_projection, quota_entry
 from integrations import Integrations
 from tokenharbor import TokenHarbor
 from chatgpt_auth import ChatGPTAuth
+from claude_ui import ClaudeSupport, ClaudePanel
+from provider_ui import ProviderSupport, GrokPanel
 from isolated_browser import open_isolated
 from model_names import model_name
 
@@ -49,9 +51,10 @@ MODEL_LABELS = {'claude-sonnet-4-5': 'Gemini 3.1 Pro Low', 'claude-haiku-4-5': '
                 'claude-sonnet-4-6': 'Claude Sonnet 4.6', 'claude-opus-4-6-thinking': 'Claude Opus 4.6 Thinking'}
 
 
-class App(ctk.CTk):
+class App(ProviderSupport, ClaudeSupport, ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.withdraw()
         self.title('Omni')
         icon = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'app.ico'
         if icon.exists():
@@ -71,6 +74,7 @@ class App(ctk.CTk):
         self.model_aliases = self.controller.model_aliases()
         self.integrations = Integrations(self.controller)
         self.provider_icons = self.make_provider_icons()
+        self.playback_icons = self.make_playback_icons()
         self.mailbox = queue.Queue()
         self.items = []
         self.selected = None
@@ -86,6 +90,8 @@ class App(ctk.CTk):
         self.busy = False
         self.pending_login = None
         self.pending_chatgpt_login = None
+        self.pending_claude_login = None
+        self.pending_grok_login = None
         self.model_route_error = None
         self.login_url = None
         self.activity = Activity(self.controller.data_dir / 'activity.json')
@@ -100,6 +106,9 @@ class App(ctk.CTk):
         self.chatgpt_collapsed = self.controller.preferences.get('chatgpt-collapsed', True)
         self.google_accounts_collapsed = self.controller.preferences.get('google-accounts-collapsed', False)
         self.chatgpt_items = []
+        self.claude_items = []
+        self.grok_items = []
+        self.api_items = []
         self.hide_account_names = self.controller.preferences.get('hide-account-names', False)
         self.activity_rows = {}
         self.policy_busy = False
@@ -114,6 +123,7 @@ class App(ctk.CTk):
         self.sidebar = ctk.CTkFrame(self, width=SIDEBAR_WIDTH, corner_radius=0, fg_color=PANEL)
         self.sidebar.grid(row=0, column=0, sticky='nsew')
         self.sidebar.grid_propagate(False)
+        self.sidebar.pack_propagate(False)
         self.grid_columnconfigure(0, minsize=round(self.sidebar._apply_widget_scaling(SIDEBAR_WIDTH)))
         sidebar_header = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         sidebar_header.pack(fill='x', padx=16, pady=(3, 4))
@@ -126,14 +136,15 @@ class App(ctk.CTk):
         self.settings_button = self.button(sidebar_header, '⚙', self.open_display_settings)
         self.settings_button.configure(height=26, width=28, font=('Segoe UI', 20), fg_color='transparent')
         self.settings_button.pack(side='right', padx=(0, 4))
-        add_row = ctk.CTkFrame(self.sidebar, fg_color='transparent')
-        add_row.pack(fill='x', padx=16, pady=(0, 6))
-        self.add_button = self.button(add_row, '+ Google', self.add_account, primary=True)
-        self.add_button.configure(height=30, width=110)
-        self.add_button.pack(side='left', fill='x', expand=True, padx=(0, 3))
-        self.add_chatgpt_button = self.button(add_row, '+ ChatGPT', self.add_chatgpt_account)
-        self.add_chatgpt_button.configure(height=30, width=110, fg_color='#303e59')
-        self.add_chatgpt_button.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self.window_pinned = bool(self.controller.preferences.get('window-pinned', False))
+        self.pin_button = self.button(sidebar_header, '', self.toggle_window_pin)
+        self.pin_button.configure(width=24, height=26, corner_radius=4, image=self.playback_icons['pin'],
+                                  fg_color=ACCENT if self.window_pinned else 'transparent')
+        self.pin_button.pack(side='right', padx=(0, 2))
+        self.attach_tooltip(self.pin_button, lambda: 'Unpin window' if self.window_pinned else 'Keep window on top')
+        self.attributes('-topmost', self.window_pinned)
+        self.add_button = self.add_chatgpt_button = self.add_claude_button = None
+        self.add_grok_button = self.add_tokenharbor_button = None
         self.privacy_icons = {}
         for hidden in (False, True):
             icon = Image.new('RGBA', (64, 64))
@@ -211,6 +222,8 @@ class App(ctk.CTk):
         self.weekly_forecast_canvas.bind('<Leave>', lambda event: self.weekly_forecast_canvas.delete('forecast_hover'))
         openai_summary = self.create_pool_summary('openai', 'OpenAI')
         self.openai_pool_widgets = {}
+        self.openai_forecasts = {}
+        self.openai_forecast_canvases = {}
         for window in ('5h', '1w'):
             row = ctk.CTkFrame(openai_summary, fg_color='transparent')
             row.pack(fill='x', pady=(0, 6))
@@ -225,6 +238,11 @@ class App(ctk.CTk):
             bar.pack(fill='x', pady=(1, 0))
             bar.set(0)
             self.openai_pool_widgets[window] = (title, value, bar)
+            canvas = Canvas(row, height=1, bg=PANEL, highlightthickness=0, borderwidth=0)
+            self.openai_forecast_canvases[window] = canvas
+            canvas.bind('<Configure>', lambda event, w=window: self.schedule_total_forecast(openai_window=w))
+            canvas.bind('<Motion>', lambda event, w=window: self.hover_forecast(event, openai_window=w))
+            canvas.bind('<Leave>', lambda event, c=canvas: c.delete('forecast_hover'))
         self.tokenharbor_accounts.pack(fill='x', padx=12, pady=(3, 5))
         self.apply_service_visibility()
         self.body = ctk.CTkFrame(self, fg_color='transparent')
@@ -244,13 +262,14 @@ class App(ctk.CTk):
         self.mode_frame = ctk.CTkFrame(self.body, fg_color=CARD, corner_radius=14)
         self.mode_frame.pack(fill='x', pady=(0, 18))
         self.mode_label = ctk.CTkLabel(self.mode_frame, text='Loading accounts…', font=('Segoe UI', 14, 'bold'), text_color=TEXT)
-        self.mode_label.pack(anchor='w', padx=18, pady=(15, 4))
+        self.mode_label.pack(anchor='w', padx=12, pady=(8, 2))
         self.mode_note = ctk.CTkLabel(self.mode_frame, text='Connected clients use the selected accounts.', text_color=MUTED, font=('Segoe UI', 12))
-        self.mode_note.pack(anchor='w', padx=18, pady=(0, 12))
+        self.mode_note.pack(anchor='w', padx=12, pady=(0, 3))
         self.pool_button = self.button(self.mode_frame, 'Use all • automatic routing', lambda: self.action(lambda: self.controller.route(), 'Automatic routing enabled.'))
-        self.pool_button.pack(anchor='w', padx=18, pady=(0, 15))
+        self.pool_button.configure(height=25, width=132, font=('Segoe UI', 11, 'bold'))
+        self.pool_button.pack(anchor='w', padx=12, pady=(0, 8))
         self.mode_activity = ctk.CTkLabel(self.mode_frame, text='Last request: waiting for proxy data', text_color=MUTED, font=('Segoe UI', 12), anchor='w')
-        self.mode_activity.pack(fill='x', padx=18, pady=(0, 10), before=self.pool_button)
+        self.mode_activity.pack(fill='x', padx=12, pady=(0, 4), before=self.pool_button)
         self.detail = ctk.CTkScrollableFrame(self.body, fg_color='transparent')
         self.detail.pack(fill='both', expand=True)
         self.display_settings = ctk.CTkScrollableFrame(self.body, fg_color='transparent')
@@ -289,6 +308,13 @@ class App(ctk.CTk):
         self.notice = ctk.CTkLabel(self.body, text='Sign-ins are preserved when the application closes.', text_color=MUTED, font=('Segoe UI', 12), wraplength=660, justify='left')
         self.notice.pack(anchor='w', pady=(12, 0))
         self.protocol('WM_DELETE_WINDOW', self.close)
+        self.claude_panel = ClaudePanel(self)
+        self.grok_panel = GrokPanel(self)
+        self.initialize_api_cards()
+        self.draw_tokenharbor_accounts()
+        self.after_idle(lambda: self.after_idle(self.show_saved_window))
+        self.position_save_job = None
+        self.bind('<Configure>', self.schedule_window_position_save, add='+')
         self.after(100, self.consume)
         self.after(120, lambda: self.refresh(prepare=True))
         self.after(60000, self.periodic_quota)
@@ -357,7 +383,10 @@ class App(ctk.CTk):
     def set_quota_floor(self, name, group, window, value):
         self.controller.preferences.setdefault('quota-floors', {}).setdefault(name, {}).setdefault(group, {})[window] = value
         self.controller.save()
-        if group == 'openai':
+        if group == 'claude-native':
+            self.claude_panel.render()
+            self.refresh_claude_accounts()
+        elif group == 'openai':
             self.draw_chatgpt_accounts()
             self.refresh_chatgpt_accounts()
         else:
@@ -382,8 +411,7 @@ class App(ctk.CTk):
             return
         if mutation:
             self.busy = True
-            self.add_button.configure(state='disabled')
-            self.add_chatgpt_button.configure(state='disabled')
+            self.set_provider_login_buttons(False)
             self.pool_button.configure(state='disabled')
         def run():
             try:
@@ -399,9 +427,11 @@ class App(ctk.CTk):
             done, result, error, mutation = self.mailbox.get()
             if mutation:
                 self.busy = False
-                login_pending = self.pending_login or self.pending_chatgpt_login
+                login_pending = self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login
                 self.add_button.configure(state='disabled' if login_pending else 'normal')
                 self.add_chatgpt_button.configure(state='disabled' if login_pending else 'normal')
+                self.add_claude_button.configure(state='disabled' if login_pending else 'normal')
+                self.add_grok_button.configure(state='disabled' if login_pending else 'normal')
                 self.pool_button.configure(state='normal')
             if error:
                 self.notice.configure(text=self.redact_private_text(error), text_color='#ffbd93')
@@ -441,6 +471,9 @@ class App(ctk.CTk):
         self.update_mode_label()
         self.draw_account_list()
         self.refresh_chatgpt_accounts()
+        self.refresh_claude_accounts()
+        self.refresh_grok_accounts()
+        self.refresh_api_accounts()
         if self.detail_account != self.selected:
             self.draw_detail()
         else:
@@ -488,7 +521,7 @@ class App(ctk.CTk):
         if not self.provider_visible('openai'):
             frame.pack_forget()
             return
-        if not rows:
+        if not rows and not self.provider_api_count('openai'):
             self._chatgpt_order = None
             frame.pack_forget()
             return
@@ -498,7 +531,7 @@ class App(ctk.CTk):
             self.chatgpt_header = self.button(frame, '', self.toggle_chatgpt_accounts)
             self.chatgpt_header.configure(image=self.provider_icons['openai'], compound='left', height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
             self.chatgpt_header.pack(fill='x', padx=1, pady=(1, 2))
-        self.chatgpt_header.configure(text=('▸' if self.chatgpt_collapsed else '▾') + f'  ChatGPT · {len(rows)}pcs')
+        self.chatgpt_header.configure(text=('▸' if self.chatgpt_collapsed else '▾') + f'  ChatGPT · {len(rows)+self.provider_api_count("openai")}pcs')
         if not hasattr(self, 'chatgpt_compact'):
             self.chatgpt_compact = self.make_quota_dots(self.chatgpt_header, ('5h', '1w'))
         self.show_quota_dots(self.chatgpt_compact, self.chatgpt_collapsed, after=self.chatgpt_header)
@@ -515,24 +548,53 @@ class App(ctk.CTk):
                 heading = ctk.CTkLabel(heading_row, text='', localize=False, width=1, height=20, anchor='w', text_color=TEXT)
                 heading.configure(font=('Segoe UI', 11), image=self.provider_icons['openai'], compound='left')
                 heading.grid(row=0, column=0, sticky='ew')
+                self.bind_account_rename(heading, name, 'OpenAI')
+                controls = ctk.CTkFrame(heading_row, fg_color='transparent', height=20, width=1)
+                controls.grid(row=0, column=2, sticky='e')
+                pause = self.account_pause_button(controls, name, 'openai')
+                pause.pack(side='right')
                 model = ctk.CTkLabel(heading_row, text='', width=1, height=20, font=('Segoe UI', 9, 'bold'), text_color='#bac9df')
                 model.grid(row=0, column=1, sticky='e', padx=(4, 0))
                 status_row = ctk.CTkFrame(card, fg_color='transparent')
                 status_row.pack(fill='x', padx=8, pady=(0, 3))
-                priority = self.make_priority_counter(status_row, item, 'openai')
+                priority = self.make_priority_counter(controls, item, 'openai')
                 plan = ctk.CTkLabel(status_row, text='', height=17, width=1, corner_radius=5,
                                     fg_color='#264268', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
                 plan.pack(side='left', padx=(0, 5))
                 status = ctk.CTkLabel(status_row, text='', height=17, anchor='w', font=('Segoe UI', 10), text_color=MUTED)
                 status.pack(side='left', fill='x', expand=True)
+                self.attach_tooltip(status, lambda n=name: str(next((a.get('success', 0) for a in self.chatgpt_items if a['name'] == n), 0)) + ' responses')
                 windows = ctk.CTkFrame(card, fg_color='transparent')
                 # Leave the card border visible beside the quota rows.
                 windows.pack(fill='x', padx=4)
-                widgets[name] = {'card': card, 'heading': heading, 'model': model, 'status': status, 'plan': plan, 'priority': priority,
-                    'windows_frame': windows, 'windows': {}, 'credits': label(15),
-                    'reset_details': label(16), 'reset_button': self.button(card, 'Use usage reset', lambda: None),
+                reset_row = ctk.CTkFrame(controls, fg_color='transparent', height=18, width=18)
+                reset_row.pack_propagate(False)
+                credits = ctk.CTkLabel(reset_row, text='', width=1, height=15, anchor='w',
+                                       font=('Segoe UI', 10), text_color=MUTED)
+                # Reset count is included in the icon button; no separate credit row.
+                reset_button = self.button(reset_row, '', lambda: None)
+                reset_button.configure(height=17, width=18, corner_radius=1, font=('Segoe UI', 13),
+                                       fg_color='transparent', image=self.playback_icons['reset'], compound='left', border_spacing=0)
+                reset_details = ctk.CTkLabel(self, text='', height=24, corner_radius=5,
+                                            fg_color='#303b50', font=('Segoe UI', 10), text_color=TEXT)
+                widgets[name] = {'card': card, 'heading': heading, 'pause': pause, 'model': model, 'status': status, 'plan': plan, 'priority': priority,
+                    'windows_frame': windows, 'windows': {}, 'credits': credits, 'reset_row': reset_row,
+                    'reset_details': reset_details, 'reset_button': reset_button, 'reset_buttons': [reset_button],
                     'error': label(15)}
-                widgets[name]['reset_button'].configure(height=25, font=('Segoe UI', 10))
+                def hide_reset_tip(event=None, tip=reset_details):
+                    tip.place_forget()
+                def show_reset_tip(event=None, tip=reset_details, target=reset_button):
+                    if not tip.cget('text'):
+                        return
+                    x = target.winfo_rootx() - self.winfo_rootx()
+                    y = target.winfo_rooty() - self.winfo_rooty()
+                    tip.place(x=tip._reverse_widget_scaling(x), y=tip._reverse_widget_scaling(y), anchor='sw')
+                    tip.lift()
+                reset_button.bind('<Enter>', show_reset_tip, add='+')
+                reset_button.bind('<Leave>', hide_reset_tip, add='+')
+                reset_button.bind('<Button-1>', hide_reset_tip, add='+')
+                card.bind('<Destroy>', lambda event, tip=reset_details, owned=card:
+                          tip.destroy() if event.widget is owned and tip.winfo_exists() else None, add='+')
             self.update_chatgpt_row(item)
         order = tuple(item['name'] for item in rows)
         if getattr(self, '_chatgpt_order', None) != (self.chatgpt_collapsed, order):
@@ -556,14 +618,15 @@ class App(ctk.CTk):
     def update_chatgpt_row(self, item):
         row = self.chatgpt_widgets[item['name']]
         row['heading'].configure(text=self.display_name(item, 'OpenAI'))
+        self.update_pause_button(row['pause'], item.get('disabled'))
         status, severity, reason = account_status(item)
         if severity != 'error' and 'openai' in blocked_families(self.controller.preferences, item['name'], ChatGPTAuth.quota_limit_groups(item.get('quota') or {})):
-            status, severity = 'Quota reserve reached', 'warning'
+            status, severity = 'Reserve reached', 'warning'
         row['plan'].configure(text=' ' + self.chatgpt_plan_name(item) + ' ')
         self.update_priority_counter(row['priority'], item)
         color = {'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': GREEN, 'muted': MUTED}[severity]
-        row['status'].configure(text=f'{status} · {item.get("success") or 0} responses', text_color=color,
-                                wraplength=175, justify='left')
+        row['status'].configure(text=f'{status} · {item.get("success") or 0} resp.', text_color=color,
+                                wraplength=0, justify='left')
         quota = item.get('quota') or {}
         keys = set()
         for window in quota.get('windows', []):
@@ -596,25 +659,54 @@ class App(ctk.CTk):
                 widget.configure(text=text)
             if not widget.winfo_manager():
                 widget.pack(fill='x', padx=8, pady=pady)
-        if quota.get('reset_credits') is not None:
-            show(row['credits'], f'Reset credits: {quota["reset_credits"]}')
+        credits = quota.get('reset_credits') or len(quota.get('reset_options') or [])
+        if isinstance(credits, (int, float)) and credits > 0:
+            row['reset_button'].configure(text='')
+            row['reset_row'].configure(width=18 * int(credits))
+            if not row['reset_row'].winfo_manager():
+                row['reset_row'].pack(side='right', padx=(0, 2))
         else:
-            row['credits'].pack_forget()
+            row['reset_row'].pack_forget()
         options = quota.get('reset_options') or []
         if options and not item.get('disabled'):
             expiry = min((entry['expires_at'] for entry in options if entry.get('expires_at')), default=None)
             details = 'One available usage reset'
             if expiry:
                 details += ' · earliest expiry ' + self.activity_time(expiry)
-            show(row['reset_details'], details)
+            row['reset_details'].configure(text=details)
             row['reset_button'].configure(command=lambda account=item: self.confirm_chatgpt_reset(account),
                                           state='disabled' if self.busy else 'normal')
-            show(row['reset_button'], pady=(1, 5))
+            if not row['reset_button'].winfo_manager():
+                row['reset_button'].pack(side='left')
         else:
-            row['reset_details'].pack_forget()
-            row['reset_button'].pack_forget()
+            row['reset_details'].place_forget()
+            credits = quota.get('reset_credits')
+            if options or isinstance(credits, (int, float)) and credits > 0:
+                row['reset_button'].configure(state='disabled')
+                if not row['reset_button'].winfo_manager():
+                    row['reset_button'].pack(side='left')
+                row['reset_details'].configure(text='Reset unavailable while the current quota window is full.'
+                     if any(w.get('label') == '5h' and w.get('remaining') == 100 for w in quota.get('windows', []))
+                     else 'OpenAI does not allow this reset right now.')
+            else:
+                row['reset_button'].pack_forget()
+        count = int(credits) if isinstance(credits, (int, float)) and credits > 0 else 0
+        while len(row['reset_buttons']) < count:
+            button = self.button(row['reset_row'], '', lambda account=item: self.confirm_chatgpt_reset(account))
+            button.configure(height=17, width=18, corner_radius=1, fg_color='transparent',
+                             image=self.playback_icons['reset'], border_spacing=0)
+            self.attach_tooltip(button, lambda r=row: r['reset_details'].cget('text'))
+            row['reset_buttons'].append(button)
+        for index, button in enumerate(row['reset_buttons']):
+            if index < count:
+                button.configure(text='', state=row['reset_button'].cget('state'),
+                                 command=lambda account=item: self.confirm_chatgpt_reset(account))
+                if not button.winfo_manager():
+                    button.pack(side='left')
+            else:
+                button.pack_forget()
         error = reason
-        quota_error = quota.get('reset_error') or (quota.get('error') or 'Quota not loaded yet' if not quota.get('windows') and not item.get('disabled') else '')
+        quota_error = quota.get('error') or ('Quota not loaded yet' if not quota.get('windows') and not item.get('disabled') else '')
         if quota_error:
             error = '\n'.join(filter(None, (error, str(quota_error))))
         row['error'].configure(text_color=color if reason else MUTED, wraplength=230, justify='left')
@@ -645,6 +737,7 @@ class App(ctk.CTk):
         self.controller.preferences['chatgpt-collapsed'] = self.chatgpt_collapsed
         self.controller.save()
         self.draw_chatgpt_accounts()
+        self.refresh_api_accounts(use_cache=True)
 
     def confirm_chatgpt_reset(self, account):
         if self.busy:
@@ -662,23 +755,7 @@ class App(ctk.CTk):
                   done, mutation=True)
 
     def add_chatgpt_account(self):
-        if self.busy or self.pending_login or self.pending_chatgpt_login:
-            return
-        window = ctk.CTkToplevel(self)
-        window.title('Add ChatGPT account')
-        window.geometry('440x235')
-        window.resizable(False, False)
-        window.configure(fg_color=PANEL)
-        window.transient(self)
-        ctk.CTkLabel(window, text='Add ChatGPT account', font=('Segoe UI', 21, 'bold'),
-                     text_color=TEXT).pack(pady=(22, 8))
-        ctk.CTkLabel(window, text='Each sign-in uses a separate browser profile.\nEnter your password and 2FA code on the official ChatGPT page.',
-                     font=('Segoe UI', 12), text_color=MUTED, justify='center').pack(pady=(0, 13))
-        def choose(action):
-            window.destroy()
-            action()
-        self.button(window, 'Sign in with ChatGPT', lambda: choose(self.sign_in_chatgpt), primary=True).pack(fill='x', padx=35, pady=(0, 7))
-        self.button(window, 'Import auth.json', lambda: choose(self.import_chatgpt_file)).pack(fill='x', padx=35)
+        self.provider_login_menu('OpenAI')
 
     def import_chatgpt_file(self):
         path = filedialog.askopenfilename(parent=self, title='Choose ChatGPT auth.json',
@@ -698,7 +775,7 @@ class App(ctk.CTk):
         self.work(lambda: ChatGPTAuth(self.controller).import_file(path), done, mutation=True)
 
     def sign_in_chatgpt(self):
-        if self.busy or self.pending_login or self.pending_chatgpt_login:
+        if self.busy or self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login:
             return
         self.work(lambda: ChatGPTAuth(self.controller).begin_login(), self.chatgpt_login_started, mutation=True)
 
@@ -781,7 +858,7 @@ class App(ctk.CTk):
         return self.visible_services.get(provider, True)
 
     def google_visible(self):
-        return self.provider_visible('gemini') or self.provider_visible('claude')
+        return self.provider_visible('gemini')
 
     def apply_service_visibility(self):
         if not hasattr(self, 'google_accounts_header'):
@@ -802,7 +879,7 @@ class App(ctk.CTk):
         else:
             self.sidebar_spacer.pack_forget()
         for provider, group in getattr(self, 'pool_summary_groups', {}).items():
-            visible = self.provider_visible('gemini') if provider == 'google' else self.provider_visible('openai')
+            visible = self.provider_visible('gemini') if provider == 'google' else self.provider_visible('claude' if provider=='claude-native' else provider)
             if visible and not group['frame'].winfo_manager():
                 anchor = self.pool_summary_groups.get('openai', {}).get('frame') if provider == 'google' else None
                 if anchor is None or not anchor.winfo_manager():
@@ -822,7 +899,7 @@ class App(ctk.CTk):
         self.label(self.display_settings, 'Display settings', 22, bold=True)
         self.label(self.display_settings, 'Visible services', 16, bold=True)
         self.service_variables = {}
-        for provider, title in [('gemini', 'Gemini'), ('claude', 'Claude'), ('openai', 'OpenAI'), ('tokenharbor', 'TokenHarbor')]:
+        for provider, title in [('gemini', 'Gemini'), ('claude', 'Claude'), ('openai', 'OpenAI'), ('grok', 'Grok'), ('tokenharbor', 'TokenHarbor')]:
             variable = tk.BooleanVar(master=self, value=self.provider_visible(provider))
             self.service_variables[provider] = variable
             control = ctk.CTkCheckBox(self.display_settings, text=title, variable=variable,
@@ -845,6 +922,9 @@ class App(ctk.CTk):
         self.apply_service_visibility()
         self.draw_account_list()
         self.draw_chatgpt_accounts()
+        self.claude_panel.render()
+        self.grok_panel.render()
+        self.refresh_api_accounts(use_cache=True)
         if hasattr(self, 'rename_entry') and self.rename_entry.winfo_exists():
             unsaved_label = self.rename_entry.get()
             self.draw_detail()
@@ -916,7 +996,7 @@ class App(ctk.CTk):
             except OSError:
                 return False
         def done(is_idle):
-            if is_idle and not self.busy and not self.pending_login and not self.pending_chatgpt_login:
+            if is_idle and not self.busy and not self.pending_login and not self.pending_chatgpt_login and not self.pending_claude_login:
                 from updater import launch_update
                 launch_update(self.controller, self.pending_update)
                 self.update_button.configure(text='Installing and restarting…')
@@ -977,7 +1057,7 @@ class App(ctk.CTk):
             self.after(5000, self.poll_activity)
             return
         self.activity_busy = True
-        chatgpt_accounts = copy.deepcopy(self.chatgpt_items)
+        chatgpt_accounts = copy.deepcopy(self.chatgpt_items + self.claude_items + self.grok_items + [a for a in self.api_items if a.get('auth_index')])
         def fetch():
             try:
                 accounts, records, strategy = self.controller.activity_snapshot()
@@ -1107,7 +1187,7 @@ class App(ctk.CTk):
 
     def render_activity(self):
         state = self.activity_state
-        by_name = {a['name']: a for a in self.items + self.chatgpt_items}
+        by_name = {a['name']: a for a in self.items + self.chatgpt_items + self.claude_items + self.grok_items}
         def name(key):
             return self.display_name(by_name[key]) if key in by_name else (
                 self.private_account_name('Account', key) if self.hide_account_names and key else key or 'Unknown account')
@@ -1129,7 +1209,7 @@ class App(ctk.CTk):
         for key in list(self.activity_rows):
             if key not in by_name:
                 self.activity_rows.pop(key).destroy()
-        for account in self.items + self.chatgpt_items:
+        for account in self.items + self.chatgpt_items + self.claude_items + self.grok_items + self.api_items:
             key = account['name']
             if key not in self.activity_rows:
                 self.activity_rows[key] = self.label(self.stats_accounts, '', 13)
@@ -1176,7 +1256,7 @@ class App(ctk.CTk):
             return
         client = TokenHarbor(self.controller, self.integrations)
         keys = client.keys()
-        signature = (tuple(keys), self.tokenharbor_collapsed)
+        signature = (tuple(keys), tuple(client.paused_keys()), self.tokenharbor_collapsed, self.provider_api_count('tokenharbor'))
         if getattr(self, '_tokenharbor_key_signature', None) == signature and frame.winfo_children():
             self.update_tokenharbor_names()
             return
@@ -1187,9 +1267,10 @@ class App(ctk.CTk):
         self.tokenharbor_rows = {}
         self.tokenharbor_name_widgets = {}
         header = self.button(frame, ('▸' if self.tokenharbor_collapsed else '▾') +
-            f'  TokenHarbor · {len(keys)}pcs', self.toggle_tokenharbor_accounts)
+            f'  TokenHarbor · {len(keys)+self.provider_api_count("tokenharbor")}pcs', self.toggle_tokenharbor_accounts)
         header.configure(height=28, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         header.pack(fill='x', padx=1, pady=(2, 3))
+        self.install_service_add_button(header, 'tokenharbor')
         if self.tokenharbor_collapsed:
             return
         self.tokenharbor_last = ctk.CTkLabel(frame, text='', height=17,
@@ -1201,27 +1282,28 @@ class App(ctk.CTk):
         for key in keys:
             card = ctk.CTkFrame(frame, fg_color='#202938', corner_radius=8, border_width=1, border_color='#344155')
             card.pack(fill='x', padx=1, pady=(0, 2))
-            heading = ctk.CTkLabel(card, text='', localize=False, height=20,
+            heading_row = ctk.CTkFrame(card, fg_color='transparent')
+            heading_row.pack(fill='x', padx=8, pady=(3, 0))
+            heading = ctk.CTkLabel(heading_row, text='', localize=False, height=20,
                 anchor='w', font=('Segoe UI', 11), text_color=TEXT)
-            heading.pack(fill='x', padx=8, pady=(3, 0))
+            heading.pack(side='left', fill='x', expand=True)
+            self.bind_account_rename(heading, key_id(key), 'TokenHarbor')
+            pause = self.account_pause_button(heading_row, key_id(key), 'tokenharbor')
+            self.update_pause_button(pause, key in client.paused_keys())
+            pause.pack(side='right')
             self.tokenharbor_name_widgets[key_id(key)] = (heading, key_label(key))
             status = ctk.CTkLabel(card, text='', height=17,
                 anchor='w', font=('Segoe UI', 10), text_color=MUTED)
             status.pack(fill='x', padx=8, pady=(0, 3))
             self.tokenharbor_widgets.append(card)
             self.tokenharbor_rows[key_id(key)] = (card, status)
-        add = self.button(frame, '+ Add TokenHarbor account', lambda: self.tokenharbor_settings(self))
-        add.configure(height=24, fg_color='#303e59')
-        add.pack(fill='x', padx=1, pady=(2, 0))
-        self.button(frame, 'Balance and reset ↗',
-                    lambda: webbrowser.open('https://tokenharbor.ai/dashboard')).pack(
-                        fill='x', padx=1, pady=(2, 0))
         self.update_tokenharbor_names()
         self.update_tokenharbor_status()
+        self.refresh_api_accounts(use_cache=True)
 
     def update_tokenharbor_names(self):
         for fingerprint, (heading, label) in getattr(self, 'tokenharbor_name_widgets', {}).items():
-            name = self.private_account_name('TokenHarbor', fingerprint) if self.hide_account_names else label
+            name = self.private_account_name('TokenHarbor', fingerprint) if self.hide_account_names else self.controller.preferences.get('labels', {}).get(fingerprint) or label
             heading.configure(text='●  ' + name)
 
     def update_tokenharbor_status(self):
@@ -1258,6 +1340,7 @@ class App(ctk.CTk):
         self.controller.preferences['tokenharbor-collapsed'] = self.tokenharbor_collapsed
         self.controller.save()
         self.draw_tokenharbor_accounts()
+        self.refresh_api_accounts(use_cache=True)
 
     def toggle_google_accounts(self):
         self.google_accounts_collapsed = not self.google_accounts_collapsed
@@ -1268,10 +1351,11 @@ class App(ctk.CTk):
         else:
             self.account_list.pack(fill='both', expand=True, padx=12, after=self.google_accounts_header)
         self.draw_account_list()
+        self.refresh_api_accounts(use_cache=True)
 
     def draw_account_list(self):
         self.google_accounts_header.configure(text=('▸' if self.google_accounts_collapsed else '▾') +
-                                             f'  Google Gemini · {len(self.items)}pcs')
+                                             f'  Google Gemini · {len(self.items)+self.provider_api_count("gemini")}pcs')
         self.google_accounts_header.configure(font=('Segoe UI', 10, 'bold'))
         self.apply_service_visibility()
         self.draw_tokenharbor_accounts()
@@ -1347,21 +1431,27 @@ class App(ctk.CTk):
             status = self.sidebar_account_status(account)
             heading_row = ctk.CTkFrame(card, fg_color='transparent')
             heading_row.pack(fill='x', pady=0, padx=5)
+            heading_row.grid_columnconfigure(0, weight=1)
+            controls = ctk.CTkFrame(heading_row, fg_color='transparent', width=1, height=19)
+            controls.grid(row=0, column=1, sticky='e')
             button = ctk.CTkButton(heading_row, text=self.account_heading(account), localize=False,
                 height=19, anchor='w', corner_radius=6, fg_color='#303e59' if not self.details_collapsed and account['name'] == self.selected else CARD,
                 hover=not self.details_collapsed,
                 hover_color='#334158', text_color=TEXT, font=('Segoe UI', 12, 'bold'), command=lambda a=account: self.select(a))
             button.configure(width=1)
             button.configure(image=self.provider_icons['antigravity'], compound='left')
-            button.pack(side='left', fill='x', expand=True)
+            button.grid(row=0, column=0, sticky='ew')
+            self.bind_account_rename(button, name, 'Google')
+            pause = self.account_pause_button(controls, name, 'google')
+            pause.pack(side='right')
             status_row = ctk.CTkFrame(card, fg_color='transparent')
             status_row.pack(fill='x', padx=8, pady=0)
-            priority = self.make_priority_counter(status_row, account, 'google')
+            priority = self.make_priority_counter(controls, account, 'google')
             plan = ctk.CTkLabel(status_row, text='', height=16, width=1, corner_radius=5,
                                 fg_color='#183b32', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
             plan.pack(side='left', padx=(0, 5))
             state = ctk.CTkLabel(status_row, text='', height=16, width=1, anchor='w',
-                                 font=('Segoe UI', 10), text_color=MUTED, wraplength=115, justify='left')
+                                 font=('Segoe UI', 10), text_color=MUTED, wraplength=0, justify='left')
             state.pack(side='left', fill='x', expand=True)
             countdown = {}
             verification_frame = ctk.CTkFrame(card, fg_color='transparent')
@@ -1381,9 +1471,10 @@ class App(ctk.CTk):
                 verification_frame.pack(fill='x', padx=5, pady=(0, 3))
             quota_frame = ctk.CTkFrame(card, fg_color='transparent')
             quota_frame.pack(fill='x', padx=5, pady=0)
-            widgets = {'card': card, 'button': button, 'plan': plan, 'status': state, 'priority': priority, 'quota_icons': {}, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
+            widgets = {'card': card, 'button': button, 'pause': pause, 'plan': plan, 'status': state, 'priority': priority, 'quota_icons': {}, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
                        'active_families': (), 'quota_rows': {}}
             self.account_widgets[account['name']] = widgets
+            button.bind('<Configure>', lambda event, row=widgets: self.draw_active_badges(row, row.get('active_families', ()), row.get('badge_model', '')), add='+')
             groups = self.quota_groups(account['name'])
             for group in groups:
                 visible_buckets = sorted(group['buckets'], key=lambda b: b['window'] != '5h')
@@ -1417,15 +1508,17 @@ class App(ctk.CTk):
         return (marker + '  ' if marker else '') + self.display_name(account)
 
     def make_priority_counter(self, parent, account, provider):
-        frame = ctk.CTkFrame(parent, fg_color='transparent', corner_radius=5, height=18)
+        frame = ctk.CTkFrame(parent, fg_color='transparent', corner_radius=5, height=18, width=1)
         frame.pack(side='right', padx=(3, 0))
-        down = self.button(frame, '↓', lambda: self.change_account_priority(account, provider, -1))
-        down.configure(width=16, height=18, font=('Segoe UI', 11), fg_color='transparent')
+        down = self.button(frame, '', lambda: self.change_account_priority(account, provider, -1))
+        down.configure(width=14, height=18, corner_radius=1, image=self.playback_icons['down'], border_spacing=0, fg_color='transparent')
+        self.attach_tooltip(down, 'Decrease priority')
         down.pack(side='left')
-        value = ctk.CTkLabel(frame, text='0', width=22, height=18, font=('Segoe UI', 10), text_color=TEXT)
+        value = ctk.CTkLabel(frame, text='0', width=15, height=18, font=('Segoe UI', 10), text_color=TEXT)
         value.pack(side='left')
-        up = self.button(frame, '↑', lambda: self.change_account_priority(account, provider, 1))
-        up.configure(width=16, height=18, font=('Segoe UI', 11), fg_color='transparent')
+        up = self.button(frame, '', lambda: self.change_account_priority(account, provider, 1))
+        up.configure(width=14, height=18, corner_radius=1, image=self.playback_icons['up'], border_spacing=0, fg_color='transparent')
+        self.attach_tooltip(up, 'Increase priority')
         up.pack(side='left')
         value.priority_down, value.priority_up = down, up
         return value
@@ -1439,6 +1532,9 @@ class App(ctk.CTk):
     def change_account_priority(self, account, provider, delta):
         if self.busy:
             return
+        if provider == 'api':
+            self.change_api_priority(account['name'], delta)
+            return
         priorities = self.controller.preferences.get('account-priorities', {})
         previous = priorities.get(account['name'], 0)
         value = min(999, max(0, previous + delta))
@@ -1446,7 +1542,13 @@ class App(ctk.CTk):
             return
         self.controller.preferences.setdefault('account-priorities', {})[account['name']] = value
         self.controller.save()
-        if provider == 'openai':
+        if provider == 'grok':
+            self.grok_panel.render()
+            self.refresh_grok_accounts()
+        elif provider == 'claude-native':
+            self.claude_panel.render()
+            self.refresh_claude_accounts()
+        elif provider == 'openai':
             self.draw_chatgpt_accounts()
             self.refresh_chatgpt_accounts()
         else:
@@ -1510,9 +1612,13 @@ class App(ctk.CTk):
             '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'))).convert('RGBA')
         light_openai = Image.new('RGBA', openai.size, '#243047')
         light_openai.putalpha(openai.getchannel('A'))
+        grok = Image.new('RGBA', (64, 64))
+        draw = ImageDraw.Draw(grok)
+        draw.arc((8, 8, 55, 55), 45, 340, fill='#bac9df', width=5)
+        draw.line((19, 49, 51, 14), fill='#bac9df', width=6)
         antigravity = Image.open(io.BytesIO(base64.b64decode(ANTIGRAVITY_PNG))).convert('RGBA')
         return {kind: ctk.CTkImage(light_image=light_openai if kind == 'openai' else bitmap, dark_image=bitmap, size=(14, 14))
-                for kind, bitmap in [('gemini', gemini), ('claude', claude), ('openai', openai), ('antigravity', antigravity)]}
+                for kind, bitmap in [('gemini', gemini), ('claude', claude), ('openai', openai), ('antigravity', antigravity), ('grok', grok)]}
 
     @staticmethod
     def sidebar_quota_text(group, bucket):
@@ -1603,7 +1709,7 @@ class App(ctk.CTk):
 
     def quota_layout(self, name):
         return tuple((group['kind'], bucket['window']) for group in self.quota_groups(name)
-                     for bucket in self.visible_quota_buckets(group) if self.provider_visible(group['kind']))
+                     for bucket in self.visible_quota_buckets(group))
 
     def create_pool_summary(self, provider, title):
         group = ctk.CTkFrame(self.sidebar_footer, fg_color='transparent')
@@ -1613,6 +1719,7 @@ class App(ctk.CTk):
                              lambda: self.toggle_pool_summary(provider))
         header.configure(height=25, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         header.pack(fill='x', pady=(0, 2))
+        self.install_service_add_button(header, provider)
         compact = self.make_quota_dots(header, ('5h', '1w'))
         self.show_quota_dots(compact, collapsed, after=header)
         body = ctk.CTkFrame(group, fg_color='transparent')
@@ -1649,7 +1756,7 @@ class App(ctk.CTk):
     @staticmethod
     def show_quota_dots(frame, visible, after):
         if visible and not frame.winfo_manager():
-            frame.place(relx=1, rely=.5, x=-5, anchor='e')
+            frame.place(relx=1, rely=.5, x=-28 if hasattr(after, 'service_add') else -5, anchor='e')
         elif not visible:
             frame.place_forget()
 
@@ -1658,8 +1765,15 @@ class App(ctk.CTk):
         if getattr(frame, 'dot_values', None) == signature:
             return
         frame.dot_values = signature
+        for index, widget in enumerate(frame.dot_widgets):
+            hide = widget.dot_label.endswith('5h') and index+1 < len(values) and isinstance(values[index+1], (int, float)) and values[index+1] < .01
+            if hide:
+                widget.pack_forget()
+            elif not widget.winfo_manager():
+                following = next((other for other in frame.dot_widgets[index+1:] if other.winfo_manager()), None)
+                widget.pack(side='left', padx=(0, 2), **({'before': following} if following else {}))
         for widget, value in zip(frame.dot_widgets, values):
-            label = widget.dot_label.split()[-1]
+            label = widget.dot_label.split()[-1] if widget.dot_label.strip() else ''
             widget.configure(image=ctk.CTkImage(light_image=quota_dot(value, True, label),
                                               dark_image=quota_dot(value, label=label), size=(19, 19)))
 
@@ -1693,11 +1807,16 @@ class App(ctk.CTk):
             self.set_quota_dots(self.chatgpt_compact, openai)
         for provider, group in getattr(self, 'pool_summary_groups', {}).items():
             values = [getattr(self, 'total_remaining', None), getattr(self, 'total_weekly_remaining', None)] if provider == 'google' else openai
+            if provider=='claude-native':
+                values = self.claude_panel.pooled_values()
+            if provider=='grok':
+                values = self.grok_panel.pooled_values()
             self.set_quota_dots(group['compact'], values)
 
     def update_openai_pool_quota(self):
         accounts = [account for account in self.chatgpt_items if not account.get('disabled')]
         values = {'5h': [], '1w': []}
+        entries = {'5h': [], '1w': []}
         now = datetime.now(timezone.utc)
         def valid(value):
             return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 <= value <= 100
@@ -1709,6 +1828,11 @@ class App(ctk.CTk):
             weekly = windows.get('1w', {}).get('remaining')
             if valid(weekly):
                 values['1w'].append(weekly / 100)
+                try:
+                    moment = datetime.fromtimestamp(windows['1w']['reset_at'], timezone.utc).isoformat()
+                except (KeyError, ValueError, TypeError, OverflowError, OSError):
+                    moment = None
+                entries['1w'].append({'remaining': weekly / 100, 'reset': moment, 'weekly_remaining': 1})
             primary = windows.get('5h', {})
             remaining = primary.get('remaining')
             if valid(remaining):
@@ -1721,6 +1845,9 @@ class App(ctk.CTk):
                 week = {'remaining': weekly / 100 if valid(weekly) else None, 'reset': reset(windows.get('1w', {}))}
                 entry = quota_entry(account, bucket, week, 'claude', now)
                 values['5h'].append(0 if valid(weekly) and weekly < 1 else entry['remaining'])
+                if valid(weekly) and weekly < 1:
+                    entry['weekly_remaining'] = 0
+                entries['5h'].append(entry)
         for window, widgets in self.openai_pool_widgets.items():
             available = values[window]
             remaining = sum(available) / len(available) if available else None
@@ -1731,6 +1858,18 @@ class App(ctk.CTk):
             value.configure(text=self.quota_percent(remaining), text_color=color)
             bar.configure(progress_color=color)
             bar.set(remaining if remaining is not None else 0)
+            forecast = quota_projection(entries[window], now, exhausted_only=False)
+            self.openai_forecasts[window] = (remaining, forecast)
+            canvas = self.openai_forecast_canvases[window]
+            if forecast:
+                bar.pack_forget()
+                if not canvas.winfo_manager():
+                    canvas.pack(fill='x', pady=(1, 0))
+                self.draw_total_forecast(openai_window=window)
+            else:
+                canvas.pack_forget()
+                if not bar.winfo_manager():
+                    bar.pack(fill='x', pady=(1, 0))
 
     def update_total_quota(self):
         self.update_openai_pool_quota()
@@ -1802,22 +1941,30 @@ class App(ctk.CTk):
                 self.total_quota_bar.pack(fill='x', pady=(1, 0))
         self.update_compact_quotas()
 
-    def schedule_total_forecast(self, weekly=False):
+    def schedule_total_forecast(self, weekly=False, openai_window=None):
         job_attr = 'weekly_forecast_resize_job' if weekly else 'forecast_resize_job'
+        if openai_window:
+            job_attr = 'openai_' + openai_window + '_resize_job'
         if getattr(self, job_attr, None):
             self.after_cancel(getattr(self, job_attr))
         def draw():
             setattr(self, job_attr, None)
             if not self.closed:
-                self.draw_total_forecast(weekly=weekly)
+                self.draw_total_forecast(weekly=weekly, openai_window=openai_window)
         setattr(self, job_attr, self.after(75, draw))
 
-    def draw_total_forecast(self, weekly=False):
+    def draw_total_forecast(self, weekly=False, openai_window=None):
         canvas = self.weekly_forecast_canvas if weekly else self.forecast_canvas
         forecast = self.total_weekly_forecast if weekly else self.total_forecast
         total_remaining = self.total_weekly_remaining if weekly else self.total_remaining
         key_attr = 'weekly_forecast_render_key' if weekly else 'forecast_render_key'
         labels_attr = 'weekly_forecast_hover_labels' if weekly else 'forecast_hover_labels'
+        if openai_window:
+            canvas = self.openai_forecast_canvases[openai_window]
+            total_remaining, forecast = self.openai_forecasts.get(openai_window, (None, []))
+            weekly = openai_window == '1w'
+            key_attr = 'openai_' + openai_window + '_render_key'
+            labels_attr = 'openai_' + openai_window + '_hover_labels'
         if not forecast:
             canvas.delete('all')
             setattr(self, key_attr, None)
@@ -1871,10 +2018,13 @@ class App(ctk.CTk):
             canvas.create_rectangle(x - scale, top, x + scale, height - top,
                 fill=color, outline='', tags='forecast_time')
 
-    def hover_forecast(self, event, weekly=False):
+    def hover_forecast(self, event, weekly=False, openai_window=None):
         canvas = self.weekly_forecast_canvas if weekly else self.forecast_canvas
+        if openai_window:
+            canvas = self.openai_forecast_canvases[openai_window]
         canvas.delete('forecast_hover')
-        labels = getattr(self, 'weekly_forecast_hover_labels' if weekly else 'forecast_hover_labels', [])
+        labels_attr = 'openai_' + openai_window + '_hover_labels' if openai_window else 'weekly_forecast_hover_labels' if weekly else 'forecast_hover_labels'
+        labels = getattr(self, labels_attr, [])
         if not labels:
             return
         scale = self.sidebar._get_widget_scaling()
@@ -1892,6 +2042,7 @@ class App(ctk.CTk):
         status = self.sidebar_account_status(account)
         self.update_selection_style(account, widgets)
         widgets['button'].configure(text=self.account_heading(account))
+        self.update_pause_button(widgets['pause'], account.get('disabled'))
         widgets['plan'].configure(text=' ' + self.google_plan_name(account) + ' ')
         self.update_priority_counter(widgets['priority'], account)
         state, severity, reason = google_account_status(account, self.quota_groups(account['name']))
@@ -1903,11 +2054,11 @@ class App(ctk.CTk):
             text_color={'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': MUTED, 'muted': MUTED}[severity])
         if account.get('access_issue') == 'verification':
             if not widgets['verification_frame'].winfo_manager():
-                widgets['verification_frame'].pack(fill='x', padx=5, pady=(0, 3), after=widgets['button'])
+                widgets['verification_frame'].pack(fill='x', padx=5, pady=(0, 3), before=widgets['quota_frame'])
         else:
             widgets['verification_frame'].pack_forget()
         for group in self.quota_groups(account['name']):
-            visible = {bucket['window'] for bucket in self.visible_quota_buckets(group)} if self.provider_visible(group['kind']) else set()
+            visible = {bucket['window'] for bucket in self.visible_quota_buckets(group)}
             first_visible = next((bucket['window'] for bucket in sorted(group['buckets'], key=lambda b: b['window'] != '5h') if bucket['window'] in visible), None)
             for bucket in group['buckets']:
                 key = (group['kind'], bucket['window'])
@@ -1990,12 +2141,16 @@ class App(ctk.CTk):
             self.update_countdown(name)
         for item in self.chatgpt_items:
             self.update_chatgpt_countdowns(item)
+        self.claude_panel.render()
+        self.grok_panel.render()
         self.update_total_quota()
         if not self.closed:
             self.after(15000, self.tick_countdowns)
 
     @staticmethod
     def model_family(model):
+        if model.startswith('api-') and '/' in model:
+            return model.split('/', 1)[0][4:]
         # These Claude-compatible aliases actually route to Gemini subscriptions.
         if model == 'claude-sonnet-4-5' or model.startswith('gemini'):
             return 'gemini'
@@ -2003,6 +2158,8 @@ class App(ctk.CTk):
             return 'claude'
         if model.startswith(('gpt', 'o1', 'o3', 'o4', 'codex')):
             return 'openai'
+        if model.startswith('grok'):
+            return 'grok'
         if model.startswith('claude'):
             return 'claude'
         return None
@@ -2043,7 +2200,7 @@ class App(ctk.CTk):
         running = {job.get('upstream_model') or
                    getattr(self, 'model_aliases', {}).get(job.get('model'), job.get('model', ''))
                    for job in getattr(self, 'gateway_jobs', []) if job.get('state') == 'running'}
-        enabled = {a['name'] for a in self.items + getattr(self, 'chatgpt_items', []) if not a.get('disabled')}
+        enabled = {a['name'] for a in self.items + getattr(self, 'chatgpt_items', []) + getattr(self, 'claude_items', []) + getattr(self, 'grok_items', []) + getattr(self, 'api_items', []) if not a.get('disabled')}
         latest = {}
         for model, event in self.activity_state['latest'].items():
             actual = event.get('upstream_model') or getattr(self, 'model_aliases', {}).get(event.get('model') or model, event.get('model') or model)
@@ -2092,6 +2249,7 @@ class App(ctk.CTk):
         return model_name(model, getattr(self, 'model_aliases', None))
 
     def draw_active_badges(self, widgets, families, model=''):
+        widgets['badge_model'] = model
         button = widgets['button']
         canvas = button._canvas
         scale = button._get_widget_scaling()
@@ -2197,6 +2355,9 @@ class App(ctk.CTk):
             if widgets['model'].cget('text') != caption:
                 widgets['model'].configure(text=caption)
             self.update_active_border(widgets, is_active)
+        self.claude_panel.animate()
+        self.grok_panel.animate()
+        self.animate_api_accounts()
         self.after(500, self.animate_active_borders)
 
     def update_active_border(self, widgets, is_active):
@@ -2216,21 +2377,21 @@ class App(ctk.CTk):
         if identity not in numbers:
             numbers[identity] = max(numbers.values(), default=0) + 1
             self.controller.save()
-        return f'{provider} {numbers[identity]}'
+        return self.controller.preferences.get('private-account-labels', {}).get(identity) or f'{provider} {numbers[identity]}'
 
     def display_name(self, account, provider=None):
-        provider = provider or ('OpenAI' if account.get('provider', account.get('type')) == 'codex' or
+        provider = provider or ('Grok' if account.get('provider', account.get('type'))=='xai' else 'Claude' if account.get('provider', account.get('type')) in ('claude', 'anthropic') else 'OpenAI' if account.get('provider', account.get('type')) == 'codex' or
             any(item['name'] == account['name'] for item in self.chatgpt_items) else 'Google')
         if self.hide_account_names:
             return self.private_account_name(provider, account['name'])
-        label = self.controller.preferences.get('labels', {}).get(account['name']) if provider == 'Google' else account.get('label')
+        label = self.controller.preferences.get('api-account-labels' if account.get('api') or ' API' in provider else 'labels', {}).get(account['name']) or account.get('label')
         return label or account.get('email') or f'{provider} account'
 
     def redact_private_text(self, text):
         if not self.hide_account_names:
             return text
         replacements = {}
-        for account in self.items + self.chatgpt_items:
+        for account in self.items + self.chatgpt_items + self.claude_items + self.grok_items + self.api_items:
             for identity in (account.get('email'), account.get('label'), self.controller.preferences.get('labels', {}).get(account['name'])):
                 if identity:
                     replacements[identity] = self.display_name(account)
@@ -2246,6 +2407,9 @@ class App(ctk.CTk):
         self.privacy_toggle.configure(image=self.privacy_icons[self.hide_account_names])
         self.draw_account_list()
         self.draw_chatgpt_accounts()
+        self.claude_panel.render()
+        self.grok_panel.render()
+        self.refresh_api_accounts()
         self.update_tokenharbor_status()
         self.update_mode_label()
         self.update_detail_account()
@@ -2295,8 +2459,6 @@ class App(ctk.CTk):
         self.detail_quota_layout = self.quota_layout(account['name'])
         self.detail_quota_frames = {}
         for group in self.quota_groups(account['name']):
-            if not self.provider_visible(group['kind']):
-                continue
             self.label(self.detail, group['name'], 15, bold=True)
             parent = ctk.CTkFrame(self.detail, fg_color='transparent')
             parent.pack(fill='x')
@@ -2318,7 +2480,9 @@ class App(ctk.CTk):
         entry.pack(side='left', fill='x', expand=True, padx=(0, 10))
         entry.insert(0, self.controller.preferences.get('labels', {}).get(account['name'], ''))
         self.rename_entry = entry
-        entry.configure(show='•' if self.hide_account_names else '')
+        if self.hide_account_names:
+            entry.delete(0, 'end')
+        entry.configure(show='')
         self.button(rename_frame, 'Save label', lambda: self.rename(account, entry.get())).pack(side='left')
         self.unavailable_label = self.label(self.detail, '', color='#ffbd93')
         self.label(self.detail, 'Pausing preserves the sign-in. Switching applies to future requests; an ongoing response may finish on the previous account.', 12, MUTED)
@@ -2385,7 +2549,7 @@ class App(ctk.CTk):
         else:
             self.detail_email.configure(text='')
             self.detail_email.pack_forget()
-        self.rename_entry.configure(show='•' if self.hide_account_names else '')
+        self.rename_entry.configure(show='')
         self.detail_status.configure(text='Sign-in saved • account paused' if account['disabled'] else 'Sign-in saved • enabled for requests')
         self.pause_button.configure(text='Resume' if account['disabled'] else 'Pause')
         self.unavailable_label.configure(text='The service reported temporary unavailability. Your sign-in is saved; you can select another account.' if account.get('unavailable') else '')
@@ -2432,7 +2596,7 @@ class App(ctk.CTk):
             self.quota_updated.configure(text_color=MUTED)
         self.detail_quota_layout = self.quota_layout(self.selected)
         for group in self.quota_groups(self.selected):
-            visible = {bucket['window'] for bucket in self.visible_quota_buckets(group)} if self.provider_visible(group['kind']) else set()
+            visible = {bucket['window'] for bucket in self.visible_quota_buckets(group)}
             for bucket in group['buckets']:
                 key = (group['kind'], bucket['window'])
                 frame = self.detail_quota_frames.get(key)
@@ -2520,6 +2684,9 @@ class App(ctk.CTk):
     def periodic_quota(self):
         if not self.busy:
             self.refresh_chatgpt_accounts()
+            self.refresh_claude_accounts()
+            self.refresh_grok_accounts()
+            self.refresh_api_accounts()
             for account in self.items:
                 self.fetch_quota(account['name'])
             # A gateway config reload can drop Claude Desktop's approved aliases.
@@ -2761,6 +2928,157 @@ class App(ctk.CTk):
         disconnect_button.configure(state='normal' if client.connected() else 'disabled')
         disconnect_button.pack(fill='x', padx=24, pady=(0, 12))
 
+    def bind_account_rename(self, widget, name, provider):
+        widget.bind('<Double-Button-1>', lambda event: self.edit_account_name(widget, name, provider), add='+')
+
+    def edit_account_name(self, widget, name, provider):
+        previous = getattr(self, '_inline_account_editor', None)
+        if previous is not None and previous.winfo_exists():
+            previous.destroy()
+        entry = ctk.CTkEntry(widget.master, height=20, corner_radius=4, font=('Segoe UI', 11))
+        self._inline_account_editor = entry
+        prefs = self.controller.preferences
+        key = 'private-account-labels' if self.hide_account_names else 'api-account-labels' if ' API' in provider else 'labels'
+        value = prefs.get(key, {}).get(name) or widget.cget('text')
+        entry.insert(0, value)
+        entry.configure(width=entry._reverse_widget_scaling(widget.winfo_width()))
+        entry.place(x=entry._reverse_widget_scaling(widget.winfo_x()), y=entry._reverse_widget_scaling(widget.winfo_y()))
+        def finish(event=None, save=True):
+            if not entry.winfo_exists():
+                return
+            label = entry.get().strip()[:100]
+            entry.destroy()
+            if save:
+                labels = prefs.setdefault(key, {})
+                if label:
+                    labels[name] = label
+                else:
+                    labels.pop(name, None)
+                self.controller.save()
+                self.draw_account_list()
+                self.draw_chatgpt_accounts()
+                self.claude_panel.render()
+                self.grok_panel.render()
+                self.refresh_api_accounts(use_cache=True)
+                self.update_tokenharbor_names()
+            return 'break'
+        entry.bind('<Return>', finish)
+        entry.bind('<Escape>', lambda event: finish(event, False))
+        entry.bind('<FocusOut>', finish)
+        entry.focus_set()
+        entry.select_range(0, 'end')
+        return entry
+
+    @staticmethod
+    def make_playback_icons():
+        icons = {}
+        for paused in (False, True):
+            variants = []
+            for color in ('#243247', '#edf2fa'):
+                icon = Image.new('RGBA', (64, 64))
+                draw = ImageDraw.Draw(icon)
+                if paused:
+                    draw.polygon([(20, 10), (52, 32), (20, 54)], fill=color)
+                else:
+                    draw.rounded_rectangle((15, 12, 26, 52), radius=3, fill=color)
+                    draw.rounded_rectangle((38, 12, 49, 52), radius=3, fill=color)
+                variants.append(icon.resize((32, 32), Image.Resampling.LANCZOS))
+            icons[paused] = ctk.CTkImage(light_image=variants[0], dark_image=variants[1], size=(14, 14))
+        for kind in ('up', 'down', 'reset', 'add', 'pin'):
+            variants = []
+            for color in ('#243247', '#edf2fa'):
+                icon = Image.new('RGBA', (64, 64))
+                draw = ImageDraw.Draw(icon)
+                if kind in ('up', 'down'):
+                    draw.line([(17, 34), (32, 19), (47, 34)], fill=color, width=6)
+                    draw.line([(32, 20), (32, 49)], fill=color, width=6)
+                    if kind == 'down':
+                        icon = icon.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+                elif kind == 'reset':
+                    draw.arc((11, 11, 53, 53), 35, 320, fill=color, width=6)
+                    draw.polygon([(45, 8), (58, 21), (40, 23)], fill=color)
+                elif kind == 'pin':
+                    draw.polygon([(20, 10), (44, 10), (40, 30), (50, 40), (14, 40), (24, 30)], fill=color)
+                    draw.line([(32, 39), (32, 57)], fill=color, width=5)
+                    icon = icon.rotate(-30, Image.Resampling.BICUBIC)
+                else:
+                    draw.line([(32, 13), (32, 51)], fill=color, width=6)
+                    draw.line([(13, 32), (51, 32)], fill=color, width=6)
+                variants.append(icon.resize((32, 32), Image.Resampling.LANCZOS))
+            icons[kind] = ctk.CTkImage(light_image=variants[0], dark_image=variants[1], size=(12, 12))
+        return icons
+
+    def update_pause_button(self, button, paused):
+        button.configure(text='', image=self.playback_icons[bool(paused)])
+
+    def attach_tooltip(self, widget, description):
+        tip = ctk.CTkLabel(self, text='', height=23, corner_radius=5, fg_color='#303b50', font=('Segoe UI', 10))
+        widget.tooltip = tip
+        def show(event=None):
+            tip.configure(text=description() if callable(description) else description)
+            x = widget.winfo_rootx()-self.winfo_rootx()
+            y = widget.winfo_rooty()-self.winfo_rooty()
+            tip.place(x=tip._reverse_widget_scaling(x), y=tip._reverse_widget_scaling(y), anchor='sw')
+            tip.lift()
+        widget.bind('<Enter>', show, add='+')
+        widget.bind('<Leave>', lambda event: tip.place_forget(), add='+')
+        widget.bind('<Button-1>', lambda event: tip.place_forget(), add='+')
+        widget.bind('<Destroy>', lambda event: tip.destroy() if event.widget is widget and tip.winfo_exists() else None, add='+')
+
+    def install_service_add_button(self, header, provider):
+        services = {'google': ('Gemini', 'add_button'), 'openai': ('OpenAI', 'add_chatgpt_button'),
+                    'claude-native': ('Claude', 'add_claude_button'), 'grok': ('Grok', 'add_grok_button'),
+                    'tokenharbor': ('TokenHarbor', 'add_tokenharbor_button')}
+        service, attribute = services[provider]
+        button = self.button(header, '', lambda: self.provider_login_menu(service))
+        button.configure(width=20, height=21, image=self.playback_icons['add'], fg_color='transparent', border_spacing=1)
+        button.place(relx=1, rely=.5, x=-3, anchor='e')
+        header.service_add = button
+        setattr(self, attribute, button)
+        self.attach_tooltip(button, 'Add '+service+' account')
+
+    def account_pause_button(self, parent, name, provider):
+        button = self.button(parent, '', lambda: self.pause_provider_account(name, provider))
+        button.configure(width=18, height=18, corner_radius=2, fg_color='transparent',
+                         image=self.playback_icons[False], border_spacing=1)
+        self.attach_tooltip(button, lambda: 'Resume account' if button.cget('image') is self.playback_icons[True] else 'Pause account')
+        return button
+
+    def pause_provider_account(self, name, provider):
+        if self.busy:
+            return
+        if provider == 'tokenharbor':
+            client = TokenHarbor(self.controller, self.integrations)
+            key = next((key for key in client.keys() if key_id(key) == name), None)
+            if key is None:
+                return
+            paused = key not in client.paused_keys()
+            self.work(lambda: client.set_key_paused(key, paused), lambda _: self.draw_tokenharbor_accounts(), mutation=True)
+            return
+        items = self.api_items if provider == 'api' else self.chatgpt_items if provider == 'openai' else self.items
+        account = next((item for item in items if item['name'] == name), None)
+        if account is None:
+            return
+        paused = not account.get('disabled')
+        def apply():
+            if provider == 'api':
+                self.api_manager().set_paused(name, paused)
+            elif provider == 'google':
+                self.controller.pause(account)
+            else:
+                self.controller._set_disabled(account, paused)
+        def done(_):
+            account['disabled'] = paused
+            if provider == 'api':
+                self.refresh_api_accounts()
+            elif provider == 'google':
+                self.draw_account_list()
+                self.refresh()
+            else:
+                self.draw_chatgpt_accounts()
+                self.refresh_chatgpt_accounts()
+        self.work(apply, done, mutation=True)
+
     def rename(self, account, label):
         try:
             self.controller.rename(account['name'], label)
@@ -2769,7 +3087,7 @@ class App(ctk.CTk):
             self.notice.configure(text='Could not save the account label.', text_color='#ffbd93')
 
     def add_account(self):
-        if self.busy or self.pending_login or self.pending_chatgpt_login:
+        if self.busy or self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login:
             return
         self.work(self.controller.begin_login, self.login_started, mutation=True)
 
@@ -2796,7 +3114,7 @@ class App(ctk.CTk):
         if not self.pending_login or self.closed:
             return
         state, started = self.pending_login
-        if time.monotonic() - started > 310:
+        if time.monotonic() - started > 900:
             self.finish_login('Sign-in timed out. Click Add Google account again.', False)
             return
         def poll():
@@ -2805,10 +3123,14 @@ class App(ctk.CTk):
             except AccountError:
                 return {'status': 'wait'}
         def done(result):
+            if not self.pending_login or self.pending_login[0] != state:
+                return
             if result.get('status') == 'ok':
                 self.finish_login('Account saved. You can select it for Claude.', True)
             elif result.get('status') == 'error':
-                self.finish_login('Google sign-in did not finish. Try adding the account again.', False)
+                reason = safe_detail(result.get('error') or result.get('message'))
+                self.finish_login('Google sign-in failed: ' + reason if reason else
+                                  'Google sign-in failed. The gateway did not report a reason.', False)
             else:
                 self.after(1800, self.poll_login)
         self.work(poll, done)
@@ -2840,7 +3162,66 @@ class App(ctk.CTk):
                     self.notice.configure(text='Account verified and added to automatic routing.' if self.controller.preferences.get('mode') != 'single' else 'Account verified. Another account is currently selected manually.', text_color=GREEN)
             self.work(reconcile, done, mutation=True)
 
+    def toggle_window_pin(self):
+        self.window_pinned = not self.window_pinned
+        self.attributes('-topmost', self.window_pinned)
+        self.pin_button.configure(fg_color=ACCENT if self.window_pinned else 'transparent')
+        self.controller.preferences['window-pinned'] = self.window_pinned
+        self.controller.save()
+
+    def window_rectangle(self):
+        user = ctypes.windll.user32
+        user.GetAncestor.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.UINT]
+        user.GetAncestor.restype = ctypes.wintypes.HWND
+        handle = user.GetAncestor(self.winfo_id(), 2)
+        rect = ctypes.wintypes.RECT()
+        user.GetWindowRect.argtypes = [ctypes.wintypes.HWND, ctypes.POINTER(ctypes.wintypes.RECT)]
+        user.GetWindowRect(handle, ctypes.byref(rect))
+        return handle, rect
+
+    def show_saved_window(self):
+        self.deiconify()
+        self.update_idletasks()
+        position = self.controller.preferences.get('window-position')
+        if not isinstance(position, dict) or any(type(position.get(key)) is not int for key in ('x', 'y')):
+            return
+        handle, rect = self.window_rectangle()
+        x, y = position['x'], position['y']
+        user = ctypes.windll.user32
+        class MonitorInfo(ctypes.Structure):
+            _fields_ = [('size', ctypes.wintypes.DWORD), ('monitor', ctypes.wintypes.RECT),
+                        ('work', ctypes.wintypes.RECT), ('flags', ctypes.wintypes.DWORD)]
+        target = ctypes.wintypes.RECT(x, y, x+rect.right-rect.left, y+rect.bottom-rect.top)
+        user.MonitorFromRect.argtypes = [ctypes.POINTER(ctypes.wintypes.RECT), ctypes.wintypes.DWORD]
+        user.MonitorFromRect.restype = ctypes.wintypes.HANDLE
+        monitor = user.MonitorFromRect(ctypes.byref(target), 2)
+        info = MonitorInfo(); info.size = ctypes.sizeof(info)
+        user.GetMonitorInfoW.argtypes = [ctypes.wintypes.HANDLE, ctypes.POINTER(MonitorInfo)]
+        if user.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            x = min(max(x, info.work.left), max(info.work.left, info.work.right-80))
+            y = min(max(y, info.work.top), max(info.work.top, info.work.bottom-40))
+        user.SetWindowPos.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.wintypes.UINT]
+        user.SetWindowPos(handle, None, x, y, 0, 0, 0x0015)
+
+    def schedule_window_position_save(self, event):
+        if event.widget is not self or self.closed:
+            return
+        if self.position_save_job:
+            self.after_cancel(self.position_save_job)
+        self.position_save_job = self.after(600, self.save_window_position)
+
+    def save_window_position(self):
+        self.position_save_job = None
+        if self.state() != 'normal':
+            return
+        _, rect = self.window_rectangle()
+        position = {'x': rect.left, 'y': rect.top}
+        if position != self.controller.preferences.get('window-position'):
+            self.controller.preferences['window-position'] = position
+            self.controller.save()
+
     def close(self):
+        self.save_window_position()
         self.closed = True
         self.destroy()
 

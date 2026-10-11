@@ -14,3 +14,6 @@ activity.json
 quota-starts.json
 *.log
 /.venv/
+/native/windows/bin/
+/native/windows/obj/
+/native/macos/.build/

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import customtkinter as native_ctk
 from ui_locale import translate
 from ui_render import queue_for
+from ui_skin import StaticBoxEngine, paint_skin
 
 LIGHT = {
     '#101728': '#ffffff', '#87a8ff': '#2757b4', '#3d4b64': '#cbd9ee',
@@ -122,6 +123,17 @@ class WidgetStyleMixin:
             self._ui_style = style
         super().__init__(*args, **self._display(kwargs))
         self._ui_render_ready = True
+        if isinstance(self, (native_ctk.CTk, native_ctk.CTkToplevel)):
+            self._windows_set_titlebar_icon()
+
+    def _windows_set_titlebar_icon(self):
+        # Every dialog gets the product icon, including CTk's delayed icon callback.
+        from pathlib import Path
+        import sys
+        icon = Path(getattr(sys, '_MEIPASS', Path(__file__).parent)) / 'app.ico'
+        if icon.exists():
+            self.iconbitmap(default=str(icon))
+            self.iconbitmap(str(icon))
 
     def _windows_set_titlebar_color(self, color_mode):
         # DWM can recolor a live title bar. CTk hides/reopens the entire window
@@ -151,12 +163,35 @@ class WidgetStyleMixin:
         return super().destroy()
 
     def _draw(self, no_color_updates=False):
+        if isinstance(self, (native_ctk.CTkFrame, native_ctk.CTkButton, native_ctk.CTkLabel)) and hasattr(self, '_draw_engine'):
+            if not isinstance(self._draw_engine, StaticBoxEngine):
+                self._draw_engine = StaticBoxEngine(self._draw_engine)
         if not getattr(self, '_ui_render_ready', False):
-            return super()._draw(no_color_updates)
+            result = super()._draw(no_color_updates)
+            if isinstance(getattr(self, '_draw_engine', None), StaticBoxEngine):
+                paint_skin(self)
+            return result
         queue_for(self).request(self, no_color_updates)
 
     def _render_now(self, no_color_updates=False):
-        return super()._draw(no_color_updates)
+        result = super()._draw(no_color_updates)
+        if isinstance(getattr(self, '_draw_engine', None), StaticBoxEngine):
+            paint_skin(self)
+        return result
+
+    def _on_enter(self, event=None):
+        result = super()._on_enter(event)
+        if isinstance(self, native_ctk.CTkButton) and self._hover:
+            self._skin_hover = True
+            self._draw()
+        return result
+
+    def _on_leave(self, event=None):
+        result = super()._on_leave(event)
+        if isinstance(self, native_ctk.CTkButton):
+            self._skin_hover = False
+            self._draw()
+        return result
 
     def configure(self, **kwargs):
         if 'localize' in kwargs:
@@ -196,9 +231,9 @@ class SelectorMixin:
     def get(self):
         return self._canonical(super().get())
 
-    def set(self, value):
+    def set(self, value, *args, **kwargs):
         style = style_for(self)
-        return super().set(style.text(value) if style else value)
+        return super().set(style.text(value) if style else value, *args, **kwargs)
 
 
 ctk = SimpleNamespace(**{name: getattr(native_ctk, name) for name in dir(native_ctk) if not name.startswith('_')})

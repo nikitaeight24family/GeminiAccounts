@@ -45,6 +45,12 @@ class AccountStatusTests(unittest.TestCase):
         self.assertEqual(account_status({'status': 'organization_review', 'status_message': 'Contact administrator'}), ('Provider status: organization_review', 'warning', 'Contact administrator'))
         self.assertEqual(account_status({'status': 'error'})[2], 'Provider did not report the cause')
 
+    def test_expired_gateway_timer_does_not_turn_credential_quota_into_request_error(self):
+        account = {'status': 'error', 'status_message': 'credential_quota',
+                   'cooldowns': [{'reason': 'credential_quota', 'retry_at': '1970-01-01T00:00:01Z'}],
+                   'quota': {'windows': [{'label': '5h', 'remaining': 0, 'reset_at': 1}]}}
+        self.assertEqual(account_status(account, now=1000), ('Limit exhausted', 'warning', ''))
+
     def test_recovery_does_not_keep_expired_quota_status(self):
         self.assertEqual(account_status({'status': 'active', 'cooldowns': [{'reason': 'quota', 'retry_at': '1970-01-01T00:00:01Z'}], 'quota': {'windows': [{'label': '5h', 'remaining': 0, 'reset_at': 1}]}}, now=1000)[0], 'Available')
         self.assertEqual(account_status({'disabled': True, 'status': 'active'})[0], 'Paused')

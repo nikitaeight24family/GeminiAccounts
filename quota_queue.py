@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from backend import Controller, dpapi
+from backend import Controller, dpapi, AccountError
 import yaml
 from model_context import strip_context_suffix
 from response_guard import StreamProbe, usable_message
@@ -76,12 +76,12 @@ def quota_wait(files, model, aliases, now=None):
     model = strip_context_suffix(model)
     model = aliases.get(model, model)
     # Scope each wait to the requested provider; never mix Google and GPT pools.
-    if 'tokenharbor' in model:
+    if 'tokenharbor' in model or model.startswith('api-'):
         return None
-    provider = 'codex' if model.startswith('gpt-') else 'antigravity'
+    providers = ('xai',) if model.startswith('grok-') else ('codex',) if model.startswith('gpt-') else ('antigravity', 'claude', 'anthropic') if model.startswith('claude-') else ('antigravity',)
     quota = []
     enabled = [a for a in files if not a.get('disabled') and
-               a.get('provider', a.get('type')) == provider]
+               a.get('provider', a.get('type')) in providers]
     for account in enabled:
         if account.get('access_issue') in ('verification', 'login', 'denied'):
             continue
@@ -113,6 +113,7 @@ class QueueServer(ThreadingHTTPServer):
         self.aliases = aliases
         self.jobs = {}
         self.updating = False
+        self.quota_guard = None
         self.diagnostics = Diagnostics()
         self.request_texts = None
         self.lock = threading.Lock()
@@ -359,6 +360,16 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 with self.server.lock:
                     self.server.jobs[ident].update(state='running', retry_at=None)
+                if self.server.quota_guard:
+                    try:
+                        self.server.quota_guard(self.server.aliases.get(model, model))
+                    except (AccountError, OSError, ValueError):
+                        if not started:
+                            self.json_reply(503, {'error': {'type': 'api_error', 'message': 'Quota reserve check unavailable. Retry shortly.'}})
+                        else:
+                            self.chunk(b'event: error\ndata: {"error":{"type":"api_error","message":"Quota reserve check unavailable"}}\n\n')
+                            self.wfile.write(b'0\r\n\r\n')
+                        return
                 attempt += 1
                 self.trace('upstream_started', attempt=attempt, model=model, upstream_model=self.server.aliases.get(model, model))
                 conn, response = self.await_upstream(lambda: self.open_upstream(body), stream,
@@ -503,6 +514,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(response.status)
             for key, value in response.getheaders():
                 if key.lower() not in HOP:
+                    # The client cannot observe account changes during a long backoff.
+                    # Known quota waits stay inside the queue; forwarded 429s recheck shortly.
+                    if response.status == 429 and key.lower() == 'retry-after':
+                        value = '3'
                     self.send_header(key, value)
             self.send_header('Transfer-Encoding', 'chunked')
             self.end_headers()
@@ -552,6 +567,10 @@ def main():
     aliases = {a['alias']: a['name'] for a in config.get('oauth', {}).get('model-alias', {}).get('antigravity', [])}
     keys = config.get('access', {}).get('api-keys', [])
     server = QueueServer(('127.0.0.1', 8317), ('127.0.0.1', config['server']['port']), key, keys, aliases)
+    from quota_guard import QuotaGuard
+    controller.key = key
+    controller.base = 'http://127.0.0.1:' + str(config['server']['port'])
+    server.quota_guard = QuotaGuard(controller)
     server.diagnostics = Diagnostics(controller.data_dir / 'gateway-diagnostics.jsonl')
     server.request_texts = RequestTextStore(controller.data_dir / 'request-texts.jsonl')
     server.diagnostics.record('service', 'started', phase='ready')

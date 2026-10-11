@@ -44,7 +44,9 @@ class Mock(BaseHTTPRequestHandler):
             data = (b'event: message_start\ndata: {"type":"message_start","message":{"id":"tool"}}\n\n'
                     b'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"Bash","id":"real-tool","input":{}}}\n\n'
                     b'event: message_stop\ndata: {"type":"message_stop"}\n\n')
-        self.send_response(self.server.status); self.send_header('Content-Type', 'text/event-stream'); self.send_header('Content-Length', str(len(data))); self.end_headers()
+        self.send_response(self.server.status); self.send_header('Content-Type', 'text/event-stream'); self.send_header('Content-Length', str(len(data)))
+        if hasattr(self.server, 'retry_after'): self.send_header('Retry-After', str(self.server.retry_after))
+        self.end_headers()
         time.sleep(getattr(self.server, 'body_delay', 0))
         self.wfile.write(data)
 
@@ -63,6 +65,34 @@ class QueueTests(unittest.TestCase):
     def post(self, key='client', model='alias'):
         self.client.request('POST', '/v1/messages', json.dumps({'model': model, 'stream': True, 'messages': []}), {'x-api-key': key})
         return self.client.getresponse()
+    def test_reserve_guard_runs_before_upstream_and_failure_does_not_spend_quota(self):
+        self.backend.files = []
+        observed = []
+        def guard(model):
+            observed.append((model, self.backend.calls))
+        self.gate.quota_guard = guard
+        self.client.request('POST', '/v1/responses', json.dumps({'model':'gpt-test','stream':True}), {'x-api-key':'client'})
+        response=self.client.getresponse();response.read()
+        self.assertEqual(observed,[('gpt-test',0)])
+        def failed(model):
+            raise OSError('quota unavailable')
+        self.gate.quota_guard=failed
+        self.client.request('POST', '/v1/responses', json.dumps({'model':'gpt-test','stream':True}), {'x-api-key':'client'})
+        response=self.client.getresponse()
+        self.assertEqual(response.status,503)
+        response.read()
+        self.assertEqual(self.backend.calls,1)
+
+    def test_forwarded_gpt_rate_limit_does_not_freeze_client_for_old_reset_deadline(self):
+        self.backend.files = [{'provider': 'codex', 'disabled': False, 'cooldowns': []}]
+        self.backend.status = 429
+        self.backend.retry_after = 792
+        self.client.request('POST', '/v1/responses', json.dumps({'model': 'gpt-6.1-sol', 'stream': True}), {'x-api-key': 'client'})
+        response = self.client.getresponse()
+        self.assertEqual(response.status, 429)
+        self.assertEqual(response.getheader('Retry-After'), '3')
+        self.assertIn(b'error', response.read())
+
     def test_sdk_identity_removed_for_stream_nonstream_and_token_count(self):
         from quota_queue import SDK_IDENTITY
         self.backend.files = []
