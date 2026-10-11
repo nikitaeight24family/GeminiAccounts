@@ -75,7 +75,9 @@ class QuotaUITests(unittest.TestCase):
             app = App()
             try:
                 app.items = [{'name': 'google', 'auth_index': 'google-index', 'disabled': False, 'unavailable': False}]
-                app.chatgpt_items = [{'name': 'gpt', 'auth_index': 'gpt-index', 'email': 'gpt@example.com', 'disabled': False, 'plan_type': 'plus'}]
+                app.chatgpt_items = [{'name': 'gpt', 'auth_index': 'gpt-index', 'email': 'gpt@example.com', 'disabled': False, 'plan_type': 'plus', 'quota': {'windows': [
+                    {'label': '5h', 'remaining': 37, 'reset_at': time.time() + 18000},
+                    {'label': '1w', 'remaining': 90, 'reset_at': time.time() + 604800}]}}]
                 app.draw_account_list()
                 app.draw_chatgpt_accounts()
                 app.toggle_chatgpt_accounts()
@@ -99,6 +101,10 @@ class QuotaUITests(unittest.TestCase):
                 self.assertEqual(App.chatgpt_plan_name({}), 'Plan unknown')
                 self.assertEqual(app.chatgpt_widgets['gpt']['model'].cget('text'), 'gpt-6.1')
                 self.assertTrue(gpt_card._canvas.find_withtag('rainbow'))
+                quota_frame = app.chatgpt_widgets['gpt']['windows_frame']
+                self.assertGreaterEqual(quota_frame.winfo_x(), 3 * gpt_card._get_widget_scaling())
+                self.assertLessEqual(quota_frame.winfo_x() + quota_frame.winfo_width(),
+                                     gpt_card.winfo_width() - 3 * gpt_card._get_widget_scaling())
                 self.assertFalse(google_card._canvas.find_withtag('rainbow'))
                 app.toggle_google_accounts()
                 app.update()

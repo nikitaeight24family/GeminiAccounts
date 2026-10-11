@@ -446,7 +446,8 @@ class App(ctk.CTk):
                 status = label()
                 status.pack(fill='x', padx=8, pady=(0, 3))
                 windows = ctk.CTkFrame(card, fg_color='transparent')
-                windows.pack(fill='x')
+                # Leave the card border visible beside the quota rows.
+                windows.pack(fill='x', padx=4)
                 widgets[name] = {'card': card, 'heading': heading, 'model': model, 'status': status,
                     'windows_frame': windows, 'windows': {}, 'credits': label(15),
                     'reset_details': label(16), 'reset_button': self.button(card, 'Use usage reset', lambda: None),
