@@ -17,9 +17,19 @@ Omni manages **Google Antigravity / Gemini, ChatGPT, Claude, Grok and TokenHarbo
 
 **Windows desktop** · **Windows / macOS / Linux terminal** · **English / Russian interface** · **Dark / light themes**
 
-<p align="center"><img src="docs/omni-dashboard.png" width="1000" alt="Omni dashboard with demo accounts, subscription badges, priorities, quota limits and account details"></p>
+<p align="center"><img src="docs/omni-dashboard.png" width="900" alt="Omni dashboard with demo accounts, subscription badges, priorities, quota limits and account details"></p>
 
-*Screenshot uses demo accounts and sample quotas. No personal credentials are shown.*
+*Screenshots use demo accounts, sample quotas and synthetic calculator measurements. No personal credentials or actual token-capacity claims are shown.*
+
+## Omni 1.4.8 highlights
+
+- **Rainbow reset icons for every saved credit**, including credits that OpenAI does not currently allow you to redeem. Hover explains availability; disabled buttons remain protected from accidental redemption.
+- **Token capacity calculator** in Routing statistics: persistent estimates by provider, subscription, model and 5h / 1w window, with a percentage input and measurement counts.
+- **Complete active-account borders** that stay inside the card and remain visible beneath quota rows.
+- **Stable account imports** that keep loaded quotas and subscription badges, with compact cards while new data loads.
+- **Available ChatGPT accounts without a reported 5h window go first** until an actual provider refusal, pause or quota reserve excludes them.
+
+<p align="center"><img src="docs/omni-token-calculator.png" width="900" alt="Token capacity calculator with synthetic per-model 5h and weekly measurements"></p>
 
 Omni was previously named **Gemini Accounts**. The repository retains its history and releases, and legacy executable names and data folders remain compatible. For installations up to 1.4.4, download the current installer once to switch to the renamed release feed.
 
@@ -71,6 +81,8 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 | Privacy | The open/closed eye beside Omni hides account names across cards, details and history using stable numbered aliases. Double-click a hidden name to set a private alias without exposing the real identity. |
 | Settings | Click the **gear beside Omni** to open service visibility, **English / Russian** and **dark / light theme** settings, including from compact mode. Changes persist without restarting. |
 | Window | Remember the last screen position. The drawn pin beside the settings gear keeps the window above other applications; both settings persist. |
+| Usage resets | One animated rainbow icon per saved credit. Provider permission determines whether each button can be used; hover shows availability and expiry. |
+| Token calculator | Estimate tokens for a chosen percentage of 5h / 1w capacity, separately by provider, subscription and model. Measurements persist across restarts; results include sample counts. |
 | Reset forecasts | Expanded Google and OpenAI 5h / 1w strips show reset markers and countdowns on the pooled quota bar. |
 | Refreshes | Existing cards, bars and controls update in place. Unchanged values skip redraws, and priority changes reuse cards. |
 | Releases | The **GitHub icon in the expanded panel** opens the latest release. Windows can download and verify updates while waiting for active requests to finish. |
@@ -92,7 +104,7 @@ The **token capacity calculator** in Routing statistics learns from completed re
 
 When OpenAI confirms an account is available but does not report a five-hour window, Omni uses it before accounts with timed windows. Actual provider failures, cooldowns, pauses and configured quota reserves still control eligibility. Missing windows are labelled explicitly rather than shown as invented percentages. Importing an account preserves existing cards, loaded quotas and subscription badges.
 
-ChatGPT cards show one drawn reset button per available **usage-reset credit**, in the same header row as priority and pause. Zero credits leave no label or button. Hover reveals availability and expiry. Confirmation and a fresh availability check are required. The provider chooses the credit consumed; Omni does not automatically repeat a timed-out reset.
+ChatGPT cards show one drawn reset button per available **usage-reset credit**, in the same header row as priority and pause. Every saved credit has an animated rainbow icon, even when it cannot currently be redeemed. Zero credits leave no label or button. Hover reveals availability and expiry. OpenAI reports the saved count and the currently applicable count separately; a credit can be unexpired and plan-supported while its button remains disabled because the applicable count is zero. Confirmation and a fresh availability check are required. The provider chooses the credit consumed; Omni does not automatically repeat a timed-out reset.
 
 Quota exhaustion is shown as a quota status. Verification, invalid credentials, access restrictions and provider errors remain distinct, and unfamiliar status messages stay visible. Active borders clear on idle or quota wait; recent models remain visible for one minute. Desktop countdowns update every 15 seconds.
 

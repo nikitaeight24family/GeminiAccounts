@@ -794,7 +794,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             if index < count:
                 button.configure(text='', state=row['reset_button'].cget('state'),
                                  command=lambda account=item: self.confirm_chatgpt_reset(account),
-                                 image=self.playback_icons['reset-rainbow'][0] if options and not item.get('disabled') else self.playback_icons['reset'])
+                                 image=self.playback_icons['reset-rainbow'][0])
                 if not button.winfo_manager():
                     button.pack(side='left')
             else:
@@ -2457,7 +2457,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             self.update_active_border(widgets, is_active)
             reset_icon = self.playback_icons['reset-rainbow'][int(time.monotonic()*2) % 12]
             for button in widgets['reset_buttons']:
-                if button.winfo_manager() and button.cget('state') != 'disabled':
+                if button.winfo_manager():
                     button.configure(image=reset_icon)
         self.claude_panel.animate()
         self.grok_panel.animate()

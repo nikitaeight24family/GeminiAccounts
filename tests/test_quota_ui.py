@@ -39,7 +39,15 @@ class QuotaUITests(unittest.TestCase):
                 self.assertIn('50,000', app.capacity_result.cget('text'))
                 item['disabled'] = True
                 app.set_chatgpt_accounts([item])
-                self.assertTrue(all(b.cget('image') is app.playback_icons['reset'] for b in row['reset_buttons']))
+                self.assertTrue(all(b.cget('image') in app.playback_icons['reset-rainbow'] for b in row['reset_buttons']))
+                self.assertTrue(all(b.cget('state') == 'disabled' for b in row['reset_buttons']))
+                item['disabled'] = False
+                item['quota']['reset_options'] = []
+                item['quota']['reset_applicable'] = 0
+                app.set_chatgpt_accounts([item])
+                app.animate_active_borders()
+                self.assertTrue(all(b.cget('image') in app.playback_icons['reset-rainbow'] for b in row['reset_buttons']))
+                self.assertTrue(all(b.cget('state') == 'disabled' for b in row['reset_buttons']))
             finally:
                 app.closed = True
                 app.destroy()
