@@ -23,6 +23,52 @@ class QuotaUITests(unittest.TestCase):
         self.controller_patch.stop()
         self.temp.cleanup()
 
+    def test_privacy_toggle_preserves_cards_and_unsaved_label(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), \
+                patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
+            app = App()
+            try:
+                google = {'name': 'google-auth', 'email': 'private@example.com', 'disabled': False, 'unavailable': False}
+                gpt = {'name': 'gpt-auth', 'email': 'gpt@example.com', 'label': 'Private GPT', 'disabled': False}
+                app.items = [google]
+                app.chatgpt_items = [gpt]
+                app.controller.preferences['labels'] = {'google-auth': 'Personal Google'}
+                app.selected = google['name']
+                app.draw_account_list()
+                app.draw_chatgpt_accounts()
+                app.draw_detail()
+                card = app.account_widgets[google['name']]['card']
+                gpt_card = app.chatgpt_widgets[gpt['name']]['card']
+                entry = app.rename_entry
+                entry.delete(0, 'end')
+                entry.insert(0, 'Unsaved label')
+                app.toggle_account_names()
+                self.assertEqual(app.display_name(google), 'Google 1')
+                self.assertEqual(app.chatgpt_widgets[gpt['name']]['heading'].cget('text'), 'OpenAI 1')
+                self.assertEqual(app.detail_heading.cget('text'), 'Google 1')
+                self.assertFalse(app.detail_email.winfo_manager())
+                self.assertEqual(entry.cget('show'), '•')
+                self.assertEqual(entry.get(), 'Unsaved label')
+                self.assertEqual(app.redact_private_text('Personal Google private@example.com Private GPT gpt@example.com'),
+                                 'Google 1 Google 1 OpenAI 1 OpenAI 1')
+                self.assertIs(card, app.account_widgets[google['name']]['card'])
+                self.assertIs(gpt_card, app.chatgpt_widgets[gpt['name']]['card'])
+                self.assertIs(entry, app.rename_entry)
+                saved = Controller(proxy_dir=Path(self.temp.name) / 'proxy', data_dir=Path(self.temp.name) / 'data')
+                self.assertTrue(saved.preferences['hide-account-names'])
+                self.assertEqual(saved.preferences['private-account-numbers']['OpenAI']['gpt-auth'], 1)
+                app.toggle_account_names()
+                self.assertEqual(app.display_name(google), 'Personal Google')
+                self.assertEqual(app.chatgpt_widgets[gpt['name']]['heading'].cget('text'), 'Private GPT')
+                self.assertTrue(app.detail_email.winfo_manager())
+                self.assertEqual(entry.cget('show'), '')
+                self.assertEqual(entry.get(), 'Unsaved label')
+                self.assertEqual(google['email'], 'private@example.com')
+                self.assertEqual(gpt['email'], 'gpt@example.com')
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_five_hour_rows_hide_below_one_percent_weekly(self):
         group = {'buckets': [{'window': '5h', 'remaining': 1},
                              {'window': 'weekly', 'remaining': .0099}]}

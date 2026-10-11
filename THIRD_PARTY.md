@@ -5,3 +5,5 @@ The installer bundles CLIProxyAPI 8.0.16 from https://github.com/router-for-me/C
 The executables also use Python (PSF license), CustomTkinter (MIT), PyYAML (MIT), bcrypt (Apache-2.0), cryptography (Apache-2.0 / BSD), Pillow (HPND) and tzdata (Apache-2.0 / public-domain IANA data). PyInstaller uses GPL with its bootloader distribution exception. See the respective projects and dependency lists in requirements.txt and requirements-cli.txt.
 
 Google, Gemini, Antigravity, Claude and Codex are names of third-party products. This project is independent of their vendors.
+
+The embedded OpenAI icon comes from Simple Icons 13.21.0 (CC0): https://github.com/simple-icons/simple-icons/blob/13.21.0/icons/openai.svg. Brand marks remain the property of their owners.
