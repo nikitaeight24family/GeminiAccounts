@@ -13,6 +13,60 @@ from harbor_activity import key_id
 
 
 class QuotaUITests(unittest.TestCase):
+    def test_capacity_calculator_and_rainbow_reset_icons(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                app.chatgpt_collapsed = False
+                item = {'name': 'one', 'quota': {'plan_type': 'plus', 'reset_credits': 3,
+                    'reset_options': [{'id': 'ready'}], 'windows': [
+                    {'label': '5h', 'remaining': 90, 'reset_at': 4070908800}]}}
+                app.set_chatgpt_accounts([item])
+                row = app.chatgpt_widgets['one']
+                self.assertTrue(all(b.cget('image') in app.playback_icons['reset-rainbow'] for b in row['reset_buttons']))
+                for remaining, tokens in ((1, 0), (.99, 1000), (.98, 2000), (.97, 3000)):
+                    app.activity_state['model_tokens'] = {'one': {'gpt-test': tokens}}
+                    app.observe_token_capacity('one', 'OpenAI', 'plus', [{'kind': 'openai',
+                        'buckets': [{'window': '5h', 'remaining': remaining, 'reset': '2099-01-01T00:00:00+00:00'}]}])
+                self.assertIn('100,000', app.capacity_result.cget('text'))
+                self.assertIn('1w: Insufficient data', app.capacity_result.cget('text'))
+                app.capacity_percent.delete(0, 'end')
+                app.capacity_percent.insert(0, '50')
+                app.render_token_capacity()
+                self.assertIn('50,000', app.capacity_result.cget('text'))
+                item['disabled'] = True
+                app.set_chatgpt_accounts([item])
+                self.assertTrue(all(b.cget('image') is app.playback_icons['reset'] for b in row['reset_buttons']))
+            finally:
+                app.closed = True
+                app.destroy()
+
+    def test_active_border_fits_canvas_during_card_resize(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                app.chatgpt_collapsed = False
+                app.set_chatgpt_accounts([{'name': 'one'}])
+                app.update()
+                row = app.chatgpt_widgets['one']
+                card, canvas = row['card'], row['card']._canvas
+                with patch.object(card, 'winfo_height', return_value=canvas.winfo_height()+80):
+                    app.draw_rainbow_border(row, 0)
+                    box = canvas.bbox('rainbow')
+                    self.assertGreaterEqual(box[0], 0)
+                    self.assertGreaterEqual(box[1], 0)
+                    self.assertLessEqual(box[2], canvas.winfo_width())
+                    self.assertLessEqual(box[3], canvas.winfo_height())
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_import_preserves_existing_quota_and_new_card_stays_compact(self):
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
                 patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \

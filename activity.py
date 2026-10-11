@@ -15,6 +15,11 @@ class Activity:
             self.state = json.loads(path.read_text('utf-8'))
         except (OSError, ValueError):
             self.state = {'since': datetime.now(timezone.utc).isoformat(), 'events': [], 'stats': {}, 'latest': {}, 'seen': [], 'attempts': {}}
+        if 'model_tokens' not in self.state:
+            self.state['model_tokens'] = {}
+            for event in self.state['events']:
+                if not event.get('failed'):
+                    self._add_model_tokens(event['name'], event.get('upstream_model') or event['model'], event.get('tokens') or 0)
         for event in self.state['events']:
             if re.search(r'[\u0400-\u04ff]', event.get('reason', '')):
                 event['reason'] = self.reason(event.get('code', 0)) if event.get('failed') else (
@@ -29,6 +34,12 @@ class Activity:
         if code >= 500:
             return f'Service error {code}'
         return f'Request error {code}' if code else 'Request failed without a status code'
+
+    def _add_model_tokens(self, name, model, tokens):
+        if not isinstance(tokens, (int, float)) or isinstance(tokens, bool) or tokens <= 0:
+            return
+        models = self.state['model_tokens'].setdefault(name, {})
+        models[model] = models.get(model, 0) + tokens
 
     def pin_model_aliases(self, aliases):
         """Keep historical model captions accurate before changing a gateway alias."""
@@ -75,6 +86,8 @@ class Activity:
             stats = self.state['stats'].setdefault(name, {'success': 0, 'failed': 0, 'tokens': 0, 'latency_ms': 0, 'last': ''})
             stats['failed' if failed else 'success'] += 1
             stats['tokens'] += max(0, tokens or 0)
+            if not failed:
+                self._add_model_tokens(name, upstream_model, tokens)
             stats['latency_ms'] += max(0, latency or 0)
             if timestamp >= stats.get('last', ''):
                 stats['last'] = timestamp

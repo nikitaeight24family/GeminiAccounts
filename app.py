@@ -28,6 +28,7 @@ from quota_dots import quota_dot
 from quota_slider import QuotaLimitBar
 from quota_limits import quota_floor, blocked_families, sync_quota_limits
 from activity import Activity
+from token_capacity import TokenCapacity
 from harbor_activity import HarborActivity, key_id, key_label
 from routing import rank_accounts, quota_projection, quota_entry
 from integrations import Integrations
@@ -95,6 +96,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.model_route_error = None
         self.login_url = None
         self.activity = Activity(self.controller.data_dir / 'activity.json')
+        self.token_capacity = TokenCapacity(self.controller.data_dir / 'token-capacity.json')
         self.harbor_activity = HarborActivity(self.controller.data_dir / 'tokenharbor-activity.json')
         self.activity_state = copy.deepcopy(self.activity.state)
         self.recent_account_models = self.latest_models_by_account(self.activity_state)
@@ -291,6 +293,22 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.stats_latest = self.label(self.stats_view, 'Last successful request: no data yet', 16, bold=True)
         self.stats_note = self.label(self.stats_view, 'Accounts are identified from completed requests. The proxy does not report the account during generation. Different models may use different accounts.', 12, MUTED)
         self.stats_totals = self.label(self.stats_view, '', 13)
+        calculator = ctk.CTkFrame(self.stats_view, fg_color=CARD, corner_radius=8, height=1)
+        calculator.pack(fill='x', pady=(4, 10))
+        self.label(calculator, 'Token capacity calculator', 15, bold=True)
+        calculator_controls = ctk.CTkFrame(calculator, fg_color='transparent', height=1)
+        calculator_controls.pack(fill='x', padx=8)
+        self.capacity_model = ctk.CTkOptionMenu(calculator_controls, values=['No observations yet'],
+                                              command=lambda _: self.render_token_capacity(), width=280)
+        self.capacity_model.pack(side='left')
+        self.capacity_percent = ctk.CTkEntry(calculator_controls, width=55, height=28)
+        self.capacity_percent.insert(0, '100')
+        self.capacity_percent.pack(side='left', padx=(8, 3))
+        self.capacity_percent.bind('<KeyRelease>', lambda _: self.render_token_capacity())
+        self.label(calculator_controls, '% of quota', 12)
+        self.capacity_result = self.label(calculator, 'Insufficient data', 13)
+        self.label(calculator, 'Estimate from observed tokens and quota changes. Mixed-model intervals and resets are excluded. External usage can affect accuracy.', 11, MUTED)
+        self.capacity_options = {}
         self.stats_accounts = ctk.CTkFrame(self.stats_view, fg_color='transparent')
         self.stats_accounts.pack(fill='x', pady=(0, 12))
         controls = ctk.CTkFrame(self.stats_view, fg_color='transparent')
@@ -509,6 +527,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         for item in accounts:
             old = previous.get(item['name'], {})
             quota = item.get('quota')
+            if quota is not None and not quota.get('error'):
+                self.observe_token_capacity(item['name'], 'OpenAI', quota.get('plan_type') or item.get('plan_type') or 'unknown',
+                                            ChatGPTAuth.quota_limit_groups(quota))
             cached = old.get('quota') or {}
             if quota is None:
                 if cached:
@@ -521,6 +542,52 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.chatgpt_items = merged
         self.draw_chatgpt_accounts()
         self.update_openai_pool_quota()
+
+    def observe_token_capacity(self, name, provider, plan, groups):
+        models = self.activity_state.get('model_tokens', {}).get(name, {})
+        for group in groups:
+            family = group['kind']
+            selected = {model: tokens for model, tokens in models.items()
+                        if provider != 'Google' or self.model_family(model) == family}
+            self.token_capacity.observe(name, provider, plan, [group], selected)
+        self.render_token_capacity()
+
+    def render_token_capacity(self):
+        if not hasattr(self, 'capacity_result'):
+            return
+        options = {}
+        for row in self.token_capacity.rows():
+            title = f"{row['provider']} · {row['plan']} · {row['model']}"
+            options.setdefault(title, {})[row['window']] = row
+        if options != self.capacity_options:
+            current = self.capacity_model.get()
+            self.capacity_options = options
+            values = list(options) or ['No observations yet']
+            self.capacity_model.configure(values=values)
+            if current not in values:
+                self.capacity_model.set(values[0])
+        try:
+            percent = float(self.capacity_percent.get().replace(',', '.'))
+            if not math.isfinite(percent) or not 0 <= percent <= 100:
+                raise ValueError
+        except ValueError:
+            self.capacity_result.configure(text='Enter a percentage from 0 to 100')
+            return
+        windows = self.capacity_options.get(self.capacity_model.get(), {})
+        lines = []
+        for window, label in (('5h', '5h'), ('weekly', '1w')):
+            row = windows.get(window)
+            if not row or not row['ready']:
+                text = self.ui_style.text('Insufficient data')
+                if row:
+                    text += f" · {row['samples']}/3 " + self.ui_style.text('samples')
+            else:
+                estimate = round(row['capacity'] * percent / 100)
+                text = f"≈ {estimate:,} " + self.ui_style.text('tokens')
+                text += f" · {row['samples']} " + self.ui_style.text('samples')
+                text += f" · {row['used']*100:.1f}% " + self.ui_style.text('observed usage')
+            lines.append(f'{label}: {text}')
+        self.capacity_result.configure(text='\n'.join(lines))
 
     def draw_chatgpt_accounts(self):
         frame = self.chatgpt_accounts
@@ -557,7 +624,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 def label(height=17, color=MUTED):
                     return ctk.CTkLabel(card, text='', height=height, anchor='w', font=('Segoe UI', 10), text_color=color)
                 heading_row = ctk.CTkFrame(card, fg_color='transparent')
-                heading_row.pack(fill='x', padx=8, pady=(3, 0))
+                heading_row.pack(fill='x', padx=8, pady=(6, 0))
                 heading_row.grid_columnconfigure(0, weight=1)
                 heading = ctk.CTkLabel(heading_row, text='', localize=False, width=1, height=20, anchor='w', text_color=TEXT)
                 heading.configure(font=('Segoe UI', 11), image=self.provider_icons['openai'], compound='left')
@@ -582,7 +649,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 missing_window = ctk.CTkLabel(windows, text='5h: Not provided by OpenAI', height=15,
                                              anchor='w', font=('Segoe UI', 10), text_color=MUTED)
                 # Leave the card border visible beside the quota rows.
-                windows.pack(fill='x', padx=4)
+                windows.pack(fill='x', padx=6, pady=(0, 6))
                 reset_row = ctk.CTkFrame(controls, fg_color='transparent', height=18, width=18)
                 reset_row.pack_propagate(False)
                 credits = ctk.CTkLabel(reset_row, text='', width=1, height=15, anchor='w',
@@ -677,7 +744,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             row['missing_window'].pack_forget()
         if keys:
             if not row['windows_frame'].winfo_manager():
-                row['windows_frame'].pack(fill='x', padx=4, before=row['error'] if row['error'].winfo_manager() else None)
+                row['windows_frame'].pack(fill='x', padx=6, pady=(0, 6), before=row['error'] if row['error'].winfo_manager() else None)
         else:
             row['windows_frame'].pack_forget()
         def show(widget, text=None, pady=(0, 2)):
@@ -726,7 +793,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         for index, button in enumerate(row['reset_buttons']):
             if index < count:
                 button.configure(text='', state=row['reset_button'].cget('state'),
-                                 command=lambda account=item: self.confirm_chatgpt_reset(account))
+                                 command=lambda account=item: self.confirm_chatgpt_reset(account),
+                                 image=self.playback_icons['reset-rainbow'][0] if options and not item.get('disabled') else self.playback_icons['reset'])
                 if not button.winfo_manager():
                     button.pack(side='left')
             else:
@@ -737,7 +805,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             error = '\n'.join(filter(None, (error, str(quota_error))))
         row['error'].configure(text_color=color if reason else MUTED, wraplength=230, justify='left')
         if error:
-            show(row['error'], self.redact_private_text(error))
+            show(row['error'], self.redact_private_text(error), pady=(0, 6))
         else:
             row['error'].pack_forget()
         self.update_chatgpt_countdowns(item)
@@ -972,6 +1040,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.controller.save()
         self.language_control.set(value)
         self.ui_style.apply(language=language)
+        self.render_token_capacity()
         self.journal_content = None
         self.render_activity()
 
@@ -2323,13 +2392,18 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
     def draw_rainbow_border(self, widgets, phase):
         card = widgets['card']
         canvas = card._canvas
-        size = (card.winfo_width(), card.winfo_height())
+        size = (min(card.winfo_width(), canvas.winfo_width()),
+                min(card.winfo_height(), canvas.winfo_height()))
         scale = card._get_widget_scaling()
+        if min(size) <= 5 * scale + 5:
+            return
         if size != widgets.get('rainbow_size'):
             canvas.delete('rainbow')
-            inset = 1.5 * scale
-            x0, y0, x1, y1 = inset, inset, size[0] - inset, size[1] - inset
-            radius = 8.5 * scale
+            # Coordinates belong to the canvas, which can lag behind the frame
+            # during layout. Keep the entire stroke inside both surfaces.
+            inset = 2.5 * scale + 2
+            x0, y0, x1, y1 = inset, inset, size[0] - 1 - inset, size[1] - 1 - inset
+            radius = min(8.5 * scale, (x1-x0)/2, (y1-y0)/2)
             points = []
             for cx, cy, start in [(x0 + radius, y0 + radius, 180), (x1 - radius, y0 + radius, 270),
                                   (x1 - radius, y1 - radius, 0), (x0 + radius, y1 - radius, 90)]:
@@ -2381,6 +2455,10 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             if widgets['model'].cget('text') != caption:
                 widgets['model'].configure(text=caption)
             self.update_active_border(widgets, is_active)
+            reset_icon = self.playback_icons['reset-rainbow'][int(time.monotonic()*2) % 12]
+            for button in widgets['reset_buttons']:
+                if button.winfo_manager() and button.cget('state') != 'disabled':
+                    button.configure(image=reset_icon)
         self.claude_panel.animate()
         self.grok_panel.animate()
         self.animate_api_accounts()
@@ -2703,6 +2781,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             self.quota_cache[name] = {'data': data if data is not None else old.get('data', {}),
                 'at': datetime.now().astimezone() if data is not None else old.get('at'),
                 'checked': time.monotonic(), 'error': error}
+            if data is not None and not error and not data.get('summary_error'):
+                self.observe_token_capacity(name, 'Google', self.google_plan_name(account), data.get('groups', []))
             if any(a['name'] == name for a in self.items):
                 self.schedule_quota_render()
         self.work(fetch, done)
@@ -3032,6 +3112,22 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                     draw.line([(13, 32), (51, 32)], fill=color, width=6)
                 variants.append(icon.resize((32, 32), Image.Resampling.LANCZOS))
             icons[kind] = ctk.CTkImage(light_image=variants[0], dark_image=variants[1], size=(12, 12))
+        mask = Image.new('L', (64, 64))
+        draw = ImageDraw.Draw(mask)
+        draw.arc((11, 11, 53, 53), 35, 320, fill=255, width=6)
+        draw.polygon([(45, 8), (58, 21), (40, 23)], fill=255)
+        icons['reset-rainbow'] = []
+        for phase in range(12):
+            icon = Image.new('RGBA', (64, 64))
+            pixels = icon.load()
+            for y in range(64):
+                for x in range(64):
+                    alpha = mask.getpixel((x, y))
+                    if alpha:
+                        rgb = colorsys.hsv_to_rgb((phase/12 + (x+y)/128) % 1, .72, 1)
+                        pixels[x, y] = (*[round(v*255) for v in rgb], alpha)
+            icon = icon.resize((32, 32), Image.Resampling.LANCZOS)
+            icons['reset-rainbow'].append(ctk.CTkImage(light_image=icon, dark_image=icon, size=(12, 12)))
         return icons
 
     def update_pause_button(self, button, paused):

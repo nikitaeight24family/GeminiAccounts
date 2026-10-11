@@ -220,6 +220,13 @@ class ClaudeSupport:
         if not self.controller.key or self.closed: return
         def done(accounts):
             self.claude_items = accounts
+            for account in accounts:
+                quota = account.get('quota') or {}
+                if not quota.get('error'):
+                    from chatgpt_auth import ChatGPTAuth
+                    groups = ChatGPTAuth.quota_limit_groups(quota)
+                    groups[0]['kind'] = 'claude-native'
+                    self.observe_token_capacity(account['name'], 'Claude', quota.get('plan_type') or 'unknown', groups)
             self.claude_panel.render()
         self.work(lambda: ClaudeAuth(self.controller).accounts_with_quotas(maintain_pool=True), done)
 
