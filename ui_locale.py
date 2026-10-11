@@ -99,6 +99,12 @@ RU = {
 }
 
 PHRASES = {
+    'Limit exhausted': 'Лимит исчерпан', 'Account blocked': 'Аккаунт заблокирован',
+    'Access denied': 'Доступ запрещён', 'Request error': 'Ошибка запроса',
+    'Rate limited': 'Ограничение частоты', 'Waiting to retry': 'Ожидание повтора',
+    'Temporarily unavailable': 'Временно недоступен', 'Provider status: ': 'Статус сервиса: ',
+    'Provider did not report the cause': 'Сервис не сообщил причину',
+    'Verification required': 'Нужно подтверждение',
     'No accounts enabled': 'Нет включённых аккаунтов', 'For Claude: ': 'Для Claude: ',
     'Automatic routing • enabled accounts: ': 'Автоматический выбор • включено аккаунтов: ',
     'Enabled accounts: ': 'Включено аккаунтов: ', ' of ': ' из ',

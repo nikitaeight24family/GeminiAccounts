@@ -13,6 +13,32 @@ from harbor_activity import key_id
 
 
 class QuotaUITests(unittest.TestCase):
+    def test_chatgpt_status_changes_preserve_card_and_show_cause(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), \
+                patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                item = {'name': 'gpt', 'status': 'error', 'success': 438,
+                        'cooldowns': [{'reason': 'credential_quota', 'remaining_seconds': 300}],
+                        'quota': {'windows': [{'label': '5h', 'remaining': 0, 'reset_at': time.time() + 300}]}}
+                app.chatgpt_items = [item]
+                app.draw_chatgpt_accounts()
+                row = app.chatgpt_widgets['gpt']
+                card = row['card']
+                self.assertIn('Limit exhausted', row['status'].cget('text'))
+                item['status_message'] = '{"error":{"code":"account_deactivated","message":"Contact support"}}'
+                app.draw_chatgpt_accounts()
+                self.assertIs(card, app.chatgpt_widgets['gpt']['card'])
+                self.assertIn('Account blocked', row['status'].cget('text'))
+                self.assertEqual(row['error'].cget('text'), 'Contact support')
+                item.update(status='active', status_message='', cooldowns=[], quota={'windows': [{'label': '5h', 'remaining': 80, 'reset_at': time.time() + 300}]})
+                app.draw_chatgpt_accounts()
+                self.assertIn('Available', row['status'].cget('text'))
+                self.assertFalse(row['error'].winfo_manager())
+            finally:
+                app.closed = True
+                app.destroy()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
@@ -346,7 +372,7 @@ class QuotaUITests(unittest.TestCase):
                 app.closed = True
                 app.destroy()
 
-    def test_ten_accounts_fit_and_all_four_limits_remain_visible(self):
+    def test_ten_accounts_scroll_and_all_four_limits_remain_visible(self):
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
             app = App()
             if hasattr(app, 'restore_details_job'):
@@ -370,8 +396,16 @@ class QuotaUITests(unittest.TestCase):
                 canvas = app.account_list._parent_canvas
                 first = app.account_widgets['0']['card']
                 last = app.account_widgets['9']['card']
-                self.assertLessEqual(last.winfo_rooty() + last.winfo_height(), canvas.winfo_rooty() + canvas.winfo_height())
-                self.assertLess(first.winfo_height() / first._get_widget_scaling(), 105)
+                # A separate subscription row increases each card's height.
+                # All accounts remain reachable without compressing the text.
+                canvas.yview_moveto(1)
+                app.update()
+                self.assertLessEqual(last.winfo_rooty() + last.winfo_height(), canvas.winfo_rooty() + canvas.winfo_height() + 2)
+                self.assertLess(first.winfo_height() / first._get_widget_scaling(), 130)
+                for item in items:
+                    self.assertEqual(len(app.account_widgets[item['name']]['quota_rows']), 4)
+                canvas.yview_moveto(0)
+                app.update()
                 app.activity_state['latest'] = {
                     'gemini-3-flash': {'name': '0', 'model': 'gemini-3-flash', 'at': now.isoformat(), 'failed': False},
                     'claude-opus-4-6-thinking': {'name': '1', 'model': 'claude-opus-4-6-thinking',

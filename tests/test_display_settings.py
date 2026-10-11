@@ -55,6 +55,10 @@ class DisplaySettingsTests(unittest.TestCase):
                     gpt_card = app.chatgpt_widgets['gpt']['card']
                     claude_row = app.account_widgets['google']['quota_rows'][('claude', 'weekly')]
                     self.assertIn('AI Ultra', app.account_widgets['google']['plan'].cget('text'))
+                    app.update_idletasks()
+                    google_row = app.account_widgets['google']
+                    self.assertGreaterEqual(google_row['plan'].winfo_rooty(),
+                                            google_row['button'].winfo_rooty() + google_row['button'].winfo_height())
                     self.assertIn('Pro', app.chatgpt_widgets['gpt']['plan'].cget('text'))
                     self.assertIs(app.sidebar.pack_slaves()[-1], app.tokenharbor_accounts)
                     app.rename_entry.delete(0, 'end')

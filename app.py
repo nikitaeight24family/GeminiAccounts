@@ -21,6 +21,7 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter import font as tkfont
 from backend import Controller, AccountError
+from account_status import account_status
 from activity import Activity
 from harbor_activity import HarborActivity, key_id, key_label
 from routing import rank_accounts, quota_projection, quota_entry
@@ -494,9 +495,11 @@ class App(ctk.CTk):
     def update_chatgpt_row(self, item):
         row = self.chatgpt_widgets[item['name']]
         row['heading'].configure(text=self.display_name(item, 'OpenAI'))
-        status = 'Paused' if item.get('disabled') else item.get('status') or 'Waiting'
+        status, severity, reason = account_status(item)
         row['plan'].configure(text=' ' + self.chatgpt_plan_name(item) + ' ')
-        row['status'].configure(text=f'{status} · {item.get("success") or 0} responses')
+        color = {'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': GREEN, 'muted': MUTED}[severity]
+        row['status'].configure(text=f'{status} · {item.get("success") or 0} responses', text_color=color,
+                                wraplength=175, justify='left')
         quota = item.get('quota') or {}
         keys = set()
         for window in quota.get('windows', []):
@@ -544,7 +547,11 @@ class App(ctk.CTk):
         else:
             row['reset_details'].pack_forget()
             row['reset_button'].pack_forget()
-        error = quota.get('reset_error') or (quota.get('error') or 'Quota not loaded yet' if not quota.get('windows') and not item.get('disabled') else '')
+        error = reason
+        quota_error = quota.get('reset_error') or (quota.get('error') or 'Quota not loaded yet' if not quota.get('windows') and not item.get('disabled') else '')
+        if quota_error:
+            error = '\n'.join(filter(None, (error, str(quota_error))))
+        row['error'].configure(text_color=color if reason else MUTED, wraplength=230, justify='left')
         if error:
             show(row['error'], self.redact_private_text(error))
         else:
@@ -1261,15 +1268,15 @@ class App(ctk.CTk):
             status = self.sidebar_account_status(account)
             heading_row = ctk.CTkFrame(card, fg_color='transparent')
             heading_row.pack(fill='x', pady=0, padx=5)
-            plan = ctk.CTkLabel(heading_row, text='', height=17, width=1, corner_radius=5,
-                                fg_color='#183b32', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
-            plan.pack(side='right', padx=(4, 0))
             button = ctk.CTkButton(heading_row, text=self.account_heading(account), localize=False,
                 height=19, anchor='w', corner_radius=6, fg_color='#303e59' if not self.details_collapsed and account['name'] == self.selected else CARD,
                 hover=not self.details_collapsed,
                 hover_color='#334158', text_color=TEXT, font=('Segoe UI', 12, 'bold'), command=lambda a=account: self.select(a))
             button.configure(width=1)
             button.pack(side='left', fill='x', expand=True)
+            plan = ctk.CTkLabel(card, text='', height=17, width=1, corner_radius=5,
+                                fg_color='#183b32', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
+            plan.pack(anchor='w', padx=8, pady=(1, 2))
             countdown = {}
             verification_frame = ctk.CTkFrame(card, fg_color='transparent')
             verification_frame.grid_columnconfigure((0, 3), weight=1)
