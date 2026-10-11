@@ -9,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import App
 from backend import Controller
+from harbor_activity import key_id
 
 
 class QuotaUITests(unittest.TestCase):
@@ -100,6 +101,29 @@ class QuotaUITests(unittest.TestCase):
                                     if isinstance(child, ctk.CTkButton)))
                 app.toggle_tokenharbor_accounts()
                 self.assertEqual(len(app.tokenharbor_accounts.winfo_children()), 1)
+            finally:
+                app.closed = True
+                app.destroy()
+
+    def test_tokenharbor_marks_only_the_key_that_completed_a_request(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch('app.TokenHarbor.keys', return_value=['thk_first-secret', 'thk_second-secret']):
+            app = App()
+            try:
+                app.tokenharbor_collapsed = False
+                app.draw_tokenharbor_accounts()
+                app.harbor_activity.observe([{'execution_id': 'request-1', 'auth_index': 'second',
+                    'timestamp': '2026-10-11T01:01:00Z', 'failed': True,
+                    'fail': {'status_code': 429}}], {'second': 'thk_second-secret'})
+                app.update_tokenharbor_status()
+                first = app.tokenharbor_rows[key_id('thk_first-secret')]
+                second = app.tokenharbor_rows[key_id('thk_second-secret')]
+                self.assertEqual(first[0].cget('border_color'), '#344155')
+                self.assertEqual(second[0].cget('border_color'), '#739aff')
+                self.assertIn('429', second[1].cget('text'))
+                self.assertIn('reset unknown', second[1].cget('text'))
             finally:
                 app.closed = True
                 app.destroy()
