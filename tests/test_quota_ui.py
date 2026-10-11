@@ -443,6 +443,8 @@ class QuotaUITests(unittest.TestCase):
                 self.assertGreater(len({canvas_active.itemcget(i, 'fill') for i in segments}), 20)
                 self.assertTrue(first._canvas.find_withtag('rainbow'))
                 old_colors = [canvas_active.itemcget(i, 'fill') for i in segments]
+                app.draw_rainbow_border(app.account_widgets['1'], 0)
+                old_colors = [canvas_active.itemcget(i, 'fill') for i in segments]
                 app.draw_rainbow_border(app.account_widgets['1'], .5)
                 self.assertNotEqual(old_colors, [canvas_active.itemcget(i, 'fill') for i in segments])
                 # A newer Gemini request leaves Claude's subscription selected.

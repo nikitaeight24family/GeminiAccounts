@@ -10,6 +10,46 @@ from ui_locale import translate
 
 
 class DisplaySettingsTests(unittest.TestCase):
+    def test_footer_stays_at_bottom_at_small_windows_and_multiple_scales(self):
+        import customtkinter as native_ctk
+        for scale in (1, .8, 1.25):
+            native_ctk.set_widget_scaling(scale)
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with patch('app.Controller', lambda: Controller(proxy_dir=root / 'proxy', data_dir=root / 'data')), \
+                        patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                        patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                        patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), patch.object(App, 'check_for_updates'):
+                    app = App()
+                    try:
+                        app.items = [{'name': 'google', 'disabled': False, 'unavailable': False}]
+                        app.draw_account_list()
+                        for size in ('990x680', '1120x760', '1120x1000'):
+                            with self.subTest(scale=scale, size=size):
+                                app.geometry(size)
+                                app.update()
+                                def bottom_gap():
+                                    return app.sidebar.winfo_rooty() + app.sidebar.winfo_height() - (app.sidebar_footer.winfo_rooty() + app.sidebar_footer.winfo_height())
+                                before = bottom_gap()
+                                app.toggle_google_accounts()
+                                app.update()
+                                self.assertEqual(bottom_gap(), before)
+                                app.toggle_google_accounts()
+                                app.update()
+                                self.assertEqual(bottom_gap(), before)
+                                app.visible_services.update(gemini=False, claude=False)
+                                app.apply_service_visibility()
+                                app.update()
+                                self.assertEqual(bottom_gap(), before)
+                                app.visible_services.update(gemini=True, claude=True)
+                                app.apply_service_visibility()
+                                app.update()
+                                self.assertEqual(bottom_gap(), before)
+                    finally:
+                        app.closed = True
+                        app.destroy()
+            native_ctk.set_widget_scaling(1)
+
     def test_google_paid_tier_wins_and_unknown_is_not_assumed_free(self):
         self.assertEqual(Controller.parse_subscription({'paidTier': {'id': 'g1-ultra-tier'},
                                                        'currentTier': {'id': 'free-tier'}}), 'AI Ultra')
@@ -64,7 +104,7 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertGreaterEqual(google_row['plan'].winfo_rooty(),
                                             google_row['button'].winfo_rooty() + google_row['button'].winfo_height())
                     self.assertIn('Pro', app.chatgpt_widgets['gpt']['plan'].cget('text'))
-                    self.assertIs(app.sidebar.pack_slaves()[-1], app.tokenharbor_accounts)
+                    self.assertIs(app.sidebar_footer.pack_slaves()[-1], app.tokenharbor_accounts)
                     footer_y = app.service.winfo_rooty()
                     app.toggle_google_accounts()
                     app.update()
@@ -97,7 +137,7 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertIs(google_card, app.account_widgets['google']['card'])
                     self.assertIs(gpt_card, app.chatgpt_widgets['gpt']['card'])
                     self.assertTrue(claude_row.winfo_manager())
-                    self.assertIs(app.sidebar.pack_slaves()[-1], app.tokenharbor_accounts)
+                    self.assertIs(app.sidebar_footer.pack_slaves()[-1], app.tokenharbor_accounts)
                     app.set_theme('Light')
                     app.set_language('Русский')
                     app.update()

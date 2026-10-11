@@ -143,8 +143,10 @@ class App(ctk.CTk):
         self.privacy_toggle.configure(width=28, height=26, image=self.privacy_icons[self.hide_account_names],
                                       fg_color='#303e59')
         self.privacy_toggle.pack(side='left', padx=(5, 0))
+        self.sidebar_footer = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        self.sidebar_footer.pack(side='bottom', fill='x')
         self.chatgpt_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
-        self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar_footer, fg_color='transparent')
         self.draw_chatgpt_accounts()
         self.google_accounts_header = self.button(self.sidebar, '', self.toggle_google_accounts)
         self.google_accounts_header.configure(image=self.provider_icons['antigravity'], compound='left', height=27, anchor='w',
@@ -155,9 +157,9 @@ class App(ctk.CTk):
         if self.google_accounts_collapsed:
             self.account_list.pack_forget()
         self.account_list._scrollbar.grid_remove()
-        self.service = ctk.CTkLabel(self.sidebar, text='Connecting…', text_color=MUTED, font=('Segoe UI', 10), height=14)
+        self.service = ctk.CTkLabel(self.sidebar_footer, text='Connecting…', text_color=MUTED, font=('Segoe UI', 10), height=14)
         self.service.pack(anchor='w', padx=18)
-        self.sidebar_spacer = ctk.CTkFrame(self.sidebar, height=self.account_list.cget('height'), fg_color='transparent')
+        self.sidebar_spacer = ctk.CTkFrame(self.sidebar, height=0, fg_color='transparent')
         self.pool_summary_groups = {}
         google_summary = self.create_pool_summary('google', 'Google Gemini')
         self.total_quota_frame = ctk.CTkFrame(google_summary, fg_color='transparent')
@@ -439,7 +441,7 @@ class App(ctk.CTk):
             frame.pack_forget()
             return
         if not frame.winfo_manager():
-            frame.pack(fill='x', padx=12, pady=(0, 3), before=self.google_accounts_header if self.google_accounts_header.winfo_manager() else self.service)
+            frame.pack(fill='x', padx=12, pady=(0, 3), **({'before': self.google_accounts_header} if self.google_accounts_header.winfo_manager() else {'before': self.sidebar_spacer} if self.sidebar_spacer.winfo_manager() else {}))
         if not getattr(self, 'chatgpt_header', None):
             self.chatgpt_header = self.button(frame, '', self.toggle_chatgpt_accounts)
             self.chatgpt_header.configure(image=self.provider_icons['openai'], compound='left', height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
@@ -724,7 +726,7 @@ class App(ctk.CTk):
             return
         if self.google_visible():
             if not self.google_accounts_header.winfo_manager():
-                self.google_accounts_header.pack(fill='x', padx=13, pady=(0, 2), before=self.service)
+                self.google_accounts_header.pack(fill='x', padx=13, pady=(0, 2), **({'before': self.sidebar_spacer} if self.sidebar_spacer.winfo_manager() else {}))
             if not self.google_accounts_collapsed and not self.account_list._parent_frame.winfo_manager():
                 self.account_list.pack(fill='both', expand=True, padx=12, after=self.google_accounts_header)
         else:
@@ -732,7 +734,7 @@ class App(ctk.CTk):
             self.account_list.pack_forget()
         if self.google_accounts_collapsed or not self.google_visible():
             if not self.sidebar_spacer.winfo_manager():
-                self.sidebar_spacer.pack(fill='both', expand=True, before=self.service)
+                self.sidebar_spacer.pack(fill='both', expand=True)
         else:
             self.sidebar_spacer.pack_forget()
         for provider, group in getattr(self, 'pool_summary_groups', {}).items():
@@ -1199,7 +1201,7 @@ class App(ctk.CTk):
         if self.google_accounts_collapsed or not self.google_visible():
             self.account_list.pack_forget()
         else:
-            self.account_list.pack(fill='both', expand=True, padx=12, before=self.service)
+            self.account_list.pack(fill='both', expand=True, padx=12, after=self.google_accounts_header)
         self.draw_account_list()
 
     def draw_account_list(self):
@@ -1489,7 +1491,7 @@ class App(ctk.CTk):
                      for bucket in self.visible_quota_buckets(group) if self.provider_visible(group['kind']))
 
     def create_pool_summary(self, provider, title):
-        group = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        group = ctk.CTkFrame(self.sidebar_footer, fg_color='transparent')
         group.pack(fill='x', padx=18, pady=(0, 3))
         collapsed = self.controller.preferences.get(provider + '-pool-collapsed', True)
         header = self.button(group, ('▸' if collapsed else '▾') + '  ' + title,
