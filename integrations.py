@@ -303,6 +303,12 @@ class Integrations:
         previous_catalog = config.get('model_catalog_json')
         root = re.sub(r'^\s*(model|model_provider|model_catalog_json)\s*=.*\n?', '', root, flags=re.M)
         model = 'gemini-selected' if self.controller.preferences.get('gemini-model') else self.controller.preferences.get('pro-model') or self.controller.model_aliases().get('claude-sonnet-4-5', 'gemini-3.1-pro-low')
+        try:
+            chatgpt_models = self.controller.chatgpt_model_choices()
+            if not self.controller.accounts() and chatgpt_models:
+                model = chatgpt_models[0]
+        except (AccountError, OSError, KeyError, ValueError):
+            pass
         defaults = 'model = ' + json.dumps(model) + '\nmodel_provider = "gemini_accounts"\n'
         if self.write_codex_catalog(catalog_path, previous_catalog):
             defaults += 'model_catalog_json = ' + json.dumps(str(catalog_path.resolve())) + '\n'
@@ -329,6 +335,10 @@ class Integrations:
             choices = available['gemini'] + available['claude']
         except (AccountError, OSError, KeyError, ValueError):
             choices = self.gemini_model_choices()
+        try:
+            choices += self.controller.chatgpt_model_choices()
+        except (AccountError, OSError, KeyError, ValueError):
+            pass
         from model_names import model_name, reasoning_level
         existing = {entry.get('slug') for entry in models}
         template = models[0]
@@ -336,7 +346,7 @@ class Integrations:
             if model in existing:
                 continue
             entry = copy.deepcopy(template)
-            family = 'Gemini ' if model.startswith('gemini-') else 'Claude '
+            family = 'Gemini ' if model.startswith('gemini-') else 'ChatGPT ' if model.startswith('gpt-') else 'Claude '
             entry.update(slug=model, display_name=family + model_name(model, {}),
                          description='Antigravity via Gemini Accounts', priority=50,
                          model_messages={}, base_instructions='You are a helpful coding assistant.',
@@ -344,9 +354,13 @@ class Integrations:
                          max_context_window=1048576 if model.startswith('gemini-') else 200000,
                          additional_speed_tiers=[], service_tiers=[], availability_nux=None,
                          upgrade=None)
-            effort = reasoning_level(model)
-            entry['default_reasoning_level'] = effort
-            entry['supported_reasoning_levels'] = [{'effort': effort, 'description': effort.title() + ' reasoning'}]
+            if model.startswith('gpt-'):
+                entry['default_reasoning_level'] = template.get('default_reasoning_level', 'medium')
+                entry['supported_reasoning_levels'] = copy.deepcopy(template.get('supported_reasoning_levels', []))
+            else:
+                effort = reasoning_level(model)
+                entry['default_reasoning_level'] = effort
+                entry['supported_reasoning_levels'] = [{'effort': effort, 'description': effort.title() + ' reasoning'}]
             models.append(entry)
         self.write_json(target, catalog)
         return True
@@ -379,6 +393,17 @@ class Integrations:
             tier = 'opus' if '-opus-' in model else 'haiku' if '-haiku-' in model else 'sonnet'
             models.append((model, 'Claude · ' + model_name(model, {}), tier, False))
             seen.add(model)
+        try:
+            chatgpt_models = self.controller.chatgpt_model_choices()
+        except (AccountError, OSError, KeyError, ValueError):
+            chatgpt_models = []
+        for model in chatgpt_models:
+            if model not in seen:
+                models.append((model, 'ChatGPT · ' + model, 'sonnet', False))
+                seen.add(model)
+        if chatgpt_models and not self.controller.accounts():
+            models = [(name, label, tier, name == chatgpt_models[0])
+                      for name, label, tier, _ in models if name in chatgpt_models]
         if TokenHarbor(self.controller, self).connected():
             models.append((TOKENHARBOR_MODEL, TOKENHARBOR_LABEL, 'haiku', False))
         routed = list(dict.fromkeys([family_models['gemini'], 'gemini-3-flash'] + [model for model in choices['gemini']

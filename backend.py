@@ -194,6 +194,22 @@ class Controller:
         except (OSError, ValueError) as exc:
             raise AccountError('Cannot reach the local Gemini connection.') from None
 
+    def upload_auth_file(self, name, payload):
+        """Send a validated OAuth record to the loopback gateway without logging its tokens."""
+        if not name.startswith('codex-import-') or not name.endswith('.json') or not isinstance(payload, bytes):
+            raise AccountError('Invalid ChatGPT account import.')
+        url = self.base + '/v0/management/auth-files?' + urllib.parse.urlencode({'name': name})
+        request = urllib.request.Request(url, data=payload, method='POST', headers={
+            'Authorization': 'Bearer ' + (self.key or ''), 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=15) as response:
+                if json.load(response).get('status') != 'ok':
+                    raise AccountError('The gateway did not accept this ChatGPT account.')
+        except urllib.error.HTTPError as error:
+            raise AccountError('The gateway rejected this ChatGPT account (HTTP ' + str(error.code) + ').') from None
+        except (OSError, ValueError):
+            raise AccountError('Cannot reach the local gateway to import this ChatGPT account.') from None
+
     def accounts(self):
         result = self.request('/auth-files')
         # Strip everything except display/routing metadata before it reaches the UI.
@@ -344,6 +360,21 @@ class Controller:
                 choices[group].append(model)
                 choices[group].sort()
         return choices
+
+    def chatgpt_model_choices(self):
+        """List models supplied by connected ChatGPT OAuth credentials."""
+        accounts = [item for item in self.request('/auth-files').get('files', [])
+                    if item.get('provider', item.get('type')) == 'codex' and not item.get('disabled')]
+        models = set()
+        for account in accounts:
+            query = urllib.parse.urlencode({'name': account['name']})
+            try:
+                entries = self.request('/auth-files/models?' + query).get('models', [])
+            except AccountError:
+                continue
+            models.update(item['id'] for item in entries if isinstance(item, dict) and
+                          isinstance(item.get('id'), str) and item['id'].startswith('gpt-'))
+        return sorted(models)
 
     def selected_family_models(self):
         aliases = self.model_aliases()

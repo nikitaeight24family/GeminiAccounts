@@ -66,11 +66,19 @@ def deadline(item):
         return 0
 
 
+def google_routed_model(model):
+    return not model.startswith('gpt-') and 'tokenharbor' not in model
+
+
 def quota_wait(files, model, aliases, now=None):
     """Wait only for actual quota blocks, scoped to the requested upstream model."""
     now = time.time() if now is None else now
     model = strip_context_suffix(model)
     model = aliases.get(model, model)
+    # ChatGPT and TokenHarbor credentials have their own quotas. Google cooldowns
+    # must never hold or retry requests routed to those providers.
+    if not google_routed_model(model):
+        return None
     quota = []
     enabled = [a for a in files if not a.get('disabled') and
                a.get('provider', a.get('type')) == 'antigravity']
@@ -361,6 +369,9 @@ class Handler(BaseHTTPRequestHandler):
                     if response.status in (429, 403, 503):
                         error = response.read()
                         self.trace('provider_rejected', status=response.status, reason=failure_reason(response.status, error) or 'Provider rejected request', **provider_error_metadata(error))
+                        if not google_routed_model(self.server.aliases.get(model, model)):
+                            self.deliver(response, error, started, stream)
+                            return
                         try:
                             reset = quota_wait(self.server.accounts(), model, self.server.aliases)
                         except (OSError, ValueError, http.client.HTTPException):

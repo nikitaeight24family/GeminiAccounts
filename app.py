@@ -1,5 +1,6 @@
 import ctypes
 import copy
+import json
 import queue
 import threading
 import time
@@ -22,6 +23,7 @@ from harbor_activity import HarborActivity, key_id, key_label
 from routing import rank_accounts, quota_projection, quota_entry
 from integrations import Integrations
 from tokenharbor import TokenHarbor
+from chatgpt_auth import ChatGPTAuth
 from model_names import model_name
 
 BG = '#10141d'
@@ -81,6 +83,8 @@ class App(ctk.CTk):
         self.gateway_jobs = []
         self.gateway_jobs_checked = 0
         self.tokenharbor_collapsed = self.controller.preferences.get('tokenharbor-collapsed', True)
+        self.chatgpt_collapsed = self.controller.preferences.get('chatgpt-collapsed', True)
+        self.chatgpt_items = []
         self.activity_rows = {}
         self.policy_busy = False
         self.policy_job = None
@@ -101,11 +105,18 @@ class App(ctk.CTk):
         self.details_toggle = self.button(sidebar_header, '☰', self.toggle_details)
         self.details_toggle.configure(height=26, width=28, font=('Segoe UI', 20), fg_color='transparent')
         self.details_toggle.pack(side='right')
-        self.add_button = self.button(self.sidebar, '+  Add Google account', self.add_account, primary=True)
-        self.add_button.configure(height=30)
-        self.add_button.pack(fill='x', padx=16, pady=(0, 6))
+        add_row = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        add_row.pack(fill='x', padx=16, pady=(0, 6))
+        self.add_button = self.button(add_row, '+ Google', self.add_account, primary=True)
+        self.add_button.configure(height=30, width=110)
+        self.add_button.pack(side='left', fill='x', expand=True, padx=(0, 3))
+        self.add_chatgpt_button = self.button(add_row, '+ ChatGPT', self.add_chatgpt_account)
+        self.add_chatgpt_button.configure(height=30, width=110, fg_color='#303e59')
+        self.add_chatgpt_button.pack(side='left', fill='x', expand=True, padx=(3, 0))
+        self.chatgpt_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.tokenharbor_accounts.pack(fill='x', padx=12, pady=(0, 5))
+        self.draw_chatgpt_accounts()
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
         self.account_list.pack(fill='both', expand=True, padx=12)
         self.account_list._scrollbar.grid_remove()
@@ -324,6 +335,7 @@ class App(ctk.CTk):
             mode = f'Enabled accounts: {len(enabled)} of {len(items)}'
         self.mode_label.configure(text=mode)
         self.draw_account_list()
+        self.refresh_chatgpt_accounts()
         if self.detail_account != self.selected:
             self.draw_detail()
         else:
@@ -334,6 +346,100 @@ class App(ctk.CTk):
         if not self.activity_started:
             self.activity_started = True
             self.start_activity()
+
+    def refresh_chatgpt_accounts(self):
+        if not self.controller.key or self.closed:
+            return
+        self.work(lambda: ChatGPTAuth(self.controller).accounts_with_quotas(), self.set_chatgpt_accounts)
+
+    def set_chatgpt_accounts(self, accounts):
+        self.chatgpt_items = accounts
+        self.draw_chatgpt_accounts()
+
+    def draw_chatgpt_accounts(self):
+        frame = self.chatgpt_accounts
+        rows = sorted(self.chatgpt_items, key=lambda item: item.get('email') or item.get('name') or '')
+        if not rows:
+            frame.pack_forget()
+            return
+        if not frame.winfo_manager():
+            frame.pack(fill='x', padx=12, pady=(0, 3), before=self.tokenharbor_accounts)
+        signature = (self.chatgpt_collapsed, len(rows)) if self.chatgpt_collapsed else (
+            self.chatgpt_collapsed, tuple((item.get('name'), item.get('email'),
+                item.get('status'), item.get('disabled'), item.get('success'), item.get('failed'),
+                json.dumps(item.get('quota'), sort_keys=True)) for item in rows))
+        if getattr(self, '_chatgpt_signature', None) == signature and frame.winfo_children():
+            return
+        self._chatgpt_signature = signature
+        for child in frame.winfo_children():
+            child.destroy()
+        header = self.button(frame, ('▸' if self.chatgpt_collapsed else '▾') +
+                             f'  ChatGPT · accounts {len(rows)}', self.toggle_chatgpt_accounts)
+        header.configure(height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
+        header.pack(fill='x', padx=1, pady=(1, 2))
+        if self.chatgpt_collapsed:
+            return
+        for item in rows:
+            card = ctk.CTkFrame(frame, fg_color='#202938', corner_radius=8,
+                                border_width=1, border_color='#344155')
+            card.pack(fill='x', padx=1, pady=(0, 2))
+            ctk.CTkLabel(card, text=item.get('email') or item.get('label') or 'ChatGPT account',
+                         height=20, anchor='w', font=('Segoe UI', 11), text_color=TEXT).pack(
+                             fill='x', padx=8, pady=(3, 0))
+            status = 'Paused' if item.get('disabled') else item.get('status') or 'Waiting'
+            ctk.CTkLabel(card, text=f'{status} · {item.get("success") or 0} responses',
+                         height=17, anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(
+                             fill='x', padx=8, pady=(0, 3))
+            quota = item.get('quota') or {}
+            for window in quota.get('windows', []):
+                line = ctk.CTkFrame(card, fg_color='transparent')
+                line.pack(fill='x', padx=8, pady=(0, 2))
+                ctk.CTkLabel(line, text=f'{window["label"]} · {window["remaining"]:.0f}%',
+                             width=75, height=15, anchor='w', font=('Segoe UI', 10),
+                             text_color=self.quota_color(window['remaining'] / 100)).pack(side='left')
+                bar = ctk.CTkProgressBar(line, width=75, height=6,
+                    progress_color=self.quota_color(window['remaining'] / 100))
+                bar.pack(side='left', padx=(1, 5))
+                bar.set(window['remaining'] / 100)
+                try:
+                    reset = datetime.fromtimestamp(window['reset_at'], timezone.utc).isoformat()
+                    countdown = self.time_until_reset(reset)
+                except (ValueError, TypeError, OverflowError, OSError):
+                    countdown = '—'
+                ctk.CTkLabel(line, text=countdown, height=15, anchor='e',
+                             font=('Segoe UI', 10), text_color=MUTED).pack(side='right')
+            if quota.get('reset_credits') is not None:
+                ctk.CTkLabel(card, text=f'Reset credits: {quota["reset_credits"]}', height=15,
+                             anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(
+                                 fill='x', padx=8, pady=(0, 2))
+            if not quota.get('windows') and not item.get('disabled'):
+                ctk.CTkLabel(card, text=quota.get('error') or 'Quota not loaded yet', height=15,
+                             anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(
+                                 fill='x', padx=8, pady=(0, 2))
+
+    def toggle_chatgpt_accounts(self):
+        self.chatgpt_collapsed = not self.chatgpt_collapsed
+        self.controller.preferences['chatgpt-collapsed'] = self.chatgpt_collapsed
+        self.controller.save()
+        self.draw_chatgpt_accounts()
+
+    def add_chatgpt_account(self):
+        if self.busy:
+            return
+        path = filedialog.askopenfilename(parent=self, title='Choose ChatGPT auth.json',
+                                          filetypes=[('JSON files', '*.json')])
+        if not path:
+            return
+        def done(result):
+            email, accounts = result
+            self.chatgpt_collapsed = False
+            self.controller.preferences['chatgpt-collapsed'] = False
+            self.controller.save()
+            self.set_chatgpt_accounts(accounts)
+            self.notice.configure(text='ChatGPT account connected: ' + email + '. Choose an available GPT model in your connected application.',
+                                  text_color=GREEN)
+            self.refresh_chatgpt_accounts()
+        self.work(lambda: ChatGPTAuth(self.controller).import_file(path), done, mutation=True)
 
     def change_view(self, value):
         self.detail.pack_forget()
@@ -1613,6 +1719,7 @@ class App(ctk.CTk):
 
     def periodic_quota(self):
         if not self.busy:
+            self.refresh_chatgpt_accounts()
             for account in self.items:
                 self.fetch_quota(account['name'])
             # A gateway config reload can drop Claude Desktop's approved aliases.
