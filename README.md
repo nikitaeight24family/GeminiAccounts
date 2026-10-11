@@ -50,6 +50,7 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 - Four account quota bars: Gemini / Claude, **5h / 1w**, with reset countdowns and time-based colors.
 - Account cards and quota controls persist during refreshes. Percentages, bars, status and countdowns update in place; crossing the weekly 1% threshold hides or restores existing rows without rebuilding the cards.
 - ChatGPT accounts with an applicable usage reset show **Use usage reset** and the earliest expiry. Applying a reset requires confirmation, rechecks availability, and clears only that account's gateway cooldown after provider confirmation. The provider chooses which credit is consumed; the app does not automatically repeat a reset request after a timeout.
+- ChatGPT accounts use their own pool: available accounts with the nearest five-hour reset are preferred, and exhausted accounts fall behind them. A full unused window gets a short Luna ping after three minutes, with persistent suppression after real usage and bounded retries. GPT requests wait only on confirmed ChatGPT quota cooldowns and resume when a reset or a newly added account makes the pool available.
 - Compact cards, sorted by Gemini's five-hour reset, with verification accounts pinned separately.
 - Selecting an account for details works only while the right panel is open. Compact mode removes selection and hover highlights; verification buttons remain usable.
 - Pooled Gemini 5h / 1w bars with vertical markers for projected quota after exhausted windows reset.

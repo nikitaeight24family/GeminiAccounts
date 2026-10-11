@@ -186,6 +186,71 @@ class ChatGPTAuthTests(unittest.TestCase):
         self.assertIsNone(quota_wait(blocked, 'gpt-6-sol', {}))
         self.assertIsNone(quota_wait(blocked, 'claude-haiku-5-5-tokenharbor-free', {}))
 
+    def test_chatgpt_waits_only_for_its_own_pool_and_wakes_on_new_account(self):
+        files = [{'provider': 'codex', 'disabled': False, 'cooldowns': [
+            {'scope': 'credential', 'http_status': 429, 'reason': 'quota',
+             'retry_at': '2099-01-01T00:00:00Z'}]},
+            {'provider': 'antigravity', 'disabled': False, 'cooldowns': []}]
+        self.assertIsNotNone(quota_wait(files, 'gpt-6-sol', {}))
+        self.assertIsNone(quota_wait(files, 'gemini-3-flash', {}))
+        files.append({'provider': 'codex', 'disabled': False, 'cooldowns': []})
+        self.assertIsNone(quota_wait(files, 'gpt-6-sol', {}))
+
+    def test_chatgpt_probe_has_grace_is_persisted_and_skips_expensive_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(data_dir=directory)
+            controller.models = Mock(return_value=['gpt-5.6-luna', 'gpt-6-astra'])
+            controller.request = Mock(return_value={'status_code': 200, 'body': 'event: response.completed\n'})
+            auth = ChatGPTAuth(controller)
+            account = {'name': 'one', 'auth_index': 'one', 'disabled': False}
+            quota = {'windows': [{'label': '5h', 'remaining': 100}, {'label': '1w', 'remaining': 100}]}
+            self.assertIsNone(auth.start_full_quota_window(account, quota, now=1000))
+            self.assertIsNone(auth.start_full_quota_window(account, quota, now=1179))
+            self.assertEqual(auth.start_full_quota_window(account, quota, now=1180), 200)
+            payload = controller.request.call_args.args[2]
+            self.assertEqual(payload['auth_index'], 'one')
+            request = json.loads(payload['data'])
+            self.assertEqual(request['model'], 'gpt-5.6-luna')
+            self.assertEqual(request['max_output_tokens'], 16)
+            restarted = Controller(data_dir=directory)
+            restarted.models = controller.models
+            restarted.request = controller.request
+            self.assertIsNone(ChatGPTAuth(restarted).start_full_quota_window(account, quota, now=1300))
+            self.assertEqual(controller.request.call_count, 1)
+            controller.models.return_value = ['gpt-6-astra']
+            other = {**account, 'name': 'other'}
+            auth.start_full_quota_window(other, quota, now=2000)
+            self.assertIsNone(auth.start_full_quota_window(other, quota, now=2180))
+            self.assertEqual(controller.request.call_count, 1)
+
+    def test_chatgpt_probe_real_usage_cancels_grace_and_weekly_block_skips_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(data_dir=directory)
+            controller.request = Mock()
+            auth = ChatGPTAuth(controller)
+            account = {'name': 'one', 'auth_index': 'one', 'success': 10}
+            quota = {'windows': [{'label': '5h', 'remaining': 100}, {'label': '1w', 'remaining': 100}]}
+            auth.start_full_quota_window(account, quota, now=1000)
+            account['success'] = 11
+            self.assertIsNone(auth.start_full_quota_window(account, quota, now=1180))
+            quota['windows'][1]['remaining'] = 0
+            self.assertIsNone(auth.start_full_quota_window(account, quota, now=20000))
+            controller.request.assert_not_called()
+
+    def test_chatgpt_rotation_ranks_available_nearest_reset_before_exhausted_and_leaves_google_alone(self):
+        import time
+        controller = Mock()
+        now = time.time()
+        def account(name, remaining, reset):
+            return {'name': name, 'provider': 'codex', 'disabled': False, 'quota': {'windows': [
+                {'label': '5h', 'remaining': remaining, 'reset_at': now + reset},
+                {'label': '1w', 'remaining': 100, 'reset_at': now + 600000}]}}
+        accounts = [account('later', 90, 5000), account('empty', 0, 100), account('first', 70, 1000)]
+        controller.request.side_effect = lambda path, *args: {'files': accounts} if path == '/auth-files' else {'strategy': 'fill-first'}
+        self.assertTrue(ChatGPTAuth(controller).apply_reset_priority(accounts))
+        changes = [call.args[2] for call in controller.request.call_args_list if call.args[0] == '/auth-files/fields']
+        self.assertEqual(changes, [{'name': 'first', 'priority': 3}, {'name': 'later', 'priority': 2}, {'name': 'empty', 'priority': 1}])
+
     def test_chatgpt_429_is_returned_without_google_retry_loop(self):
         backend = ThreadingHTTPServer(('127.0.0.1', 0), MockGateway)
         backend.files = []
@@ -206,6 +271,39 @@ class ChatGPTAuthTests(unittest.TestCase):
             self.assertEqual(backend.calls, 1)
             client.close()
         finally:
+            gate.shutdown()
+            gate.server_close()
+            backend.shutdown()
+            backend.server_close()
+
+    def test_chatgpt_429_with_own_cooldown_resumes_when_new_account_is_added(self):
+        class Gateway(MockGateway):
+            def do_POST(self):
+                if self.server.calls == 0:
+                    self.server.files = [{'provider': 'codex', 'name': 'blocked', 'cooldowns': [
+                        {'scope': 'credential', 'reason': 'quota', 'http_status': 429,
+                         'retry_at': '2099-01-01T00:00:00Z'}]}]
+                super().do_POST()
+        backend = ThreadingHTTPServer(('127.0.0.1', 0), Gateway)
+        backend.files, backend.calls, backend.status = [], 0, 429
+        gate = QueueServer(('127.0.0.1', 0), backend.server_address, 'admin', ['client'], {})
+        gate.poll_seconds = .01
+        threading.Thread(target=backend.serve_forever, daemon=True).start()
+        threading.Thread(target=gate.serve_forever, daemon=True).start()
+        client = http.client.HTTPConnection(*gate.server_address, timeout=3)
+        try:
+            client.request('POST', '/v1/messages', json.dumps({'model': 'gpt-6-sol', 'stream': True, 'messages': []}),
+                           {'x-api-key': 'client'})
+            response = client.getresponse()
+            from quota_queue import PING
+            self.assertEqual(response.read(len(PING)), PING)
+            self.assertEqual(backend.calls, 1)
+            backend.status = 200
+            backend.files.append({'provider': 'codex', 'name': 'new', 'cooldowns': []})
+            self.assertIn(b'OK', response.read())
+            self.assertEqual(backend.calls, 2)
+        finally:
+            client.close()
             gate.shutdown()
             gate.server_close()
             backend.shutdown()

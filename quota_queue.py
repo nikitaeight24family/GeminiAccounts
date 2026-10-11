@@ -75,13 +75,13 @@ def quota_wait(files, model, aliases, now=None):
     now = time.time() if now is None else now
     model = strip_context_suffix(model)
     model = aliases.get(model, model)
-    # ChatGPT and TokenHarbor credentials have their own quotas. Google cooldowns
-    # must never hold or retry requests routed to those providers.
-    if not google_routed_model(model):
+    # Scope each wait to the requested provider; never mix Google and GPT pools.
+    if 'tokenharbor' in model:
         return None
+    provider = 'codex' if model.startswith('gpt-') else 'antigravity'
     quota = []
     enabled = [a for a in files if not a.get('disabled') and
-               a.get('provider', a.get('type')) == 'antigravity']
+               a.get('provider', a.get('type')) == provider]
     for account in enabled:
         if account.get('access_issue') in ('verification', 'login', 'denied'):
             continue
@@ -369,13 +369,18 @@ class Handler(BaseHTTPRequestHandler):
                     if response.status in (429, 403, 503):
                         error = response.read()
                         self.trace('provider_rejected', status=response.status, reason=failure_reason(response.status, error) or 'Provider rejected request', **provider_error_metadata(error))
-                        if not google_routed_model(self.server.aliases.get(model, model)):
+                        routed_model = self.server.aliases.get(model, model)
+                        if 'tokenharbor' in routed_model or (response.status != 429 and routed_model.startswith('gpt-')):
                             self.deliver(response, error, started, stream)
                             return
                         try:
                             reset = quota_wait(self.server.accounts(), model, self.server.aliases)
                         except (OSError, ValueError, http.client.HTTPException):
                             reset = None
+                        if routed_model.startswith('gpt-') and not reset:
+                            # An unqualified GPT 429 is not proof of a quota wait.
+                            self.deliver(response, error, started, stream)
+                            return
                         if response.status == 429:
                             rate_retries += 1
                             delay = min(self.server.retry_max_seconds,

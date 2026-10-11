@@ -355,7 +355,7 @@ class App(ctk.CTk):
     def refresh_chatgpt_accounts(self):
         if not self.controller.key or self.closed:
             return
-        self.work(lambda: ChatGPTAuth(self.controller).accounts_with_quotas(), self.set_chatgpt_accounts)
+        self.work(lambda: ChatGPTAuth(self.controller).accounts_with_quotas(maintain_pool=True), self.set_chatgpt_accounts)
 
     def set_chatgpt_accounts(self, accounts):
         self.chatgpt_items = accounts

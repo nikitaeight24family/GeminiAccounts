@@ -4,11 +4,13 @@ import hashlib
 import json
 import urllib.parse
 import uuid
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend import AccountError
+from backend import AccountError, atomic_write
+from routing import rank_accounts
 
 
 def jwt_claims(token):
@@ -82,19 +84,127 @@ class ChatGPTAuth:
     def cancel_login(self, state):
         return self.controller.request('/oauth-session?' + urllib.parse.urlencode({'state': state}), 'DELETE')
 
-    def accounts_with_quotas(self):
+    def accounts_with_quotas(self, maintain_pool=False):
         accounts = self.accounts()
         eligible = [account for account in accounts if not account.get('disabled') and account.get('auth_index')]
         def load(account):
             try:
-                return self.quota(account)
+                quota = self.quota(account)
+                if maintain_pool and self.start_full_quota_window(account, quota) == 200:
+                    quota = self.quota(account)
+                return quota
             except (AccountError, ValueError, TypeError):
                 return {'windows': [], 'error': 'Quota unavailable'}
         if eligible:
             with ThreadPoolExecutor(max_workers=min(4, len(eligible))) as pool:
                 for account, quota in zip(eligible, pool.map(load, eligible)):
                     account['quota'] = quota
+        if maintain_pool and eligible:
+            self.apply_reset_priority(accounts)
         return accounts
+
+    def apply_reset_priority(self, accounts):
+        """Rank the ChatGPT pool independently of Google's manual account mode."""
+        now = datetime.now(timezone.utc)
+        caches = {}
+        for account in accounts:
+            quota = account.get('quota') or {}
+            buckets = []
+            for window in quota.get('windows', []):
+                if window.get('label') not in ('5h', '1w'):
+                    continue
+                try:
+                    reset = datetime.fromtimestamp(window['reset_at'], timezone.utc).isoformat()
+                except (KeyError, ValueError, TypeError, OverflowError, OSError):
+                    reset = None
+                buckets.append({'window': 'weekly' if window['label'] == '1w' else '5h',
+                                'remaining': window['remaining'] / 100, 'reset': reset})
+            caches[account['name']] = {'at': now, 'error': quota.get('error'),
+                'data': {'groups': [{'kind': 'claude', 'buckets': buckets}]}}
+        rows = rank_accounts(accounts, caches, 'claude', now)
+        fresh = {a['name']: a for a in self.accounts() if not a.get('disabled')}
+        if set(fresh) != {row['name'] for row in rows}:
+            return False
+        if self.controller.request('/routing/strategy').get('strategy') != 'fill-first':
+            self.controller.request('/routing/strategy', 'PUT', {'value': 'fill-first'})
+        changes = []
+        try:
+            for row in rows:
+                account = fresh[row['name']]
+                if (account.get('priority') or 0) != row['priority']:
+                    changes.append((account, account.get('priority') or 0))
+                    self.controller.request('/auth-files/fields', 'PATCH', {'name': row['name'], 'priority': row['priority']})
+                    next(a for a in accounts if a['name'] == row['name'])['priority'] = row['priority']
+        except AccountError:
+            for account, priority in reversed(changes):
+                self.controller.request('/auth-files/fields', 'PATCH', {'name': account['name'], 'priority': priority})
+            raise
+        return True
+
+    def start_full_quota_window(self, account, quota, now=None):
+        """Start an unused full 5h window after a three-minute grace period."""
+        if account.get('disabled') or not account.get('auth_index') or account.get('unavailable') or account.get('cooldowns'):
+            return None
+        windows = {w['label']: w for w in quota.get('windows', [])}
+        remaining = windows.get('5h', {}).get('remaining')
+        if remaining is None:
+            return None
+        now = time.time() if now is None else now
+        key = account['name'] + ':codex'
+        c = self.controller
+        with c.quota_start_lock:
+            state = c.quota_starts.setdefault(key, {'armed': True})
+            def save():
+                atomic_write(c.quota_start_path, json.dumps(c.quota_starts).encode())
+            successes = account.get('success') or 0
+            if remaining < 100:
+                state.update(armed=True, failures=0, successes=successes)
+                state.pop('full_since', None)
+                save()
+                return None
+            if remaining != 100 or windows.get('1w', {}).get('remaining', 0) <= 0:
+                return None
+            last = state.get('attempt_at', 0)
+            if state.get('failures', 0) >= 3 and now - last < 18000:
+                return None
+            if last and now - last < 600:
+                return None
+            if not state.get('armed') and state.get('status') == 200 and now - last < 18000:
+                return None
+            if 'full_since' not in state or (last and now - last >= 18000 and state['full_since'] <= last):
+                state.update(full_since=now, successes=successes)
+                save()
+            if successes > state.get('successes', 0):
+                state.update(armed=False, attempt_at=now, status=200, failures=0, successes=successes)
+                state.pop('full_since', None)
+                save()
+                return None
+            if now - state['full_since'] < 180:
+                return None
+            models = c.models(account)
+            preferred = ('gpt-5.6-luna', 'gpt-6-luna')
+            model = next((model for model in preferred if model in models), None)
+            if not model:
+                return None
+            state.update(armed=False, attempt_at=now, status='pending', model=model)
+            save()
+        payload = {'model': model, 'instructions': 'Reply with a single dot.',
+                   'input': [{'role': 'user', 'content': [{'type': 'input_text', 'text': 'Hi'}]}],
+                   'max_output_tokens': 16, 'reasoning': {'effort': 'none'}, 'stream': True, 'store': False}
+        try:
+            result = c.request('/api-call', 'POST', {'auth_index': account['auth_index'], 'method': 'POST',
+                'url': 'https://chatgpt.com/backend-api/codex/responses',
+                'header': {**self._headers(account), 'Accept': 'text/event-stream', 'Originator': 'codex_cli_rs'},
+                'data': json.dumps(payload)})
+            status = result.get('status_code', 0)
+            if status == 200 and 'response.completed' not in (result.get('body') or ''):
+                status = 0
+        except AccountError:
+            status = 0
+        with c.quota_start_lock:
+            state.update(status=status, failures=0 if status == 200 else state.get('failures', 0) + 1)
+            save()
+        return status
 
     def quota(self, account):
         headers = self._headers(account)
