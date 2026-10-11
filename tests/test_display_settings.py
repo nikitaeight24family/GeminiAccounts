@@ -87,6 +87,13 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.quota_cache['google'] = {'data': {'subscription': 'AI Ultra'}}
                     app.selected = 'google'
                     app.draw_account_list()
+                    app.update_total_quota()
+                    self.assertEqual(app.pool_summary_groups['google']['compact'].dot_values, (None, None))
+                    self.assertTrue(app.pool_summary_groups['google']['compact'].winfo_manager())
+                    dots = app.pool_summary_groups['google']['compact'].dot_widgets
+                    first_image = dots[0].cget('image')
+                    app.update_total_quota()
+                    self.assertIs(dots[0].cget('image'), first_image)
                     app.draw_chatgpt_accounts()
                     app.draw_detail()
                     app.toggle_chatgpt_accounts()
@@ -110,9 +117,11 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.update()
                     self.assertEqual(app.service.winfo_rooty(), footer_y)
                     self.assertTrue(app.sidebar_spacer.winfo_manager())
+                    self.assertTrue(app.google_compact.winfo_manager())
                     app.toggle_google_accounts()
                     app.update()
                     self.assertFalse(app.sidebar_spacer.winfo_manager())
+                    self.assertFalse(app.google_compact.winfo_manager())
                     app.rename_entry.delete(0, 'end')
                     app.rename_entry.insert(0, 'Unsaved name')
                     app.service_variables['claude'].set(False)

@@ -23,6 +23,7 @@ from tkinter import font as tkfont
 from backend import Controller, AccountError
 from account_status import account_status, google_account_status
 from brand_icons import ANTIGRAVITY_PNG
+from quota_dots import quota_dot
 from activity import Activity
 from harbor_activity import HarborActivity, key_id, key_label
 from routing import rank_accounts, quota_projection, quota_entry
@@ -152,6 +153,7 @@ class App(ctk.CTk):
         self.google_accounts_header.configure(image=self.provider_icons['antigravity'], compound='left', height=27, anchor='w',
                                               font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         self.google_accounts_header.pack(fill='x', padx=13, pady=(0, 2))
+        self.google_compact = self.make_quota_dots(self.sidebar, ('G 5h', 'G 1w', 'C 5h', 'C 1w'))
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
         self.account_list.pack(fill='both', expand=True, padx=12)
         if self.google_accounts_collapsed:
@@ -447,6 +449,10 @@ class App(ctk.CTk):
             self.chatgpt_header.configure(image=self.provider_icons['openai'], compound='left', height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
             self.chatgpt_header.pack(fill='x', padx=1, pady=(1, 2))
         self.chatgpt_header.configure(text=('▸' if self.chatgpt_collapsed else '▾') + f'  ChatGPT · accounts {len(rows)}')
+        if not hasattr(self, 'chatgpt_compact'):
+            self.chatgpt_compact = self.make_quota_dots(frame, ('5h', '1w'))
+        self.show_quota_dots(self.chatgpt_compact, self.chatgpt_collapsed, after=self.chatgpt_header)
+        self.update_compact_quotas()
         for item in rows:
             name = item['name']
             if name not in widgets:
@@ -732,6 +738,8 @@ class App(ctk.CTk):
         else:
             self.google_accounts_header.pack_forget()
             self.account_list.pack_forget()
+        self.show_quota_dots(self.google_compact, self.google_visible() and self.google_accounts_collapsed,
+                             after=self.google_accounts_header)
         if self.google_accounts_collapsed or not self.google_visible():
             if not self.sidebar_spacer.winfo_manager():
                 self.sidebar_spacer.pack(fill='both', expand=True)
@@ -1498,10 +1506,12 @@ class App(ctk.CTk):
                              lambda: self.toggle_pool_summary(provider))
         header.configure(height=25, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         header.pack(fill='x', pady=(0, 2))
+        compact = self.make_quota_dots(group, ('5h', '1w'))
+        self.show_quota_dots(compact, collapsed, after=header)
         body = ctk.CTkFrame(group, fg_color='transparent')
         if not collapsed:
             body.pack(fill='x', padx=3)
-        self.pool_summary_groups[provider] = {'frame': group, 'header': header, 'body': body,
+        self.pool_summary_groups[provider] = {'frame': group, 'header': header, 'body': body, 'compact': compact,
                                              'title': title, 'collapsed': collapsed}
         return body
 
@@ -1515,6 +1525,66 @@ class App(ctk.CTk):
             group['body'].pack(fill='x', padx=3)
         self.controller.preferences[provider + '-pool-collapsed'] = group['collapsed']
         self.controller.save()
+        self.show_quota_dots(group['compact'], group['collapsed'], after=group['header'])
+        self.update_compact_quotas()
+
+    def make_quota_dots(self, parent, labels):
+        frame = ctk.CTkFrame(parent, fg_color='transparent', height=20)
+        frame.dot_widgets = []
+        for label in labels:
+            widget = ctk.CTkLabel(frame, text=label, height=19, font=('Segoe UI', 9),
+                                  text_color=MUTED, compound='right', padx=2)
+            widget.pack(side='left', padx=(0, 5))
+            frame.dot_widgets.append(widget)
+        return frame
+
+    @staticmethod
+    def show_quota_dots(frame, visible, after):
+        if visible and not frame.winfo_manager():
+            frame.pack(fill='x', padx=3, pady=(0, 2), after=after)
+        elif not visible:
+            frame.pack_forget()
+
+    def set_quota_dots(self, frame, values):
+        signature = tuple(None if value is None else round(value, 3) for value in values)
+        if getattr(frame, 'dot_values', None) == signature:
+            return
+        frame.dot_values = signature
+        for widget, value in zip(frame.dot_widgets, values):
+            widget.configure(image=ctk.CTkImage(light_image=quota_dot(value, True),
+                                              dark_image=quota_dot(value), size=(14, 14)))
+
+    def update_compact_quotas(self):
+        def average(values):
+            values = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and 0 <= v <= 1]
+            return sum(values) / len(values) if values else None
+        google = {('gemini', '5h'): [], ('gemini', 'weekly'): [], ('claude', '5h'): [], ('claude', 'weekly'): []}
+        for account in self.items:
+            if account.get('disabled') or self.quota_cache.get(account['name'], {}).get('error'):
+                continue
+            for group in self.quota_groups(account['name']):
+                for bucket in group['buckets']:
+                    key = (group['kind'], bucket['window'])
+                    if key in google:
+                        google[key].append(bucket.get('remaining'))
+        if hasattr(self, 'google_compact'):
+            self.set_quota_dots(self.google_compact, [average(v) for v in google.values()])
+        openai = []
+        for label in ('5h', '1w'):
+            values = []
+            for account in self.chatgpt_items:
+                quota = account.get('quota') or {}
+                if account.get('disabled') or quota.get('error'):
+                    continue
+                for window in quota.get('windows', []):
+                    if window.get('label') == label and isinstance(window.get('remaining'), (int, float)):
+                        values.append(window['remaining'] / 100)
+            openai.append(average(values))
+        if hasattr(self, 'chatgpt_compact'):
+            self.set_quota_dots(self.chatgpt_compact, openai)
+        for provider, group in getattr(self, 'pool_summary_groups', {}).items():
+            values = [getattr(self, 'total_remaining', None), getattr(self, 'total_weekly_remaining', None)] if provider == 'google' else openai
+            self.set_quota_dots(group['compact'], values)
 
     def update_openai_pool_quota(self):
         accounts = [account for account in self.chatgpt_items if not account.get('disabled')]
@@ -1621,6 +1691,7 @@ class App(ctk.CTk):
             self.forecast_canvas.pack_forget()
             if not self.total_quota_bar.winfo_manager():
                 self.total_quota_bar.pack(fill='x', pady=(1, 0))
+        self.update_compact_quotas()
 
     def schedule_total_forecast(self, weekly=False):
         job_attr = 'weekly_forecast_resize_job' if weekly else 'forecast_resize_job'
