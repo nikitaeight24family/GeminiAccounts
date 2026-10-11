@@ -2,6 +2,7 @@
 import re
 
 RU = {
+    'Quota reserve reached': 'Граница остатка достигнута',
     'Saved accounts': 'Сохранённые аккаунты', 'Connect applications': 'Подключить приложения',
     'Switch accounts while continuing your Claude sessions.': 'Переключайте аккаунты, сохраняя текущие сессии.',
     'Display settings': 'Настройки отображения', 'Visible services': 'Видимые сервисы',
@@ -99,6 +100,7 @@ RU = {
 }
 
 PHRASES = {
+    'Quota reserve': 'Граница остатка', 'Quota reserve reached': 'Граница остатка достигнута',
     'Account priority': 'Приоритет аккаунта', 'Account priority saved.': 'Приоритет аккаунта сохранён.',
     'Higher numbers are used first. Equal priorities follow automatic quota ranking.': 'Чем выше число, тем раньше используется аккаунт. При равных приоритетах выбор определяется лимитами.',
     'Gemini quota exhausted': 'Лимит Gemini исчерпан', 'Claude quota exhausted': 'Лимит Claude исчерпан',

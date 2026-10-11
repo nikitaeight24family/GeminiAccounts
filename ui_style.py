@@ -60,7 +60,11 @@ class UIStyle:
                 sources = getattr(widget, '_ui_sources', {}).copy()
                 selected = widget.get() if isinstance(widget, SelectorMixin) else None
                 if sources:
-                    widget.configure(**sources)
+                    widget._ui_refreshing = True
+                    try:
+                        widget.configure(**sources)
+                    finally:
+                        widget._ui_refreshing = False
                 if selected is not None:
                     widget.set(selected)
             if isinstance(widget, Canvas):
@@ -111,6 +115,8 @@ class WidgetStyleMixin:
             self._ui_sources = {}
         self._ui_sources.update({key: value for key, value in kwargs.items()
                                  if key in COLOR_KEYS or key in ('text', 'placeholder_text', 'values', 'command')})
+        if getattr(self, '_ui_refreshing', False):
+            return super().configure(**self._display(kwargs))
         changed = {}
         for key, value in self._display(kwargs).items():
             if key == 'font':

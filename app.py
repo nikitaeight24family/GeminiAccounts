@@ -22,9 +22,11 @@ from tkinter import filedialog
 from tkinter import font as tkfont
 from backend import Controller, AccountError
 from account_status import account_status, google_account_status
-from brand_icons import ANTIGRAVITY_PNG
+from brand_icons import ANTIGRAVITY_PNG, GITHUB_PNG
 from omni_brand import omni_icon
 from quota_dots import quota_dot
+from quota_slider import QuotaLimitBar
+from quota_limits import quota_floor, blocked_families, sync_quota_limits
 from activity import Activity
 from harbor_activity import HarborActivity, key_id, key_label
 from routing import rank_accounts, quota_projection, quota_entry
@@ -121,6 +123,9 @@ class App(ctk.CTk):
         self.details_toggle = self.button(sidebar_header, '☰', self.toggle_details)
         self.details_toggle.configure(height=26, width=28, font=('Segoe UI', 20), fg_color='transparent')
         self.details_toggle.pack(side='right')
+        self.settings_button = self.button(sidebar_header, '⚙', self.open_display_settings)
+        self.settings_button.configure(height=26, width=28, font=('Segoe UI', 20), fg_color='transparent')
+        self.settings_button.pack(side='right', padx=(0, 4))
         add_row = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         add_row.pack(fill='x', padx=16, pady=(0, 6))
         self.add_button = self.button(add_row, '+ Google', self.add_account, primary=True)
@@ -228,6 +233,13 @@ class App(ctk.CTk):
         body_header.pack(fill='x')
         ctk.CTkLabel(body_header, text='Saved accounts', font=('Segoe UI', 30, 'bold'), text_color=TEXT).pack(side='left')
         self.button(body_header, 'Connect applications', self.connection_settings).pack(side='right')
+        github = Image.open(io.BytesIO(base64.b64decode(GITHUB_PNG))).convert('RGBA')
+        github_light = Image.new('RGBA', github.size, '#243047')
+        github_light.putalpha(github.getchannel('A'))
+        self.github_icon = ctk.CTkImage(light_image=github_light, dark_image=github, size=(22, 22))
+        self.github_release_button = self.button(body_header, '', self.open_github_release)
+        self.github_release_button.configure(image=self.github_icon, width=39, height=39, fg_color='transparent')
+        self.github_release_button.pack(side='right', padx=(0, 10))
         ctk.CTkLabel(self.body, text='Switch accounts while continuing your Claude sessions.', text_color=MUTED, font=('Segoe UI', 14)).pack(anchor='w', pady=(4, 24))
         self.mode_frame = ctk.CTkFrame(self.body, fg_color=CARD, corner_radius=14)
         self.mode_frame.pack(fill='x', pady=(0, 18))
@@ -324,6 +336,40 @@ class App(ctk.CTk):
         return ctk.CTkButton(parent, text=text, command=command, height=39, corner_radius=9,
             fg_color=ACCENT if primary else '#303b50', hover_color='#87a8ff' if primary else '#3d4b64',
             text_color='#101728' if primary else TEXT, font=('Segoe UI', 13, 'bold'))
+
+    def open_github_release(self):
+        from updater import REPO
+        webbrowser.open('https://github.com/' + REPO + '/releases/latest')
+
+    def open_display_settings(self):
+        if getattr(self, 'restore_details_job', None):
+            self.after_cancel(self.restore_details_job)
+            self.restore_details_job = None
+        if self.details_collapsed:
+            self.toggle_details()
+        self.view_switch.set('Display settings')
+        self.change_view('Display settings')
+
+    def make_quota_limit_bar(self, parent, name, group, window, **kwargs):
+        return QuotaLimitBar(parent, floor=quota_floor(self.controller.preferences, name, group, window),
+            command=lambda value: self.set_quota_floor(name, group, window, value), **kwargs)
+
+    def set_quota_floor(self, name, group, window, value):
+        self.controller.preferences.setdefault('quota-floors', {}).setdefault(name, {}).setdefault(group, {})[window] = value
+        self.controller.save()
+        if group == 'openai':
+            self.draw_chatgpt_accounts()
+            self.refresh_chatgpt_accounts()
+        else:
+            self.draw_account_list()
+            if self.selected == name:
+                self.update_detail_quota()
+            account = next((item for item in self.items if item['name'] == name), None)
+            if account:
+                groups = self.quota_groups(name)
+                self.work(lambda: sync_quota_limits(self.controller, account, groups),
+                          lambda _: self.fetch_quota(name))
+        self.notice.configure(text=f'Quota reserve: {value}%', text_color=MUTED)
 
     def label(self, parent, text, size=14, color=TEXT, bold=False):
         obj = ctk.CTkLabel(parent, text=text, font=('Segoe UI', size, 'bold' if bold else 'normal'),
@@ -511,6 +557,8 @@ class App(ctk.CTk):
         row = self.chatgpt_widgets[item['name']]
         row['heading'].configure(text=self.display_name(item, 'OpenAI'))
         status, severity, reason = account_status(item)
+        if severity != 'error' and 'openai' in blocked_families(self.controller.preferences, item['name'], ChatGPTAuth.quota_limit_groups(item.get('quota') or {})):
+            status, severity = 'Quota reserve reached', 'warning'
         row['plan'].configure(text=' ' + self.chatgpt_plan_name(item) + ' ')
         self.update_priority_counter(row['priority'], item)
         color = {'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': GREEN, 'muted': MUTED}[severity]
@@ -526,7 +574,8 @@ class App(ctk.CTk):
                 line.pack(fill='x', padx=8, pady=(0, 2))
                 label = ctk.CTkLabel(line, text='', width=75, height=15, anchor='w', font=('Segoe UI', 10))
                 label.pack(side='left')
-                bar = ctk.CTkProgressBar(line, width=75, height=6)
+                bar = self.make_quota_limit_bar(line, item['name'], 'openai',
+                    'weekly' if key == '1w' else '5h', width=75, height=6)
                 bar.pack(side='left', padx=(1, 5))
                 timer = ctk.CTkLabel(line, text='', height=15, anchor='e', font=('Segoe UI', 10), text_color=MUTED)
                 timer.pack(side='right')
@@ -538,6 +587,7 @@ class App(ctk.CTk):
             label.configure(text=f'{key} · {window["remaining"]:.0f}%', text_color=color)
             bar.configure(progress_color=color)
             bar.set(window['remaining'] / 100)
+            bar.set_floor(quota_floor(self.controller.preferences, item['name'], 'openai', 'weekly' if key == '1w' else '5h'))
         for key, (line, *_) in row['windows'].items():
             if key not in keys:
                 line.pack_forget()
@@ -1351,7 +1401,8 @@ class App(ctk.CTk):
                     reset_label = ctk.CTkLabel(header, text='', height=14, width=68, font=('Segoe UI', 12, 'bold'), text_color=TEXT, anchor='e')
                     reset_label.grid(row=0, column=3, sticky='e', padx=(6, 0))
                     countdown[(group['kind'], bucket['window'])] = reset_label
-                    bar = ctk.CTkProgressBar(header, width=35, height=5, fg_color='#354157', progress_color=self.quota_color(remaining))
+                    bar = self.make_quota_limit_bar(header, name, group['kind'], bucket['window'],
+                        width=35, height=5, fg_color='#354157', progress_color=self.quota_color(remaining))
                     bar.grid(row=0, column=2, sticky='ew', padx=(3, 0))
                     bar.set(remaining if remaining is not None else 0)
                     widgets['quotas'][(group['kind'], bucket['window'])] = (label, bar)
@@ -1844,6 +1895,9 @@ class App(ctk.CTk):
         widgets['plan'].configure(text=' ' + self.google_plan_name(account) + ' ')
         self.update_priority_counter(widgets['priority'], account)
         state, severity, reason = google_account_status(account, self.quota_groups(account['name']))
+        reserved = blocked_families(self.controller.preferences, account['name'], self.quota_groups(account['name']))
+        if reserved and severity != 'error':
+            state, severity = 'Quota reserve reached · ' + ' / '.join(kind.title() for kind in sorted(reserved)), 'warning'
         state_text = state if severity in ('warning', 'error') else f'{state} · {account.get("success") or 0} responses'
         widgets['status'].configure(text=state_text,
             text_color={'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': MUTED, 'muted': MUTED}[severity])
@@ -1873,6 +1927,7 @@ class App(ctk.CTk):
                 label.configure(text=self.sidebar_quota_text(group, bucket), text_color=self.quota_color(remaining))
                 bar.configure(progress_color=self.quota_color(remaining))
                 bar.set(remaining if remaining is not None else 0)
+                bar.set_floor(quota_floor(self.controller.preferences, account['name'], group['kind'], bucket['window']))
         self.update_countdown(account['name'])
 
     @staticmethod
@@ -2247,7 +2302,8 @@ class App(ctk.CTk):
             parent.pack(fill='x')
             for bucket in sorted(group['buckets'], key=lambda b: b['window'] != '5h'):
                 key = (group['kind'], bucket['window'])
-                self.detail_quota_widgets[key] = self.quota_row('Weekly quota' if bucket['window'] == 'weekly' else '5-hour quota', bucket, parent)
+                self.detail_quota_widgets[key] = self.quota_row('Weekly quota' if bucket['window'] == 'weekly' else '5-hour quota', bucket, parent,
+                    limit_key=(account['name'], group['kind'], bucket['window']))
                 self.detail_quota_frames[key] = self.detail_quota_widgets[key][1].master
         self.label(self.detail, 'Bars show remaining quota: full = 100%. Missing percentages are shown as No data.', 12, MUTED)
         actions = ctk.CTkFrame(self.detail, fg_color='transparent')
@@ -2269,7 +2325,7 @@ class App(ctk.CTk):
         self.update_detail_account()
         self.after_idle(lambda: self.detail._parent_canvas.yview_moveto(position))
 
-    def quota_row(self, model, quota, parent=None):
+    def quota_row(self, model, quota, parent=None, limit_key=None):
         row = ctk.CTkFrame(parent if parent is not None else self.detail, fg_color=CARD, corner_radius=9)
         row.pack(fill='x', pady=5)
         header = ctk.CTkFrame(row, fg_color='transparent')
@@ -2279,9 +2335,13 @@ class App(ctk.CTk):
         ctk.CTkLabel(header, text=MODEL_LABELS.get(model, model), text_color=TEXT, font=('Segoe UI', 13), anchor='w').pack(side='left')
         value = ctk.CTkLabel(header, text='', text_color=color, font=('Segoe UI', 12, 'bold'))
         value.pack(side='right')
-        bar = ctk.CTkProgressBar(row, height=9, fg_color='#354157', progress_color=color)
+        bar = (self.make_quota_limit_bar(row, *limit_key, height=9, fg_color='#354157', progress_color=color)
+               if limit_key else ctk.CTkProgressBar(row, height=9, fg_color='#354157', progress_color=color))
+        bar.limit_key = limit_key
         bar.pack(fill='x', padx=14, pady=(0, 7))
         bar.set(remaining if remaining is not None else 0)
+        if getattr(bar, 'limit_key', None):
+            bar.set_floor(quota_floor(self.controller.preferences, *bar.limit_key))
         reset_label = ctk.CTkLabel(row, text='', text_color=MUTED, font=('Segoe UI', 11), anchor='w')
         reset_label.pack(fill='x', padx=14, pady=(0, 8))
         widgets = (value, bar, reset_label)
@@ -2295,6 +2355,8 @@ class App(ctk.CTk):
         value.configure(text='No data' if remaining is None else self.quota_percent(remaining) + ' remaining', text_color=color)
         bar.configure(progress_color=color)
         bar.set(remaining if remaining is not None else 0)
+        if getattr(bar, 'limit_key', None):
+            bar.set_floor(quota_floor(self.controller.preferences, *bar.limit_key))
         reset = (quota or {}).get('reset')
         label = 'Reset time not provided'
         if reset:

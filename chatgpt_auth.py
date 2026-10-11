@@ -143,6 +143,9 @@ class ChatGPTAuth:
         return True
 
     def start_full_quota_window(self, account, quota, now=None):
+        from quota_limits import blocked_families
+        if 'openai' in blocked_families(self.controller.preferences, account['name'], self.quota_limit_groups(quota)):
+            return None
         """Start an unused full 5h window after a three-minute grace period."""
         if account.get('disabled') or not account.get('auth_index') or account.get('unavailable') or account.get('cooldowns'):
             return None
@@ -241,7 +244,15 @@ class ChatGPTAuth:
             except (AccountError, ValueError, TypeError):
                 quota['reset_options'] = []
                 quota['reset_error'] = 'Reset details unavailable'
+        from quota_limits import sync_quota_limits
+        quota['reserved'] = bool(sync_quota_limits(self.controller, account, self.quota_limit_groups(quota)))
         return quota
+
+    @staticmethod
+    def quota_limit_groups(quota):
+        return [{'kind': 'openai', 'buckets': [
+            {'window': 'weekly' if window['label'] == '1w' else '5h', 'remaining': window['remaining'] / 100}
+            for window in quota.get('windows', []) if window.get('label') in ('5h', '1w')]}]
 
     @staticmethod
     def _headers(account):

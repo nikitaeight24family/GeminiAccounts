@@ -587,8 +587,10 @@ class Controller:
         for alias in aliases:
             if alias.get('name') in result:
                 result[alias['alias']] = dict(result[alias['name']])
+        from quota_limits import sync_quota_limits
+        blocked = sync_quota_limits(self, account, groups)
         return {'models': result, 'groups': groups, 'summary_error': summary_error,
-                'subscription': self.subscription(account)}
+                'subscription': self.subscription(account), 'reserved_families': sorted(blocked)}
 
     def start_full_quota_windows(self, account, quotas, now=None, last_used=None):
         """Start a fresh five-hour window once per account/provider, using one output token."""
@@ -598,6 +600,9 @@ class Controller:
         results = []
         for group in quotas.get('groups', []):
             kind = group.get('kind')
+            from quota_limits import blocked_families
+            if kind in blocked_families(self.preferences, account['name'], [group]):
+                continue
             if kind not in ('gemini', 'claude'):
                 continue
             # Never fall back to expensive Pro/Sonnet/Opus for a timer trigger.

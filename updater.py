@@ -8,7 +8,7 @@ from pathlib import Path
 from backend import AccountError
 from runtime import VERSION
 
-REPO = 'nikitaeight24family/GeminiAccounts'
+REPO = 'nikitaeight24family/Omni'
 API = 'https://api.github.com/repos/' + REPO + '/releases/latest'
 
 

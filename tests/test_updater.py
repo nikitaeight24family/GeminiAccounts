@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from backend import AccountError
-from updater import check_update, download_update, version
+from updater import REPO, check_update, download_update, version
 
 
 class UpdaterTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class UpdaterTests(unittest.TestCase):
                 check_update()
 
     def test_omni_installer_is_preferred_with_legacy_update_compatibility(self):
-        prefix = 'https://github.com/nikitaeight24family/GeminiAccounts/releases/download/v9.0.0/'
+        prefix = 'https://github.com/' + REPO + '/releases/download/v9.0.0/'
         assets = [{'name': name, 'digest': 'sha256:' + 'a' * 64, 'browser_download_url': prefix + name}
                   for name in ('GeminiAccounts-Setup.exe', 'Omni-Setup.exe')]
         for selected in ('Omni-Setup.exe', 'GeminiAccounts-Setup.exe'):

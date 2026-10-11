@@ -129,6 +129,16 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertIs(dots[0].cget('image'), first_image)
                     app.draw_chatgpt_accounts()
                     app.draw_detail()
+                    with patch('app.webbrowser.open') as open_release:
+                        app.github_release_button.invoke()
+                        open_release.assert_called_once_with('https://github.com/nikitaeight24family/Omni/releases/latest')
+                    app.toggle_details()
+                    app.settings_button.invoke()
+                    self.assertFalse(app.details_collapsed)
+                    self.assertEqual(app.view_switch.get(), 'Display settings')
+                    self.assertTrue(app.display_settings._parent_frame.winfo_manager())
+                    app.change_view('Account and quotas')
+                    app.view_switch.set('Account and quotas')
                     app.toggle_chatgpt_accounts()
                     app.update()
                     self.assertLessEqual(compact.winfo_y() + compact.winfo_height(), compact.master.winfo_height())
@@ -170,6 +180,20 @@ class DisplaySettingsTests(unittest.TestCase):
                         google_row['priority'].priority_down.invoke()
                     self.assertEqual(app.controller.preferences['account-priorities']['google'], 1)
                     self.assertEqual(google_row['priority'].cget('text'), '1')
+                    from types import SimpleNamespace
+                    bar = google_row['quotas'][('gemini', '5h')][1]
+                    app.update()
+                    self.assertEqual(bar.floor, 0)
+                    event = SimpleNamespace(x_root=bar.winfo_rootx() + bar.winfo_width() * .7)
+                    with patch.object(app, 'work'), patch.object(app, 'fetch_quota'):
+                        bar.press(event)
+                        self.assertEqual(bar.marker.cget('width'), '8')
+                        bar.drag(event)
+                        self.assertEqual(bar.bubble.cget('text'), '70%')
+                        bar.release(event)
+                    self.assertEqual(bar.floor, 70)
+                    self.assertEqual(app.controller.preferences['quota-floors']['google']['gemini']['5h'], 70)
+                    self.assertFalse(bar.bubble.winfo_manager())
                     gpt_priority = app.chatgpt_widgets['gpt']['priority']
                     with patch('app.simpledialog.askinteger', side_effect=AssertionError('Priority must not open a dialog')), patch.object(app, 'refresh_chatgpt_accounts') as refresh:
                         gpt_priority.priority_up.invoke()
@@ -238,6 +262,7 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.set_theme('Dark')
                     self.assertEqual(app.pool_button.cget('text'), 'Use all • automatic routing')
                     self.assertEqual(app.cget('fg_color'), '#10141d')
+                    self.assertEqual(app.account_list._parent_canvas.cget('bg'), '#191f2b')
                     self.assertEqual(app.items[0]['email'], 'private@example.com')
                     self.assertFalse(app.items[0]['disabled'])
                     saved = Controller(proxy_dir=root / 'proxy', data_dir=root / 'data')

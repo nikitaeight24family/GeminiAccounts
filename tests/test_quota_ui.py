@@ -319,7 +319,7 @@ class QuotaUITests(unittest.TestCase):
                         collect(child)
                 collect(app)
                 self.assertIn('Connect applications', buttons)
-                self.assertNotIn('⚙', buttons)
+                self.assertIsNotNone(app.settings_button)
                 self.assertFalse(hasattr(app, 'model_settings'))
             finally:
                 app.closed = True

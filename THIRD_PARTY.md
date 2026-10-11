@@ -9,3 +9,5 @@ Google, Gemini, Antigravity, Claude and Codex are names of third-party products.
 The embedded OpenAI icon comes from Simple Icons 13.21.0 (CC0): https://github.com/simple-icons/simple-icons/blob/13.21.0/icons/openai.svg. Brand marks remain the property of their owners.
 
 The Antigravity account icon is extracted from the official installed Google Antigravity application (https://antigravity.google/). It identifies Google Antigravity accounts. The brand mark remains Google's property.
+
+The GitHub release link uses GitHub's official mark from https://github.com/logos. The brand mark remains GitHub's property.

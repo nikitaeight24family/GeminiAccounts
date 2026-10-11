@@ -2,7 +2,7 @@
 
 ## Standalone release
 
-Download and extract the CLI archive matching your OS and CPU from [Releases](https://github.com/nikitaeight24family/GeminiAccounts/releases/latest).
+Download and extract the CLI archive matching your OS and CPU from [Releases](https://github.com/nikitaeight24family/Omni/releases/latest).
 
 Mac / Linux: `./gemini-accounts`. Windows PowerShell: `.\GeminiAccounts-CLI.exe`.
 
