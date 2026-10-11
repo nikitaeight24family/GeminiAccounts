@@ -4,6 +4,7 @@ from tkinter import messagebox, simpledialog
 from types import SimpleNamespace
 import customtkinter as native_ctk
 from ui_locale import translate
+from ui_render import queue_for
 
 LIGHT = {
     '#101728': '#ffffff', '#87a8ff': '#2757b4', '#3d4b64': '#cbd9ee',
@@ -54,24 +55,37 @@ class UIStyle:
             self.language = language
         if theme is not None:
             self.theme = theme
-        native_ctk.set_appearance_mode(self.theme)
-        def visit(widget):
+        # Snapshot canonical sources before parent color propagation touches children.
+        snapshots = []
+        def collect(widget):
             if isinstance(widget, WidgetStyleMixin):
-                sources = getattr(widget, '_ui_sources', {}).copy()
                 selected = widget.get() if isinstance(widget, SelectorMixin) else None
-                if sources:
-                    widget._ui_refreshing = True
-                    try:
-                        widget.configure(**sources)
-                    finally:
-                        widget._ui_refreshing = False
-                if selected is not None:
-                    widget.set(selected)
-            if isinstance(widget, Canvas):
-                widget.refresh_style()
+                snapshots.append((widget, widget._ui_sources.copy(), selected))
+            elif isinstance(widget, Canvas):
+                snapshots.append((widget, None, None))
             for child in widget.winfo_children():
-                visit(child)
-        visit(self.root)
+                collect(child)
+        collect(self.root)
+        native_ctk.set_appearance_mode(self.theme)
+        keys = set(COLOR_KEYS) if theme is not None else set()
+        if language is not None:
+            keys.update(('text', 'placeholder_text', 'values', 'command'))
+        for widget, sources, selected in snapshots:
+            if sources is None:
+                widget.refresh_style()
+                continue
+            relevant = {key: value for key, value in sources.items() if key in keys}
+            # ScrollableFrame also owns a native parent canvas: refresh its background
+            # even when the public frame reports the same transparent color.
+            widget._ui_refreshing = isinstance(widget, native_ctk.CTkScrollableFrame)
+            try:
+                if relevant:
+                    widget.configure(**relevant)
+            finally:
+                widget._ui_refreshing = False
+                widget._ui_sources = sources
+            if selected is not None and language is not None:
+                widget.set(selected)
 
 
 class WidgetStyleMixin:
@@ -107,6 +121,42 @@ class WidgetStyleMixin:
         if style is not None:
             self._ui_style = style
         super().__init__(*args, **self._display(kwargs))
+        self._ui_render_ready = True
+
+    def _windows_set_titlebar_color(self, color_mode):
+        # DWM can recolor a live title bar. CTk hides/reopens the entire window
+        # here, adding a blocking delay and causing a second progressive paint.
+        import sys
+        if not sys.platform.startswith('win') or getattr(self, '_deactivate_windows_window_header_manipulation', False):
+            return
+        import ctypes
+        from ctypes import wintypes
+        user = ctypes.windll.user32
+        user.GetParent.argtypes = [wintypes.HWND]
+        user.GetParent.restype = wintypes.HWND
+        hwnd = user.GetParent(self.winfo_id())
+        value = ctypes.c_int(color_mode.lower() == 'dark')
+        dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
+        dwm.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+        for attribute in (20, 19):
+            if dwm(hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)) == 0:
+                break
+        user.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
+        user.RedrawWindow(hwnd, None, None, 0x401)  # frame + invalidate; event loop presents it
+
+    def destroy(self):
+        renderer = vars(self).get('_render_queue')
+        if renderer is not None:
+            renderer.close()
+        return super().destroy()
+
+    def _draw(self, no_color_updates=False):
+        if not getattr(self, '_ui_render_ready', False):
+            return super()._draw(no_color_updates)
+        queue_for(self).request(self, no_color_updates)
+
+    def _render_now(self, no_color_updates=False):
+        return super()._draw(no_color_updates)
 
     def configure(self, **kwargs):
         if 'localize' in kwargs:

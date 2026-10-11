@@ -187,7 +187,11 @@ class DisplaySettingsTests(unittest.TestCase):
                     event = SimpleNamespace(x_root=bar.winfo_rootx() + bar.winfo_width() * .7)
                     with patch.object(app, 'work'), patch.object(app, 'fetch_quota'):
                         bar.press(event)
-                        self.assertEqual(bar.marker.cget('width'), '8')
+                        self.assertEqual(bar.marker.cget('width'), 10)
+                        self.assertEqual(bar.marker.cget('height'), 16)
+                        app.update()
+                        self.assertTrue(bar.bubble.winfo_viewable())
+                        self.assertLessEqual(bar.bubble.winfo_rooty() + bar.bubble.winfo_height(), bar.winfo_rooty())
                         bar.drag(event)
                         self.assertEqual(bar.bubble.cget('text'), '70%')
                         bar.release(event)
