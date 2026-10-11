@@ -90,6 +90,9 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.update_total_quota()
                     self.assertEqual(app.pool_summary_groups['google']['compact'].dot_values, (None, None))
                     self.assertTrue(app.pool_summary_groups['google']['compact'].winfo_manager())
+                    compact = app.pool_summary_groups['google']['compact']
+                    self.assertIs(compact.master, app.pool_summary_groups['google']['header'])
+                    self.assertIn('1pcs', app.google_accounts_header.cget('text'))
                     dots = app.pool_summary_groups['google']['compact'].dot_widgets
                     first_image = dots[0].cget('image')
                     app.update_total_quota()
@@ -98,6 +101,7 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.draw_detail()
                     app.toggle_chatgpt_accounts()
                     app.update()
+                    self.assertLessEqual(compact.winfo_y() + compact.winfo_height(), compact.master.winfo_height())
                     google_card = app.account_widgets['google']['card']
                     gpt_card = app.chatgpt_widgets['gpt']['card']
                     claude_row = app.account_widgets['google']['quota_rows'][('claude', 'weekly')]
@@ -111,6 +115,10 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertGreaterEqual(google_row['plan'].winfo_rooty(),
                                             google_row['button'].winfo_rooty() + google_row['button'].winfo_height())
                     self.assertIn('Pro', app.chatgpt_widgets['gpt']['plan'].cget('text'))
+                    with patch('app.simpledialog.askinteger', return_value=8), patch.object(app, 'queue_policy'):
+                        app.edit_account_priority(app.items[0], 'google')
+                    self.assertEqual(app.controller.preferences['account-priorities']['google'], 8)
+                    self.assertEqual(google_row['priority'].cget('text'), '↑8')
                     self.assertIs(app.sidebar_footer.pack_slaves()[-1], app.tokenharbor_accounts)
                     footer_y = app.service.winfo_rooty()
                     app.toggle_google_accounts()

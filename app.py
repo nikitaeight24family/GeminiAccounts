@@ -153,7 +153,7 @@ class App(ctk.CTk):
         self.google_accounts_header.configure(image=self.provider_icons['antigravity'], compound='left', height=27, anchor='w',
                                               font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         self.google_accounts_header.pack(fill='x', padx=13, pady=(0, 2))
-        self.google_compact = self.make_quota_dots(self.sidebar, ('G 5h', 'G 1w', 'C 5h', 'C 1w'))
+        self.google_compact = self.make_quota_dots(self.google_accounts_header, ('G 5h', 'G 1w', 'C 5h', 'C 1w'))
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
         self.account_list.pack(fill='both', expand=True, padx=12)
         if self.google_accounts_collapsed:
@@ -448,9 +448,9 @@ class App(ctk.CTk):
             self.chatgpt_header = self.button(frame, '', self.toggle_chatgpt_accounts)
             self.chatgpt_header.configure(image=self.provider_icons['openai'], compound='left', height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
             self.chatgpt_header.pack(fill='x', padx=1, pady=(1, 2))
-        self.chatgpt_header.configure(text=('▸' if self.chatgpt_collapsed else '▾') + f'  ChatGPT · accounts {len(rows)}')
+        self.chatgpt_header.configure(text=('▸' if self.chatgpt_collapsed else '▾') + f'  ChatGPT · {len(rows)}pcs')
         if not hasattr(self, 'chatgpt_compact'):
-            self.chatgpt_compact = self.make_quota_dots(frame, ('5h', '1w'))
+            self.chatgpt_compact = self.make_quota_dots(self.chatgpt_header, ('5h', '1w'))
         self.show_quota_dots(self.chatgpt_compact, self.chatgpt_collapsed, after=self.chatgpt_header)
         self.update_compact_quotas()
         for item in rows:
@@ -469,6 +469,9 @@ class App(ctk.CTk):
                 model.grid(row=0, column=1, sticky='e', padx=(4, 0))
                 status_row = ctk.CTkFrame(card, fg_color='transparent')
                 status_row.pack(fill='x', padx=8, pady=(0, 3))
+                priority = self.button(status_row, '', lambda account=item: self.edit_account_priority(account, 'openai'))
+                priority.configure(width=34, height=17, font=('Segoe UI', 9), fg_color='transparent')
+                priority.pack(side='right')
                 plan = ctk.CTkLabel(status_row, text='', height=17, width=1, corner_radius=5,
                                     fg_color='#264268', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
                 plan.pack(side='left', padx=(0, 5))
@@ -477,7 +480,7 @@ class App(ctk.CTk):
                 windows = ctk.CTkFrame(card, fg_color='transparent')
                 # Leave the card border visible beside the quota rows.
                 windows.pack(fill='x', padx=4)
-                widgets[name] = {'card': card, 'heading': heading, 'model': model, 'status': status, 'plan': plan,
+                widgets[name] = {'card': card, 'heading': heading, 'model': model, 'status': status, 'plan': plan, 'priority': priority,
                     'windows_frame': windows, 'windows': {}, 'credits': label(15),
                     'reset_details': label(16), 'reset_button': self.button(card, 'Use usage reset', lambda: None),
                     'error': label(15)}
@@ -507,6 +510,7 @@ class App(ctk.CTk):
         row['heading'].configure(text=self.display_name(item, 'OpenAI'))
         status, severity, reason = account_status(item)
         row['plan'].configure(text=' ' + self.chatgpt_plan_name(item) + ' ')
+        row['priority'].configure(text='↑' + str(self.controller.preferences.get('account-priorities', {}).get(item['name'], 0)))
         color = {'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': GREEN, 'muted': MUTED}[severity]
         row['status'].configure(text=f'{status} · {item.get("success") or 0} responses', text_color=color,
                                 wraplength=175, justify='left')
@@ -998,7 +1002,8 @@ class App(ctk.CTk):
             self.policy_label.configure(text='One account is selected manually. Automatic ranking is paused.')
             return
         group = self.target_policy_group()
-        rows = rank_accounts(self.items, self.quota_cache, group)
+        rows = rank_accounts(self.items, self.quota_cache, group,
+                             priorities=self.controller.preferences.get('account-priorities', {}))
         title = 'Gemini' if group == 'gemini' else 'Claude / GPT'
         if not rows or all(r['tier'] == 2 for r in rows):
             self.policy_label.configure(text=f'Account ranking for {title}: waiting for fresh Google quota data.')
@@ -1130,7 +1135,7 @@ class App(ctk.CTk):
         self.tokenharbor_rows = {}
         self.tokenharbor_name_widgets = {}
         header = self.button(frame, ('▸' if self.tokenharbor_collapsed else '▾') +
-            f'  TokenHarbor · keys {len(keys)}', self.toggle_tokenharbor_accounts)
+            f'  TokenHarbor · {len(keys)}pcs', self.toggle_tokenharbor_accounts)
         header.configure(height=28, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         header.pack(fill='x', padx=1, pady=(2, 3))
         if self.tokenharbor_collapsed:
@@ -1214,7 +1219,8 @@ class App(ctk.CTk):
 
     def draw_account_list(self):
         self.google_accounts_header.configure(text=('▸' if self.google_accounts_collapsed else '▾') +
-                                             f'  Google Gemini · accounts {len(self.items)}')
+                                             f'  Google Gemini · {len(self.items)}pcs')
+        self.google_accounts_header.configure(font=('Segoe UI', 10, 'bold'))
         self.apply_service_visibility()
         self.draw_tokenharbor_accounts()
         self.update_total_quota()
@@ -1294,6 +1300,9 @@ class App(ctk.CTk):
             button.pack(side='left', fill='x', expand=True)
             status_row = ctk.CTkFrame(card, fg_color='transparent')
             status_row.pack(fill='x', padx=8, pady=0)
+            priority = self.button(status_row, '', lambda account=account: self.edit_account_priority(account, 'google'))
+            priority.configure(width=34, height=16, font=('Segoe UI', 9), fg_color='transparent')
+            priority.pack(side='right')
             plan = ctk.CTkLabel(status_row, text='', height=16, width=1, corner_radius=5,
                                 fg_color='#183b32', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
             plan.pack(side='left', padx=(0, 5))
@@ -1318,7 +1327,7 @@ class App(ctk.CTk):
                 verification_frame.pack(fill='x', padx=5, pady=(0, 3))
             quota_frame = ctk.CTkFrame(card, fg_color='transparent')
             quota_frame.pack(fill='x', padx=5, pady=0)
-            widgets = {'card': card, 'button': button, 'plan': plan, 'status': state, 'quota_icons': {}, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
+            widgets = {'card': card, 'button': button, 'plan': plan, 'status': state, 'priority': priority, 'quota_icons': {}, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
                        'active_families': (), 'quota_rows': {}}
             self.account_widgets[account['name']] = widgets
             groups = self.quota_groups(account['name'])
@@ -1351,6 +1360,26 @@ class App(ctk.CTk):
     def account_heading(self, account):
         marker = '!' if account.get('access_issue') else 'Ⅱ' if account.get('disabled') else ''
         return (marker + '  ' if marker else '') + self.display_name(account)
+
+    def edit_account_priority(self, account, provider):
+        if self.busy:
+            return
+        priorities = self.controller.preferences.get('account-priorities', {})
+        value = simpledialog.askinteger('Account priority',
+            'Higher numbers are used first. Equal priorities follow automatic quota ranking.',
+            initialvalue=priorities.get(account['name'], 0), minvalue=0, maxvalue=999, parent=self)
+        if value is None:
+            return
+        self.controller.preferences.setdefault('account-priorities', {})[account['name']] = value
+        self.controller.save()
+        if provider == 'openai':
+            self.draw_chatgpt_accounts()
+            self.refresh_chatgpt_accounts()
+        else:
+            self.update_account_row(account)
+            self.policy_rows = []
+            self.queue_policy()
+        self.notice.configure(text='Account priority saved.', text_color=GREEN)
 
     def account_weekly_depleted(self, name):
         gemini = next((group for group in self.quota_groups(name) if group['kind'] == 'gemini'), {})
@@ -1506,7 +1535,7 @@ class App(ctk.CTk):
                              lambda: self.toggle_pool_summary(provider))
         header.configure(height=25, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         header.pack(fill='x', pady=(0, 2))
-        compact = self.make_quota_dots(group, ('5h', '1w'))
+        compact = self.make_quota_dots(header, ('5h', '1w'))
         self.show_quota_dots(compact, collapsed, after=header)
         body = ctk.CTkFrame(group, fg_color='transparent')
         if not collapsed:
@@ -1529,21 +1558,22 @@ class App(ctk.CTk):
         self.update_compact_quotas()
 
     def make_quota_dots(self, parent, labels):
-        frame = ctk.CTkFrame(parent, fg_color='transparent', height=20)
+        frame = ctk.CTkFrame(parent, fg_color='#303b50', width=len(labels) * 17, height=18, corner_radius=0)
         frame.dot_widgets = []
         for label in labels:
-            widget = ctk.CTkLabel(frame, text=label, height=19, font=('Segoe UI', 9),
-                                  text_color=MUTED, compound='right', padx=2)
-            widget.pack(side='left', padx=(0, 5))
+            widget = ctk.CTkLabel(frame, text='', width=14, height=18, padx=0)
+            widget.dot_label = label
+            widget.pack(side='left', padx=(0, 3))
+            widget.bind('<Button-1>', lambda event, button=parent: button.invoke())
             frame.dot_widgets.append(widget)
         return frame
 
     @staticmethod
     def show_quota_dots(frame, visible, after):
         if visible and not frame.winfo_manager():
-            frame.pack(fill='x', padx=3, pady=(0, 2), after=after)
+            frame.place(relx=1, rely=.5, x=-5, anchor='e')
         elif not visible:
-            frame.pack_forget()
+            frame.place_forget()
 
     def set_quota_dots(self, frame, values):
         signature = tuple(None if value is None else round(value, 3) for value in values)
@@ -1784,6 +1814,7 @@ class App(ctk.CTk):
         self.update_selection_style(account, widgets)
         widgets['button'].configure(text=self.account_heading(account))
         widgets['plan'].configure(text=' ' + self.google_plan_name(account) + ' ')
+        widgets['priority'].configure(text='↑' + str(self.controller.preferences.get('account-priorities', {}).get(account['name'], 0)))
         state, severity, reason = google_account_status(account, self.quota_groups(account['name']))
         state_text = state if severity in ('warning', 'error') else f'{state} · {account.get("success") or 0} responses'
         widgets['status'].configure(text=state_text,

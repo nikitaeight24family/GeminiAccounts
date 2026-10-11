@@ -257,6 +257,11 @@ class ChatGPTAuthTests(unittest.TestCase):
         self.assertTrue(ChatGPTAuth(controller).apply_reset_priority(accounts))
         changes = [call.args[2] for call in controller.request.call_args_list if call.args[0] == '/auth-files/fields']
         self.assertEqual(changes, [{'name': 'first', 'priority': 3}, {'name': 'later', 'priority': 2}, {'name': 'empty', 'priority': 1}])
+        controller.preferences = {'account-priorities': {'later': 9, 'empty': 999}}
+        controller.request.reset_mock()
+        self.assertTrue(ChatGPTAuth(controller).apply_reset_priority(accounts))
+        changes = [call.args[2] for call in controller.request.call_args_list if call.args[0] == '/auth-files/fields']
+        self.assertEqual([change['name'] for change in changes], ['later', 'first'])
 
     def test_chatgpt_429_is_returned_without_google_retry_loop(self):
         backend = ThreadingHTTPServer(('127.0.0.1', 0), MockGateway)

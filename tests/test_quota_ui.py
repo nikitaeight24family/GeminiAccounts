@@ -335,7 +335,7 @@ class QuotaUITests(unittest.TestCase):
                 app.draw_tokenharbor_accounts()
                 collapsed = app.tokenharbor_accounts.winfo_children()
                 self.assertEqual(len(collapsed), 1)
-                self.assertIn('keys 1', collapsed[0].cget('text'))
+                self.assertIn('1pcs', collapsed[0].cget('text'))
                 app.draw_tokenharbor_accounts()
                 self.assertIs(collapsed[0], app.tokenharbor_accounts.winfo_children()[0])
                 app.toggle_tokenharbor_accounts()

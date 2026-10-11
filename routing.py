@@ -68,7 +68,7 @@ def quota_projection(entries, now=None, exhausted_only=True):
     return result
 
 
-def rank_accounts(accounts, caches, group, now=None):
+def rank_accounts(accounts, caches, group, now=None, priorities=None):
     now = now or datetime.now(timezone.utc)
     rows = []
     for account in accounts:
@@ -116,7 +116,11 @@ def rank_accounts(accounts, caches, group, now=None):
         rows.append({'name': account['name'], 'reset': reset.isoformat() if reset else None,
                      'tier': tier, 'reason': reason, 'remaining': min((b['remaining'] for b in known), default=None),
                      '_sort': (tier, reset.timestamp() if reset else float('inf'), min((b['remaining'] for b in known), default=1), account['name'])})
-    rows.sort(key=lambda r: r['_sort'])
+    priorities = priorities if isinstance(priorities, dict) else {}
+    priorities = {name: value for name, value in priorities.items()
+                  if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 999}
+    rows.sort(key=lambda r: (0 if r['tier'] <= 1 else r['tier'],
+                            -priorities.get(r['name'], 0), *r['_sort']))
     for index, row in enumerate(rows):
         row.pop('_sort')
         row['priority'] = len(rows) - index

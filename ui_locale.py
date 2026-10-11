@@ -99,6 +99,8 @@ RU = {
 }
 
 PHRASES = {
+    'Account priority': 'Приоритет аккаунта', 'Account priority saved.': 'Приоритет аккаунта сохранён.',
+    'Higher numbers are used first. Equal priorities follow automatic quota ranking.': 'Чем выше число, тем раньше используется аккаунт. При равных приоритетах выбор определяется лимитами.',
     'Gemini quota exhausted': 'Лимит Gemini исчерпан', 'Claude quota exhausted': 'Лимит Claude исчерпан',
     'Model quota restricted': 'Ограничен лимит модели',
     'Limit exhausted': 'Лимит исчерпан', 'Account blocked': 'Аккаунт заблокирован',

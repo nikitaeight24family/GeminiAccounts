@@ -121,7 +121,8 @@ class ChatGPTAuth:
                                 'remaining': window['remaining'] / 100, 'reset': reset})
             caches[account['name']] = {'at': now, 'error': quota.get('error'),
                 'data': {'groups': [{'kind': 'claude', 'buckets': buckets}]}}
-        rows = rank_accounts(accounts, caches, 'claude', now)
+        rows = rank_accounts(accounts, caches, 'claude', now,
+                             priorities=self.controller.preferences.get('account-priorities', {}))
         fresh = {a['name']: a for a in self.accounts() if not a.get('disabled')}
         if set(fresh) != {row['name'] for row in rows}:
             return False

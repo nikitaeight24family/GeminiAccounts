@@ -20,6 +20,10 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(rank_accounts(accounts, caches, 'gemini', now)[0]['name'], 'b')
         self.assertEqual(rank_accounts(accounts, caches, 'claude', now)[0]['name'], 'a')
         self.assertEqual(rank_accounts(accounts, caches, 'gemini', now)[0]['reset'], (now + timedelta(hours=1)).isoformat())
+        self.assertEqual(rank_accounts(accounts, caches, 'gemini', now, priorities={'a': 8, 'b': 2})[0]['name'], 'a')
+        self.assertEqual(rank_accounts(accounts, caches, 'gemini', now, priorities={'a': 8, 'b': 8})[0]['name'], 'b')
+        caches['a']['data']['groups'][0]['buckets'][0]['remaining'] = 0
+        self.assertEqual(rank_accounts(accounts, caches, 'gemini', now, priorities={'a': 999})[0]['name'], 'b')
 
     def test_weekly_projection_restores_used_portions_at_cumulative_percentages(self):
         now = datetime(2026, 10, 7, tzinfo=timezone.utc)
