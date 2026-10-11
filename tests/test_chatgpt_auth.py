@@ -7,12 +7,13 @@ import threading
 import unittest
 from pathlib import Path
 from http.server import ThreadingHTTPServer
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend import AccountError
 from backend import Controller
 from chatgpt_auth import ChatGPTAuth, gateway_credential
+from isolated_browser import open_isolated
 from quota_queue import QueueServer, quota_wait
 from tests.test_quota_queue import Mock as MockGateway
 
@@ -98,6 +99,30 @@ class ChatGPTAuthTests(unittest.TestCase):
                 return {'models': [{'id': 'gpt-6-sol'}, {'id': 'gemini-3-flash'}]}
             controller.request = request
             self.assertEqual(controller.chatgpt_model_choices(), ['gpt-6-sol'])
+
+    def test_signin_uses_gateway_oauth_and_rejects_other_hosts(self):
+        controller = Mock()
+        controller.request.return_value = {
+            'url': 'https://auth.openai.com/oauth/authorize?state=one', 'state': 'one'}
+        auth = ChatGPTAuth(controller)
+        self.assertEqual(auth.begin_login()[1], 'one')
+        controller.request.assert_called_with('/codex-auth-url?is_webui=true')
+        controller.request.return_value = {
+            'url': 'https://auth.openai.com.evil.example/oauth/authorize', 'state': 'two'}
+        with self.assertRaises(AccountError):
+            auth.begin_login()
+
+    def test_each_browser_signin_gets_a_separate_private_profile(self):
+        with patch('isolated_browser.find_browser', return_value=(Path('msedge.exe'), 'edge')):
+            with patch('isolated_browser.subprocess.Popen') as popen:
+                open_isolated('https://auth.openai.com/oauth/authorize?state=one')
+                open_isolated('https://auth.openai.com/oauth/authorize?state=two')
+        first = popen.call_args_list[0].args[0]
+        second = popen.call_args_list[1].args[0]
+        self.assertIn('--inprivate', first)
+        self.assertNotEqual(next(v for v in first if v.startswith('--user-data-dir=')),
+                            next(v for v in second if v.startswith('--user-data-dir=')))
+        self.assertTrue(first[-1].startswith('https://auth.openai.com/'))
 
     def test_google_quota_does_not_hold_chatgpt_models(self):
         blocked = [{'provider': 'antigravity', 'disabled': False,

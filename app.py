@@ -24,6 +24,7 @@ from routing import rank_accounts, quota_projection, quota_entry
 from integrations import Integrations
 from tokenharbor import TokenHarbor
 from chatgpt_auth import ChatGPTAuth
+from isolated_browser import open_isolated
 from model_names import model_name
 
 BG = '#10141d'
@@ -72,6 +73,7 @@ class App(ctk.CTk):
         self.drawn_models = None
         self.busy = False
         self.pending_login = None
+        self.pending_chatgpt_login = None
         self.model_route_error = None
         self.login_url = None
         self.activity = Activity(self.controller.data_dir / 'activity.json')
@@ -272,6 +274,7 @@ class App(ctk.CTk):
         if mutation:
             self.busy = True
             self.add_button.configure(state='disabled')
+            self.add_chatgpt_button.configure(state='disabled')
             self.pool_button.configure(state='disabled')
         def run():
             try:
@@ -287,7 +290,9 @@ class App(ctk.CTk):
             done, result, error, mutation = self.mailbox.get()
             if mutation:
                 self.busy = False
-                self.add_button.configure(state='disabled' if self.pending_login else 'normal')
+                login_pending = self.pending_login or self.pending_chatgpt_login
+                self.add_button.configure(state='disabled' if login_pending else 'normal')
+                self.add_chatgpt_button.configure(state='disabled' if login_pending else 'normal')
                 self.pool_button.configure(state='normal')
             if error:
                 self.notice.configure(text=error, text_color='#ffbd93')
@@ -424,8 +429,25 @@ class App(ctk.CTk):
         self.draw_chatgpt_accounts()
 
     def add_chatgpt_account(self):
-        if self.busy:
+        if self.busy or self.pending_login or self.pending_chatgpt_login:
             return
+        window = ctk.CTkToplevel(self)
+        window.title('Add ChatGPT account')
+        window.geometry('440x235')
+        window.resizable(False, False)
+        window.configure(fg_color=PANEL)
+        window.transient(self)
+        ctk.CTkLabel(window, text='Add ChatGPT account', font=('Segoe UI', 21, 'bold'),
+                     text_color=TEXT).pack(pady=(22, 8))
+        ctk.CTkLabel(window, text='Each sign-in uses a separate browser profile.\nEnter your password and 2FA code on the official ChatGPT page.',
+                     font=('Segoe UI', 12), text_color=MUTED, justify='center').pack(pady=(0, 13))
+        def choose(action):
+            window.destroy()
+            action()
+        self.button(window, 'Sign in with ChatGPT', lambda: choose(self.sign_in_chatgpt), primary=True).pack(fill='x', padx=35, pady=(0, 7))
+        self.button(window, 'Import auth.json', lambda: choose(self.import_chatgpt_file)).pack(fill='x', padx=35)
+
+    def import_chatgpt_file(self):
         path = filedialog.askopenfilename(parent=self, title='Choose ChatGPT auth.json',
                                           filetypes=[('JSON files', '*.json')])
         if not path:
@@ -440,6 +462,86 @@ class App(ctk.CTk):
                                   text_color=GREEN)
             self.refresh_chatgpt_accounts()
         self.work(lambda: ChatGPTAuth(self.controller).import_file(path), done, mutation=True)
+
+    def sign_in_chatgpt(self):
+        if self.busy or self.pending_login or self.pending_chatgpt_login:
+            return
+        self.work(lambda: ChatGPTAuth(self.controller).begin_login(), self.chatgpt_login_started, mutation=True)
+
+    def chatgpt_login_started(self, result):
+        url, state = result
+        self.pending_chatgpt_login = (state, time.monotonic())
+        self.add_button.configure(state='disabled')
+        self.add_chatgpt_button.configure(state='disabled')
+        try:
+            open_isolated(url)
+        except AccountError as error:
+            self.pending_chatgpt_login = None
+            self.add_button.configure(state='normal')
+            self.add_chatgpt_button.configure(state='normal')
+            self.notice.configure(text=str(error), text_color='#ffbd93')
+            self.work(lambda: ChatGPTAuth(self.controller).cancel_login(state), lambda _: None)
+            return
+        self.notice.configure(text='Complete ChatGPT sign-in in the separate browser window. The account will appear here automatically.',
+                              text_color=ACCENT)
+        self.chatgpt_login_window = ctk.CTkToplevel(self)
+        self.chatgpt_login_window.title('ChatGPT sign-in')
+        self.chatgpt_login_window.geometry('470x235')
+        self.chatgpt_login_window.resizable(False, False)
+        self.chatgpt_login_window.configure(fg_color=PANEL)
+        self.chatgpt_login_window.transient(self)
+        ctk.CTkLabel(self.chatgpt_login_window, text='Complete ChatGPT sign-in',
+                     font=('Segoe UI', 21, 'bold'), text_color=TEXT).pack(pady=(25, 10))
+        ctk.CTkLabel(self.chatgpt_login_window,
+                     text='Enter your email, password and 2FA code in the separate browser.\nThis app never receives your password or 2FA code.',
+                     font=('Segoe UI', 12), text_color=MUTED, justify='center').pack(pady=(0, 12))
+        self.button(self.chatgpt_login_window, 'Cancel sign-in', self.cancel_chatgpt_login).pack(pady=(0, 8))
+        ctk.CTkLabel(self.chatgpt_login_window, text='Waiting for sign-in…',
+                     text_color=MUTED, font=('Segoe UI', 11)).pack()
+        self.after(1800, self.poll_chatgpt_login)
+
+    def poll_chatgpt_login(self):
+        if not self.pending_chatgpt_login or self.closed:
+            return
+        state, started = self.pending_chatgpt_login
+        if time.monotonic() - started > 900:
+            self.finish_chatgpt_login('ChatGPT sign-in timed out. Try adding the account again.', False)
+            return
+        def poll():
+            try:
+                return ChatGPTAuth(self.controller).login_status(state)
+            except AccountError:
+                return {'status': 'wait'}
+        def done(result):
+            if not self.pending_chatgpt_login or self.pending_chatgpt_login[0] != state:
+                return
+            if result.get('status') == 'ok':
+                self.finish_chatgpt_login('ChatGPT account added. Reconnect applications to show its GPT models.', True)
+            elif result.get('status') == 'error':
+                self.finish_chatgpt_login('ChatGPT sign-in did not finish. Try again.', False)
+            else:
+                self.after(1800, self.poll_chatgpt_login)
+        self.work(poll, done)
+
+    def cancel_chatgpt_login(self):
+        if not self.pending_chatgpt_login:
+            return
+        state = self.pending_chatgpt_login[0]
+        self.finish_chatgpt_login('ChatGPT sign-in cancelled.', False)
+        self.work(lambda: ChatGPTAuth(self.controller).cancel_login(state), lambda _: None)
+
+    def finish_chatgpt_login(self, message, success):
+        self.pending_chatgpt_login = None
+        self.add_button.configure(state='normal')
+        self.add_chatgpt_button.configure(state='normal')
+        if hasattr(self, 'chatgpt_login_window') and self.chatgpt_login_window.winfo_exists():
+            self.chatgpt_login_window.destroy()
+        self.notice.configure(text=message, text_color=GREEN if success else '#ffbd93')
+        if success:
+            self.chatgpt_collapsed = False
+            self.controller.preferences['chatgpt-collapsed'] = False
+            self.controller.save()
+            self.refresh_chatgpt_accounts()
 
     def change_view(self, value):
         self.detail.pack_forget()
@@ -483,7 +585,7 @@ class App(ctk.CTk):
             except OSError:
                 return False
         def done(is_idle):
-            if is_idle and not self.busy and not self.pending_login:
+            if is_idle and not self.busy and not self.pending_login and not self.pending_chatgpt_login:
                 from updater import launch_update
                 launch_update(self.controller, self.pending_update)
                 self.update_button.configure(text='Installing and restarting…')
@@ -1969,7 +2071,7 @@ class App(ctk.CTk):
             self.notice.configure(text='Could not save the account label.', text_color='#ffbd93')
 
     def add_account(self):
-        if self.busy or self.pending_login:
+        if self.busy or self.pending_login or self.pending_chatgpt_login:
             return
         self.work(self.controller.begin_login, self.login_started, mutation=True)
 
@@ -1977,6 +2079,7 @@ class App(ctk.CTk):
         self.login_url, state = result
         self.pending_login = (state, time.monotonic())
         self.add_button.configure(state='disabled')
+        self.add_chatgpt_button.configure(state='disabled')
         self.notice.configure(text='Choose your Google account in the browser and complete sign-in. It will appear here automatically.', text_color=ACCENT)
         self.login_window = ctk.CTkToplevel(self)
         self.login_window.title('Add account')
@@ -2016,6 +2119,7 @@ class App(ctk.CTk):
         self.pending_login = None
         self.login_url = None
         self.add_button.configure(state='normal')
+        self.add_chatgpt_button.configure(state='normal')
         if hasattr(self, 'login_window') and self.login_window.winfo_exists():
             self.login_window.destroy()
         self.notice.configure(text=message, text_color=GREEN if success else '#ffbd93')

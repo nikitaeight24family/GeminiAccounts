@@ -67,6 +67,20 @@ class ChatGPTAuth:
         return [item for item in self.controller.request('/auth-files').get('files', [])
                 if item.get('provider', item.get('type')) == 'codex']
 
+    def begin_login(self):
+        result = self.controller.request('/codex-auth-url?is_webui=true')
+        url, state = result.get('url', ''), result.get('state', '')
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != 'https' or parts.hostname != 'auth.openai.com' or not state:
+            raise AccountError('The gateway did not provide a safe ChatGPT sign-in page.')
+        return url, state
+
+    def login_status(self, state):
+        return self.controller.request('/get-auth-status?' + urllib.parse.urlencode({'state': state}))
+
+    def cancel_login(self, state):
+        return self.controller.request('/oauth-session?' + urllib.parse.urlencode({'state': state}), 'DELETE')
+
     def accounts_with_quotas(self):
         accounts = self.accounts()
         eligible = [account for account in accounts if not account.get('disabled') and account.get('auth_index')]
