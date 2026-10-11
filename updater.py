@@ -20,16 +20,17 @@ def version(value):
 
 
 def check_update():
-    request = urllib.request.Request(API, headers={'User-Agent':'GeminiAccounts/' + VERSION, 'Accept':'application/vnd.github+json'})
+    request = urllib.request.Request(API, headers={'User-Agent':'Omni/' + VERSION, 'Accept':'application/vnd.github+json'})
     with urllib.request.urlopen(request, timeout=20) as response:
         release = json.load(response)
     if release.get('draft') or release.get('prerelease') or version(release['tag_name']) <= version(VERSION):
         return None
-    asset = next((a for a in release.get('assets', []) if a['name'] == 'GeminiAccounts-Setup.exe'), None)
+    asset = next((a for name in ('Omni-Setup.exe', 'GeminiAccounts-Setup.exe')
+                  for a in release.get('assets', []) if a['name'] == name), None)
     if not asset or not re.fullmatch(r'sha256:[0-9a-f]{64}', asset.get('digest') or ''):
         raise AccountError('The release has no verified Windows installer.')
     prefix = 'https://github.com/' + REPO + '/releases/download/' + release['tag_name'] + '/'
-    if asset.get('browser_download_url') != prefix + 'GeminiAccounts-Setup.exe':
+    if asset.get('browser_download_url') != prefix + asset['name']:
         raise AccountError('Unexpected update download location.')
     return {'version': release['tag_name'], 'url': asset['browser_download_url'], 'sha256':asset['digest'][7:]}
 
@@ -37,7 +38,7 @@ def check_update():
 def download_update(controller, release):
     directory = controller.data_dir / 'updates'
     directory.mkdir(parents=True, exist_ok=True)
-    target = directory / ('GeminiAccounts-Setup-' + release['version'] + '.exe')
+    target = directory / ('Omni-Setup-' + release['version'] + '.exe')
     temporary = target.with_suffix('.download')
     try:
         digest = hashlib.sha256()

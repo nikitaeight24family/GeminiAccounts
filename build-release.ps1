@@ -29,6 +29,7 @@ Copy-Item -LiteralPath 'start-proxy.ps1' -Destination $payload -Force
 Copy-Item -LiteralPath $catalog -Destination $payload -Force
 & $Python -m PyInstaller --noconfirm --onefile --windowed --name GeminiAccounts-Setup --icon $icon --add-data ($payload+';payload') --distpath dist --workpath (Join-Path $build 'installer') --specpath $build installer.py
 if ($LASTEXITCODE -ne 0) {throw 'Installer build failed'}
+Copy-Item -LiteralPath 'dist/GeminiAccounts-Setup.exe' -Destination 'dist/Omni-Setup.exe' -Force
 $sum=(Get-FileHash 'dist/GeminiAccounts-Setup.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'dist/SHA256SUMS.txt'),$sum+'  GeminiAccounts-Setup.exe'+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))
 Write-Output 'Release files are in dist/'

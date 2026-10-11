@@ -171,7 +171,7 @@ class Terminal:
             raise AccountError('No clients detected. Install a client or specify --clients claude_cli codex.')
         paths = [str(p) for client in clients for p in self.integrations.paths()[client]]
         print('Configuration files:\n  ' + '\n  '.join(paths))
-        print('Selected clients will use Gemini Accounts and a new default model. Original files are backed up.\n'
+        print('Selected clients will use Omni and a new default model. Original files are backed up.\n'
               'Existing sessions and sign-ins are preserved. Restart running clients manually afterward.')
         if not confirm('Allow these configuration changes?', yes):
             print('Cancelled. Client configurations were not changed.')
@@ -182,7 +182,7 @@ class Terminal:
 
     def restore(self, yes=False):
         print('Restore exact client files from before the first connection. Later edits to those files will be replaced.\n'
-              'Gemini Accounts preferences reset to defaults. Google sign-ins are preserved.')
+              'Omni preferences reset to defaults. Google sign-ins are preserved.')
         if not confirm('Restore previous settings?', yes):
             print('Cancelled.')
             return False
@@ -231,7 +231,7 @@ class Terminal:
 
 
 def parser():
-    root = argparse.ArgumentParser(description='Gemini Accounts — terminal manager for Windows, macOS and Linux')
+    root = argparse.ArgumentParser(description='Omni — terminal manager for Windows, macOS and Linux')
     commands = root.add_subparsers(dest='command')
     commands.add_parser('menu', help='interactive menu (default)')
     commands.add_parser('serve', help='run gateway and quota monitoring; Ctrl+C stops services started here')
@@ -306,7 +306,7 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, interrupt)
     if hasattr(signal, 'SIGBREAK'):
         signal.signal(signal.SIGBREAK, interrupt)
-    print('Gemini Accounts: http://127.0.0.1:8317 — press Ctrl+C to exit.')
+    print('Omni: http://127.0.0.1:8317 — press Ctrl+C to exit.')
     try:
         if command == 'serve':
             while not terminal.stop.wait(1):

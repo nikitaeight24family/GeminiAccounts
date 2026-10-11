@@ -160,7 +160,7 @@ class Controller:
                 return
             except AccountError:
                 time.sleep(.3)
-        raise AccountError('The connection is not responding. Restart Gemini Accounts.')
+        raise AccountError('The connection is not responding. Restart Omni.')
 
     def start_services(self):
         starter = self.proxy_dir / 'start-proxy.ps1'
@@ -509,6 +509,40 @@ class Controller:
                 groups.append({'name': 'Gemini' if kind == 'gemini' else 'Claude / GPT' if kind == 'claude' else title, 'kind': kind, 'buckets': buckets})
         return groups
 
+    @staticmethod
+    def parse_subscription(body):
+        tier = body.get('paidTier') or body.get('currentTier')
+        if not isinstance(tier, dict):
+            return None
+        identifier = tier.get('id')
+        names = {'g1-pro-tier': 'AI Pro', 'g1-ultra-tier': 'AI Ultra', 'free-tier': 'Free'}
+        if identifier in names:
+            return names[identifier]
+        name = tier.get('name') or identifier
+        return name.strip()[:48] if isinstance(name, str) and name.strip() else None
+
+    def subscription(self, account):
+        cache = getattr(self, '_subscription_cache', {})
+        self._subscription_cache = cache
+        name, now = account['name'], time.monotonic()
+        cached = cache.get(name)
+        if cached and now < cached['until']:
+            return cached['plan']
+        plan = None
+        try:
+            response = self.request('/api-call', 'POST', {
+                'auth_index': account['auth_index'], 'method': 'POST',
+                'url': 'https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist',
+                'header': {'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json',
+                           'User-Agent': 'antigravity/2.19.1 windows/amd64'},
+                'data': json.dumps({'metadata': {'ideType': 'ANTIGRAVITY'}})})
+            if response.get('status_code') == 200:
+                plan = self.parse_subscription(json.loads(response.get('body') or '{}'))
+        except (AccountError, ValueError, TypeError, AttributeError):
+            pass
+        cache[name] = {'plan': plan, 'until': now + (3600 if plan else 300)}
+        return plan
+
     def quotas(self, account):
         payload = {'project': account['project_id']} if account.get('project_id') else {}
         response = self.request('/api-call', 'POST', {
@@ -553,7 +587,8 @@ class Controller:
         for alias in aliases:
             if alias.get('name') in result:
                 result[alias['alias']] = dict(result[alias['name']])
-        return {'models': result, 'groups': groups, 'summary_error': summary_error}
+        return {'models': result, 'groups': groups, 'summary_error': summary_error,
+                'subscription': self.subscription(account)}
 
     def start_full_quota_windows(self, account, quotas, now=None, last_used=None):
         """Start a fresh five-hour window once per account/provider, using one output token."""

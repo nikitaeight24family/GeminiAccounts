@@ -21,6 +21,16 @@ class UpdaterTests(unittest.TestCase):
             with self.assertRaises(AccountError):
                 check_update()
 
+    def test_omni_installer_is_preferred_with_legacy_update_compatibility(self):
+        prefix = 'https://github.com/nikitaeight24family/GeminiAccounts/releases/download/v9.0.0/'
+        assets = [{'name': name, 'digest': 'sha256:' + 'a' * 64, 'browser_download_url': prefix + name}
+                  for name in ('GeminiAccounts-Setup.exe', 'Omni-Setup.exe')]
+        for selected in ('Omni-Setup.exe', 'GeminiAccounts-Setup.exe'):
+            release = {'tag_name': 'v9.0.0', 'assets': assets}
+            with patch('updater.urllib.request.urlopen', return_value=io.BytesIO(json.dumps(release).encode())):
+                self.assertEqual(check_update()['url'], prefix + selected)
+            assets.pop()
+
     def test_download_rejects_tampered_installer(self):
         with tempfile.TemporaryDirectory() as directory:
             controller = SimpleNamespace(data_dir=Path(directory))

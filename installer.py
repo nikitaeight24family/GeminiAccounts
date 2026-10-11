@@ -90,15 +90,34 @@ def install(payload, root, shortcuts=True, automatic=False):
         changed = True
     if changed:
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    atomic_write(manager / 'installation.json', json.dumps({'version': '1.3.21'}).encode())
+    atomic_write(manager / 'installation.json', json.dumps({'version': '1.4.0'}).encode())
     if shortcuts:
-        # PowerShell receives paths as environment data, never executable interpolation.
-        env = os.environ.copy()
-        env['GEMINI_ACCOUNTS_INSTALLED_EXE'] = str(manager / 'GeminiAccounts.exe')
-        script = "$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Gemini Accounts.lnk')); $s.TargetPath=$env:GEMINI_ACCOUNTS_INSTALLED_EXE; $s.WorkingDirectory=Split-Path $s.TargetPath; $s.IconLocation=$s.TargetPath; $s.Save()"
-        subprocess.run(['powershell.exe', '-NoProfile', '-Command', script], env=env,
-                       creationflags=subprocess.CREATE_NO_WINDOW, check=True)
+        create_shortcut(manager / 'GeminiAccounts.exe')
     return manager / 'GeminiAccounts.exe'
+
+
+def create_shortcut(executable):
+    # Preserve existing install locations; only replace our own old desktop shortcut.
+    env = os.environ.copy()
+    env['GEMINI_ACCOUNTS_INSTALLED_EXE'] = str(executable)
+    script = """
+$shortcutShell = New-Object -ComObject WScript.Shell
+$shortcutDesktop = [Environment]::GetFolderPath('Desktop')
+$shortcutNew = $shortcutShell.CreateShortcut((Join-Path $shortcutDesktop 'Omni.lnk'))
+$shortcutNew.TargetPath = $env:GEMINI_ACCOUNTS_INSTALLED_EXE
+$shortcutNew.WorkingDirectory = Split-Path $shortcutNew.TargetPath
+$shortcutNew.IconLocation = $shortcutNew.TargetPath
+$shortcutNew.Save()
+$shortcutOldPath = Join-Path $shortcutDesktop 'Gemini Accounts.lnk'
+if (Test-Path -LiteralPath $shortcutOldPath) {
+    $shortcutOld = $shortcutShell.CreateShortcut($shortcutOldPath)
+    if ($shortcutOld.TargetPath -eq $env:GEMINI_ACCOUNTS_INSTALLED_EXE) {
+        Remove-Item -LiteralPath $shortcutOldPath
+    }
+}
+"""
+    subprocess.run(['powershell.exe', '-NoProfile', '-Command', script], env=env,
+                   creationflags=subprocess.CREATE_NO_WINDOW, check=True)
 
 
 def main():
@@ -128,11 +147,11 @@ def main():
                 pass
         return
     window = tk.Tk()
-    window.title('Install Gemini Accounts')
+    window.title('Install Omni')
     window.geometry('510x270')
     window.configure(bg='#191f2b')
-    tk.Label(window, text='Gemini Accounts', font=('Segoe UI', 24, 'bold'), bg='#191f2b', fg='#edf2fa').pack(pady=(25, 15))
-    tk.Label(window, text='Account manager and local Claude connection.\nConnect applications explicitly from Gemini Accounts after installation.\nUpdating restarts Gemini Accounts services.\nSaved sign-ins and configurations are preserved.', font=('Segoe UI', 11), bg='#191f2b', fg='#9daec4').pack()
+    tk.Label(window, text='Omni', font=('Segoe UI', 24, 'bold'), bg='#191f2b', fg='#edf2fa').pack(pady=(25, 15))
+    tk.Label(window, text='Account manager and local Claude connection.\nConnect applications explicitly from Omni after installation.\nUpdating restarts Omni services.\nSaved sign-ins and configurations are preserved.', font=('Segoe UI', 11), bg='#191f2b', fg='#9daec4').pack()
     def perform():
         button.configure(state='disabled', text='Installing…')
         window.update_idletasks()
@@ -143,7 +162,7 @@ def main():
             window.destroy()
         except Exception as error:
             button.configure(state='normal', text='Install')
-            messagebox.showerror('Installation failed', 'Close Gemini Accounts before updating.\n' + str(error), parent=window)
+            messagebox.showerror('Installation failed', 'Close Omni before updating.\n' + str(error), parent=window)
     button = tk.Button(window, text='Install', command=perform, font=('Segoe UI', 13, 'bold'), bg='#739aff', fg='#10141d', relief='flat', padx=45, pady=8)
     button.pack(pady=24)
     window.mainloop()

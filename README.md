@@ -1,6 +1,6 @@
-# Gemini Accounts
+# Omni
 
-Google Antigravity account manager with Gemini / Claude quota monitoring and a local gateway for Claude Code and Codex. English interface and documentation. Available as a **Windows desktop app** and a **terminal app for Windows, macOS and Linux**.
+Account manager for Google Gemini / Claude, ChatGPT and TokenHarbor with quota monitoring and a local gateway for Claude Code and Codex. English / Russian desktop interface with dark / light themes; English documentation. Available as a **Windows desktop app** and a **terminal app for Windows, macOS and Linux**.
 
 ## Windows desktop: three steps
 
@@ -8,7 +8,7 @@ Google Antigravity account manager with Gemini / Claude quota monitoring and a l
 
 Screenshot uses demo accounts and example quota values.
 
-1. [Download GeminiAccounts-Setup.exe](https://github.com/nikitaeight24family/GeminiAccounts/releases/latest/download/GeminiAccounts-Setup.exe) and click **Install**. No Python or administrator access required.
+1. [Download Omni](https://github.com/nikitaeight24family/GeminiAccounts/releases/latest/download/Omni-Setup.exe) and click **Install**. No Python or administrator access required.
 2. Click **+ Google** to sign in through a browser, or **+ ChatGPT** to sign in with a ChatGPT account. ChatGPT sign-in opens an isolated Edge/Chrome profile for each account, so multiple accounts can be added without switching the browser's everyday account. Enter the password and 2FA code on the official sign-in page. Existing Codex `auth.json` files can still be imported from the same menu.
 3. Open **Connect applications** and approve setup of installed clients. Original configs are backed up. Restarting running clients requires separate consent.
 
@@ -43,12 +43,14 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 
 ## Features
 
+- In the expanded details, open **Display settings** to show or hide **Gemini, Claude, OpenAI and TokenHarbor**, choose a dark/light theme, or switch English/Russian without restarting. These are display preferences; hiding a service does not pause credentials or change routing. TokenHarbor stays at the bottom of the sidebar.
+- Subscription badges show Google AI Pro/Ultra or the reported Google tier, and ChatGPT Free/Plus/Pro or its reported plan. Unknown data is marked explicitly; allowed Google tiers are never treated as the current subscription.
 - Google Gemini accounts have their own collapsible list with a saved expand/collapse preference. ChatGPT cards show the reported subscription plan, active-request border and recent model, using the same activity tracking as Google cards.
-- The eye button hides account names across cards, details and request history using stable numbered aliases. The preference persists; clicking again restores names. ChatGPT cards and their list header carry an OpenAI icon.
+- The open/closed eye beside the Omni title hides account names across cards, details and request history using stable numbered aliases. The preference persists; clicking again restores names. ChatGPT cards and their list header carry an OpenAI icon.
 
 - Choose models directly in Claude or Codex after connecting that application from **Connect applications**. The connection offers distinct available Gemini Pro, Flash and Claude model IDs; selecting one sends requests to that exact model. To refresh a client's model menu after account changes, open **Connect applications** again and approve reconnecting it. Client configurations change only after this explicit action.
 - ChatGPT accounts added through **+ ChatGPT** appear in their own expandable list. Each browser login uses a fresh private profile and the gateway stores accounts separately for routing. The app never receives passwords or 2FA codes. It reads available GPT models from the local gateway and shows account quota windows, reset countdowns and reset credits when the provider supplies them. Adding an account alone does not reconfigure Claude or Codex; use **Connect applications** afterward to add the available GPT models to an approved client's menu. ChatGPT account tokens stay in the local gateway's private auth directory and are excluded from diagnostic exports.
-- Optional TokenHarbor **Claude Haiku 5.5 Free**: click **TokenHarbor · Haiku 5.5 Free** directly below **Add Google account**, paste a TokenHarbor Universal Key, and approve the shown file changes. The app tests the exact `claude-haiku-5.5:free` route through TokenHarbor and the local gateway before adding it to an already approved Claude Desktop Code menu; connected Claude Code CLI installations can select its unique model ID with `/model`. No paid fallback is configured. This is a limited-time offer; its allowance and expiry are shown in the TokenHarbor dashboard. TokenHarbor requires free-model access on your account and says free-route prompts and responses may be retained. The key is stored in the local gateway configuration; **Remove TokenHarbor connection** deletes the provider and menu entry.
+- Optional TokenHarbor **Claude Haiku 5.5 Free**: expand **TokenHarbor** at the bottom of the sidebar and click **+ Add TokenHarbor account**, paste a TokenHarbor Universal Key, and approve the shown file changes. The app tests the exact `claude-haiku-5.5:free` route through TokenHarbor and the local gateway before adding it to an already approved Claude Desktop Code menu; connected Claude Code CLI installations can select its unique model ID with `/model`. No paid fallback is configured. This is a limited-time offer; its allowance and expiry are shown in the TokenHarbor dashboard. TokenHarbor requires free-model access on your account and says free-route prompts and responses may be retained. The key is stored in the local gateway configuration; **Remove TokenHarbor connection** deletes the provider and menu entry.
 - The TokenHarbor key list identifies the key used by each completed request from the gateway's credential ID. It keeps the last-used key marked without flashing all cards during generation, and shows each key's latest success or error (including 429). The current key is known only after the gateway publishes usage. The connection window shows published free-account API rate limits; use **Balance and reset** to see the live campaign allowance in TokenHarbor. TokenHarbor does not document a read API for the remaining campaign quota or reset time, so the application does not invent either value.
 - Four account quota bars: Gemini / Claude, **5h / 1w**, with reset countdowns and time-based colors.
 - The bottom pooled-quota panel has separate collapsible **Google Gemini** and **OpenAI** sections, each with **5h / 1w** totals. Expand/collapse preferences persist across restarts; refreshing values preserves the existing controls. Paused accounts are excluded, and incomplete data shows the number of loaded accounts.

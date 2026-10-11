@@ -28,6 +28,12 @@ class QuotaUITests(unittest.TestCase):
                 patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
             app = App()
             try:
+                app.update()
+                self.assertIs(app.privacy_toggle.master, app.details_toggle.master)
+                self.assertLessEqual(app.privacy_toggle.winfo_x() + app.privacy_toggle.winfo_width(),
+                                     app.details_toggle.winfo_x())
+                self.assertNotEqual(app.privacy_icons[False]._dark_image.tobytes(),
+                                    app.privacy_icons[True]._dark_image.tobytes())
                 google = {'name': 'google-auth', 'email': 'private@example.com', 'disabled': False, 'unavailable': False}
                 gpt = {'name': 'gpt-auth', 'email': 'gpt@example.com', 'label': 'Private GPT', 'disabled': False}
                 app.items = [google]
@@ -96,7 +102,7 @@ class QuotaUITests(unittest.TestCase):
                 app.gateway_jobs_checked = time.monotonic()
                 app.animate_active_borders()
                 self.assertEqual(app.active_provider_accounts(), {'openai': 'gpt'})
-                self.assertIn('Plus', app.chatgpt_widgets['gpt']['status'].cget('text'))
+                self.assertIn('Plus', app.chatgpt_widgets['gpt']['plan'].cget('text'))
                 self.assertEqual(App.chatgpt_plan_name({'plan_type': 'plus', 'quota': {'plan_type': 'pro'}}), 'Pro')
                 self.assertEqual(App.chatgpt_plan_name({}), 'Plan unknown')
                 self.assertEqual(app.chatgpt_widgets['gpt']['model'].cget('text'), 'gpt-6.1')

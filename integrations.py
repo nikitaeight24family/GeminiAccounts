@@ -284,7 +284,7 @@ class Integrations:
 
     def provider_toml(self, key):
         return '\n'.join([
-            '[model_providers.gemini_accounts]', 'name = "Gemini Accounts"',
+            '[model_providers.gemini_accounts]', 'name = "Omni"',
             'base_url = "http://127.0.0.1:8317/v1"', 'wire_api = "responses"',
             'experimental_bearer_token = ' + json.dumps(key),
             'stream_idle_timeout_ms = 604800000', 'request_max_retries = 2',
@@ -348,7 +348,7 @@ class Integrations:
             entry = copy.deepcopy(template)
             family = 'Gemini ' if model.startswith('gemini-') else 'ChatGPT ' if model.startswith('gpt-') else 'Claude '
             entry.update(slug=model, display_name=family + model_name(model, {}),
-                         description='Antigravity via Gemini Accounts', priority=50,
+                         description='Antigravity via Omni', priority=50,
                          model_messages={}, base_instructions='You are a helpful coding assistant.',
                          context_window=1048576 if model.startswith('gemini-') else 200000,
                          max_context_window=1048576 if model.startswith('gemini-') else 200000,
@@ -411,7 +411,7 @@ class Integrations:
         route_targets = {self.claude_desktop_route(model): model for model in routed}
         self.configure_desktop_routes(routed)
         self.write_json(preset, {
-            'deploymentDisplayName': 'Gemini Accounts', 'inferenceCredentialKind': 'static',
+            'deploymentDisplayName': 'Omni', 'inferenceCredentialKind': 'static',
             'modelDiscoveryEnabled': False, 'inferenceGatewayAuthScheme': 'bearer',
             'inferenceProvider': 'gateway', 'inferenceGatewayApiKey': key,
             'inferenceGatewayBaseUrl': 'http://127.0.0.1:8317',
@@ -426,7 +426,7 @@ class Integrations:
         entries = meta.setdefault('entries', [])
         preset_id = preset.stem
         if not any(e.get('id') == preset_id for e in entries):
-            entries.append({'id': preset_id, 'name': 'Gemini Accounts'})
+            entries.append({'id': preset_id, 'name': 'Omni'})
         meta['appliedId'] = preset_id
         self.write_json(meta_path, meta)
         settings = self.read_json(desktop)
