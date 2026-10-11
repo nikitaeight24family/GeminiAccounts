@@ -157,7 +157,7 @@ class App(ctk.CTk):
         self.account_list._scrollbar.grid_remove()
         self.service = ctk.CTkLabel(self.sidebar, text='Connecting…', text_color=MUTED, font=('Segoe UI', 10), height=14)
         self.service.pack(anchor='w', padx=18)
-        self.sidebar_spacer = ctk.CTkFrame(self.sidebar, height=0, fg_color='transparent')
+        self.sidebar_spacer = ctk.CTkFrame(self.sidebar, height=self.account_list.cget('height'), fg_color='transparent')
         self.pool_summary_groups = {}
         google_summary = self.create_pool_summary('google', 'Google Gemini')
         self.total_quota_frame = ctk.CTkFrame(google_summary, fg_color='transparent')
