@@ -140,14 +140,15 @@ class QuotaUITests(unittest.TestCase):
                 self.assertFalse(google_card._canvas.find_withtag('rainbow'))
                 app.toggle_google_accounts()
                 app.update()
-                self.assertFalse(google_card.winfo_ismapped())
-                self.assertTrue(gpt_card.winfo_ismapped())
+                # A canvas child may remain mapped while its ancestor is hidden.
+                self.assertFalse(google_card.winfo_viewable())
+                self.assertTrue(gpt_card.winfo_viewable())
                 app.draw_account_list()
                 self.assertIs(google_card, app.account_widgets['google']['card'])
                 self.assertTrue(app.controller.preferences['google-accounts-collapsed'])
                 app.toggle_google_accounts()
                 app.update()
-                self.assertTrue(google_card.winfo_ismapped())
+                self.assertTrue(google_card.winfo_viewable())
                 self.assertIs(google_card, app.account_widgets['google']['card'])
                 app.gateway_jobs[0]['state'] = 'waiting'
                 app.animate_active_borders()

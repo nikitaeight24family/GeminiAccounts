@@ -469,9 +469,7 @@ class App(ctk.CTk):
                 model.grid(row=0, column=1, sticky='e', padx=(4, 0))
                 status_row = ctk.CTkFrame(card, fg_color='transparent')
                 status_row.pack(fill='x', padx=8, pady=(0, 3))
-                priority = self.button(status_row, '', lambda account=item: self.edit_account_priority(account, 'openai'))
-                priority.configure(width=34, height=17, font=('Segoe UI', 9), fg_color='transparent')
-                priority.pack(side='right')
+                priority = self.make_priority_counter(status_row, item, 'openai')
                 plan = ctk.CTkLabel(status_row, text='', height=17, width=1, corner_radius=5,
                                     fg_color='#264268', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
                 plan.pack(side='left', padx=(0, 5))
@@ -510,7 +508,7 @@ class App(ctk.CTk):
         row['heading'].configure(text=self.display_name(item, 'OpenAI'))
         status, severity, reason = account_status(item)
         row['plan'].configure(text=' ' + self.chatgpt_plan_name(item) + ' ')
-        row['priority'].configure(text='↑' + str(self.controller.preferences.get('account-priorities', {}).get(item['name'], 0)))
+        self.update_priority_counter(row['priority'], item)
         color = {'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': GREEN, 'muted': MUTED}[severity]
         row['status'].configure(text=f'{status} · {item.get("success") or 0} responses', text_color=color,
                                 wraplength=175, justify='left')
@@ -1300,14 +1298,12 @@ class App(ctk.CTk):
             button.pack(side='left', fill='x', expand=True)
             status_row = ctk.CTkFrame(card, fg_color='transparent')
             status_row.pack(fill='x', padx=8, pady=0)
-            priority = self.button(status_row, '', lambda account=account: self.edit_account_priority(account, 'google'))
-            priority.configure(width=34, height=16, font=('Segoe UI', 9), fg_color='transparent')
-            priority.pack(side='right')
+            priority = self.make_priority_counter(status_row, account, 'google')
             plan = ctk.CTkLabel(status_row, text='', height=16, width=1, corner_radius=5,
                                 fg_color='#183b32', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
             plan.pack(side='left', padx=(0, 5))
             state = ctk.CTkLabel(status_row, text='', height=16, width=1, anchor='w',
-                                 font=('Segoe UI', 10), text_color=MUTED)
+                                 font=('Segoe UI', 10), text_color=MUTED, wraplength=115, justify='left')
             state.pack(side='left', fill='x', expand=True)
             countdown = {}
             verification_frame = ctk.CTkFrame(card, fg_color='transparent')
@@ -1361,14 +1357,33 @@ class App(ctk.CTk):
         marker = '!' if account.get('access_issue') else 'Ⅱ' if account.get('disabled') else ''
         return (marker + '  ' if marker else '') + self.display_name(account)
 
-    def edit_account_priority(self, account, provider):
+    def make_priority_counter(self, parent, account, provider):
+        frame = ctk.CTkFrame(parent, fg_color='transparent', corner_radius=5, height=18)
+        frame.pack(side='right', padx=(3, 0))
+        down = self.button(frame, '↓', lambda: self.change_account_priority(account, provider, -1))
+        down.configure(width=16, height=18, font=('Segoe UI', 11), fg_color='transparent')
+        down.pack(side='left')
+        value = ctk.CTkLabel(frame, text='0', width=22, height=18, font=('Segoe UI', 10), text_color=TEXT)
+        value.pack(side='left')
+        up = self.button(frame, '↑', lambda: self.change_account_priority(account, provider, 1))
+        up.configure(width=16, height=18, font=('Segoe UI', 11), fg_color='transparent')
+        up.pack(side='left')
+        value.priority_down, value.priority_up = down, up
+        return value
+
+    def update_priority_counter(self, widget, account):
+        value = self.controller.preferences.get('account-priorities', {}).get(account['name'], 0)
+        widget.configure(text=str(value))
+        widget.priority_down.configure(state='normal' if value > 0 else 'disabled')
+        widget.priority_up.configure(state='normal' if value < 999 else 'disabled')
+
+    def change_account_priority(self, account, provider, delta):
         if self.busy:
             return
         priorities = self.controller.preferences.get('account-priorities', {})
-        value = simpledialog.askinteger('Account priority',
-            'Higher numbers are used first. Equal priorities follow automatic quota ranking.',
-            initialvalue=priorities.get(account['name'], 0), minvalue=0, maxvalue=999, parent=self)
-        if value is None:
+        previous = priorities.get(account['name'], 0)
+        value = min(999, max(0, previous + delta))
+        if value == previous:
             return
         self.controller.preferences.setdefault('account-priorities', {})[account['name']] = value
         self.controller.save()
@@ -1814,7 +1829,7 @@ class App(ctk.CTk):
         self.update_selection_style(account, widgets)
         widgets['button'].configure(text=self.account_heading(account))
         widgets['plan'].configure(text=' ' + self.google_plan_name(account) + ' ')
-        widgets['priority'].configure(text='↑' + str(self.controller.preferences.get('account-priorities', {}).get(account['name'], 0)))
+        self.update_priority_counter(widgets['priority'], account)
         state, severity, reason = google_account_status(account, self.quota_groups(account['name']))
         state_text = state if severity in ('warning', 'error') else f'{state} · {account.get("success") or 0} responses'
         widgets['status'].configure(text=state_text,

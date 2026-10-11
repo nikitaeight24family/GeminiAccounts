@@ -115,10 +115,26 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertGreaterEqual(google_row['plan'].winfo_rooty(),
                                             google_row['button'].winfo_rooty() + google_row['button'].winfo_height())
                     self.assertIn('Pro', app.chatgpt_widgets['gpt']['plan'].cget('text'))
-                    with patch('app.simpledialog.askinteger', return_value=8), patch.object(app, 'queue_policy'):
-                        app.edit_account_priority(app.items[0], 'google')
-                    self.assertEqual(app.controller.preferences['account-priorities']['google'], 8)
-                    self.assertEqual(google_row['priority'].cget('text'), '↑8')
+                    with patch('app.simpledialog.askinteger', side_effect=AssertionError('Priority must not open a dialog')), patch.object(app, 'queue_policy'):
+                        self.assertEqual(google_row['priority'].priority_down.cget('state'), 'disabled')
+                        google_row['priority'].priority_up.invoke()
+                        google_row['priority'].priority_up.invoke()
+                        self.assertEqual(google_row['priority'].cget('text'), '2')
+                        google_row['priority'].priority_down.invoke()
+                    self.assertEqual(app.controller.preferences['account-priorities']['google'], 1)
+                    self.assertEqual(google_row['priority'].cget('text'), '1')
+                    gpt_priority = app.chatgpt_widgets['gpt']['priority']
+                    with patch('app.simpledialog.askinteger', side_effect=AssertionError('Priority must not open a dialog')), patch.object(app, 'refresh_chatgpt_accounts') as refresh:
+                        gpt_priority.priority_up.invoke()
+                        self.assertEqual(gpt_priority.cget('text'), '1')
+                        refresh.assert_called_once()
+                        app.controller.preferences['account-priorities']['gpt'] = 999
+                        app.update_priority_counter(gpt_priority, app.chatgpt_items[0])
+                        self.assertEqual(gpt_priority.priority_up.cget('state'), 'disabled')
+                        gpt_priority.priority_up.invoke()
+                        self.assertEqual(gpt_priority.cget('text'), '999')
+                        gpt_priority.priority_down.invoke()
+                        self.assertEqual(gpt_priority.cget('text'), '998')
                     self.assertIs(app.sidebar_footer.pack_slaves()[-1], app.tokenharbor_accounts)
                     footer_y = app.service.winfo_rooty()
                     app.toggle_google_accounts()
@@ -139,14 +155,16 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.service_variables['gemini'].set(False)
                     app.set_service_visibility('gemini')
                     app.update()
-                    self.assertFalse(google_card.winfo_ismapped())
+                    # Canvas children can stay mapped while their containing frame is hidden.
+                    # Viewability includes the visibility of every ancestor.
+                    self.assertFalse(google_card.winfo_viewable())
                     self.assertGreaterEqual(app.service.winfo_rooty(), footer_y)
-                    self.assertTrue(gpt_card.winfo_ismapped())
+                    self.assertTrue(gpt_card.winfo_viewable())
                     for provider in ('openai', 'tokenharbor'):
                         app.service_variables[provider].set(False)
                         app.set_service_visibility(provider)
                     app.update()
-                    self.assertFalse(gpt_card.winfo_ismapped())
+                    self.assertFalse(gpt_card.winfo_viewable())
                     for provider in ('gemini', 'claude', 'openai', 'tokenharbor'):
                         app.service_variables[provider].set(True)
                         app.set_service_visibility(provider)
@@ -179,6 +197,7 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertEqual(saved.preferences['theme'], 'dark')
                     self.assertEqual(saved.preferences['language'], 'en')
                     self.assertTrue(all(saved.preferences['visible-services'].values()))
+                    self.assertEqual(saved.preferences['account-priorities'], {'google': 1, 'gpt': 998})
                 finally:
                     app.closed = True
                     app.destroy()
