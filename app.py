@@ -124,8 +124,10 @@ class App(ctk.CTk):
         self.account_list._scrollbar.grid_remove()
         self.service = ctk.CTkLabel(self.sidebar, text='Connecting…', text_color=MUTED, font=('Segoe UI', 10), height=14)
         self.service.pack(anchor='w', padx=18)
-        self.total_quota_frame = ctk.CTkFrame(self.sidebar, fg_color='transparent')
-        self.total_quota_frame.pack(fill='x', padx=18, pady=(0, 5))
+        self.pool_summary_groups = {}
+        google_summary = self.create_pool_summary('google', 'Google Gemini')
+        self.total_quota_frame = ctk.CTkFrame(google_summary, fg_color='transparent')
+        self.total_quota_frame.pack(fill='x', pady=(0, 5))
         total_header = ctk.CTkFrame(self.total_quota_frame, fg_color='transparent')
         total_header.pack(fill='x')
         self.total_quota_title = ctk.CTkLabel(total_header, text='Gemini · 5h · pooled remaining', height=18, font=('Segoe UI', 11), text_color=TEXT)
@@ -142,8 +144,8 @@ class App(ctk.CTk):
         self.forecast_canvas.bind('<Configure>', lambda event: self.schedule_total_forecast())
         self.forecast_canvas.bind('<Motion>', self.hover_forecast)
         self.forecast_canvas.bind('<Leave>', lambda event: self.forecast_canvas.delete('forecast_hover'))
-        weekly_frame = ctk.CTkFrame(self.sidebar, fg_color='transparent')
-        weekly_frame.pack(fill='x', padx=18, pady=(0, 6))
+        weekly_frame = ctk.CTkFrame(google_summary, fg_color='transparent')
+        weekly_frame.pack(fill='x', pady=(0, 6))
         weekly_header = ctk.CTkFrame(weekly_frame, fg_color='transparent')
         weekly_header.pack(fill='x')
         self.total_weekly_title = ctk.CTkLabel(weekly_header, text='Gemini · 1w · pooled remaining',
@@ -161,6 +163,22 @@ class App(ctk.CTk):
         self.weekly_forecast_canvas.bind('<Configure>', lambda event: self.schedule_total_forecast(weekly=True))
         self.weekly_forecast_canvas.bind('<Motion>', lambda event: self.hover_forecast(event, weekly=True))
         self.weekly_forecast_canvas.bind('<Leave>', lambda event: self.weekly_forecast_canvas.delete('forecast_hover'))
+        openai_summary = self.create_pool_summary('openai', 'OpenAI')
+        self.openai_pool_widgets = {}
+        for window in ('5h', '1w'):
+            row = ctk.CTkFrame(openai_summary, fg_color='transparent')
+            row.pack(fill='x', pady=(0, 6))
+            header = ctk.CTkFrame(row, fg_color='transparent')
+            header.pack(fill='x')
+            title = ctk.CTkLabel(header, text=f'{window} · pooled remaining', height=18,
+                font=('Segoe UI', 11), text_color=TEXT)
+            title.pack(side='left')
+            value = ctk.CTkLabel(header, text='—', height=18, font=('Segoe UI', 12, 'bold'), text_color=MUTED)
+            value.pack(side='right')
+            bar = ctk.CTkProgressBar(row, height=6, fg_color='#354157', progress_color=GREEN)
+            bar.pack(fill='x', pady=(1, 0))
+            bar.set(0)
+            self.openai_pool_widgets[window] = (title, value, bar)
         self.body = ctk.CTkFrame(self, fg_color='transparent')
         self.body.grid(row=0, column=1, sticky='nsew', padx=32, pady=28)
         body_header = ctk.CTkFrame(self.body, fg_color='transparent')
@@ -360,6 +378,7 @@ class App(ctk.CTk):
     def set_chatgpt_accounts(self, accounts):
         self.chatgpt_items = accounts
         self.draw_chatgpt_accounts()
+        self.update_openai_pool_quota()
 
     def draw_chatgpt_accounts(self):
         frame = self.chatgpt_accounts
@@ -477,7 +496,7 @@ class App(ctk.CTk):
             if not widgets:
                 continue
             try:
-                reset = datetime.fromtimestamp(window['reset_at'], timezone.utc).isoformat()
+                reset = datetime.fromtimestamp(window.get('reset_at'), timezone.utc).isoformat()
                 countdown = self.time_until_reset(reset)
             except (ValueError, TypeError, OverflowError, OSError):
                 countdown = '—'
@@ -1241,7 +1260,71 @@ class App(ctk.CTk):
         return tuple((group['kind'], bucket['window']) for group in self.quota_groups(name)
                      for bucket in self.visible_quota_buckets(group))
 
+    def create_pool_summary(self, provider, title):
+        group = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        group.pack(fill='x', padx=18, pady=(0, 3))
+        collapsed = self.controller.preferences.get(provider + '-pool-collapsed', True)
+        header = self.button(group, ('▸' if collapsed else '▾') + '  ' + title,
+                             lambda: self.toggle_pool_summary(provider))
+        header.configure(height=25, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
+        header.pack(fill='x', pady=(0, 2))
+        body = ctk.CTkFrame(group, fg_color='transparent')
+        if not collapsed:
+            body.pack(fill='x', padx=3)
+        self.pool_summary_groups[provider] = {'header': header, 'body': body,
+                                             'title': title, 'collapsed': collapsed}
+        return body
+
+    def toggle_pool_summary(self, provider):
+        group = self.pool_summary_groups[provider]
+        group['collapsed'] = not group['collapsed']
+        group['header'].configure(text=('▸' if group['collapsed'] else '▾') + '  ' + group['title'])
+        if group['collapsed']:
+            group['body'].pack_forget()
+        else:
+            group['body'].pack(fill='x', padx=3)
+        self.controller.preferences[provider + '-pool-collapsed'] = group['collapsed']
+        self.controller.save()
+
+    def update_openai_pool_quota(self):
+        accounts = [account for account in self.chatgpt_items if not account.get('disabled')]
+        values = {'5h': [], '1w': []}
+        now = datetime.now(timezone.utc)
+        def valid(value):
+            return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 <= value <= 100
+        for account in accounts:
+            quota = account.get('quota') or {}
+            if quota.get('error'):
+                continue
+            windows = {window['label']: window for window in quota.get('windows', [])}
+            weekly = windows.get('1w', {}).get('remaining')
+            if valid(weekly):
+                values['1w'].append(weekly / 100)
+            primary = windows.get('5h', {})
+            remaining = primary.get('remaining')
+            if valid(remaining):
+                def reset(window):
+                    try:
+                        return datetime.fromtimestamp(window['reset_at'], timezone.utc).isoformat()
+                    except (KeyError, ValueError, TypeError, OverflowError, OSError):
+                        return None
+                bucket = {'remaining': remaining / 100, 'reset': reset(primary)}
+                week = {'remaining': weekly / 100 if valid(weekly) else None, 'reset': reset(windows.get('1w', {}))}
+                entry = quota_entry(account, bucket, week, 'claude', now)
+                values['5h'].append(0 if valid(weekly) and weekly < 1 else entry['remaining'])
+        for window, widgets in self.openai_pool_widgets.items():
+            available = values[window]
+            remaining = sum(available) / len(available) if available else None
+            title, value, bar = widgets
+            text = f'{window} · pooled remaining' if len(available) == len(accounts) and available else f'{window} · data {len(available)}/{len(accounts)} accounts'
+            color = self.quota_color(remaining)
+            title.configure(text=text)
+            value.configure(text=self.quota_percent(remaining), text_color=color)
+            bar.configure(progress_color=color)
+            bar.set(remaining if remaining is not None else 0)
+
     def update_total_quota(self):
+        self.update_openai_pool_quota()
         accounts = [a for a in self.items if not a.get('disabled')]
         values = []
         weekly_values = []

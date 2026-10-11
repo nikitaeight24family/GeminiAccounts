@@ -32,6 +32,43 @@ class QuotaUITests(unittest.TestCase):
         group['buckets'][1]['remaining'] = None
         self.assertEqual(len(App.visible_quota_buckets(group)), 2)
 
+    def test_collapsible_provider_totals_preserve_controls_and_exclude_paused_or_missing_data(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
+            app = App()
+            try:
+                groups = app.pool_summary_groups
+                self.assertEqual(groups['google']['header'].cget('text'), '▸  Google Gemini')
+                self.assertFalse(groups['google']['body'].winfo_manager())
+                app.toggle_pool_summary('google')
+                self.assertTrue(groups['google']['body'].winfo_manager())
+                app.toggle_pool_summary('openai')
+                controls = app.openai_pool_widgets['5h']
+                def account(name, primary, weekly, disabled=False):
+                    return {'name': name, 'disabled': disabled, 'quota': {'windows': [
+                        {'label': '5h', 'remaining': primary}, {'label': '1w', 'remaining': weekly}]}}
+                accounts = [account('ready', 80, 100), account('weekly_empty', 90, 0),
+                            account('paused', 100, 100, True), {'name': 'unknown', 'quota': {'error': 'Unavailable'}}]
+                app.set_chatgpt_accounts(accounts)
+                self.assertAlmostEqual(controls[2].get(), .4)
+                self.assertAlmostEqual(app.openai_pool_widgets['1w'][2].get(), .5)
+                self.assertIn('2/3', controls[0].cget('text'))
+                app.toggle_pool_summary('openai')
+                accounts[0]['quota']['windows'][0]['remaining'] = 60
+                app.set_chatgpt_accounts(accounts)
+                self.assertFalse(groups['openai']['body'].winfo_manager())
+                app.toggle_pool_summary('openai')
+                self.assertIs(controls, app.openai_pool_widgets['5h'])
+                self.assertAlmostEqual(controls[2].get(), .3)
+                self.assertFalse(app.controller.preferences['openai-pool-collapsed'])
+                app.set_chatgpt_accounts([])
+                self.assertEqual(controls[1].cget('text'), '—')
+                self.assertEqual(controls[2].get(), 0)
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_chatgpt_cards_and_controls_survive_quota_refresh_and_collapse(self):
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
                 patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
@@ -271,6 +308,7 @@ class QuotaUITests(unittest.TestCase):
                 self.assertEqual(app.total_weekly_bar.get(), 1)
                 # Exhausted accounts contribute zero; missing quotas stay unknown.
                 app.quota_cache['0']['data']['groups'][0]['buckets'][0]['remaining'] = 0
+                app.toggle_pool_summary('google')
                 app.update_total_quota()
                 self.assertAlmostEqual(app.total_quota_bar.get(), .9)
                 self.assertEqual(app.total_weekly_bar.get(), 1)
