@@ -1276,9 +1276,14 @@ class App(ctk.CTk):
             button.configure(width=1)
             button.configure(image=self.provider_icons['antigravity'], compound='left')
             button.pack(side='left', fill='x', expand=True)
-            plan = ctk.CTkLabel(card, text='', height=17, width=1, corner_radius=5,
+            status_row = ctk.CTkFrame(card, fg_color='transparent')
+            status_row.pack(fill='x', padx=8, pady=0)
+            plan = ctk.CTkLabel(status_row, text='', height=16, width=1, corner_radius=5,
                                 fg_color='#183b32', text_color=TEXT, font=('Segoe UI', 9, 'bold'))
-            plan.pack(anchor='w', padx=8, pady=(1, 2))
+            plan.pack(side='left', padx=(0, 5))
+            state = ctk.CTkLabel(status_row, text='', height=16, width=1, anchor='w',
+                                 font=('Segoe UI', 10), text_color=MUTED)
+            state.pack(side='left', fill='x', expand=True)
             countdown = {}
             verification_frame = ctk.CTkFrame(card, fg_color='transparent')
             verification_frame.grid_columnconfigure((0, 3), weight=1)
@@ -1297,7 +1302,7 @@ class App(ctk.CTk):
                 verification_frame.pack(fill='x', padx=5, pady=(0, 3))
             quota_frame = ctk.CTkFrame(card, fg_color='transparent')
             quota_frame.pack(fill='x', padx=5, pady=0)
-            widgets = {'card': card, 'button': button, 'plan': plan, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
+            widgets = {'card': card, 'button': button, 'plan': plan, 'status': state, 'quota_icons': {}, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
                        'active_families': (), 'quota_rows': {}}
             self.account_widgets[account['name']] = widgets
             groups = self.quota_groups(account['name'])
@@ -1311,6 +1316,7 @@ class App(ctk.CTk):
                     header.grid_columnconfigure(2, weight=1)
                     icon = ctk.CTkLabel(header, text='', image=self.provider_icons[group['kind']] if bucket is visible_buckets[0] else None, height=14, width=14)
                     icon.grid(row=0, column=0, padx=(0, 4))
+                    widgets['quota_icons'][(group['kind'], bucket['window'])] = icon
                     label = ctk.CTkLabel(header, text=text, height=14, width=76, font=('Segoe UI', 11), text_color=self.quota_color(remaining), anchor='w')
                     label.grid(row=0, column=1, sticky='w')
                     reset_label = ctk.CTkLabel(header, text='', height=14, width=68, font=('Segoe UI', 12, 'bold'), text_color=TEXT, anchor='e')
@@ -1327,8 +1333,8 @@ class App(ctk.CTk):
         self.after_idle(lambda: self.account_list._parent_canvas.yview_moveto(position))
 
     def account_heading(self, account):
-        marker = '!' if account.get('access_issue') else 'Ⅱ' if account.get('disabled') else '●'
-        return marker + '  ' + self.display_name(account)
+        marker = '!' if account.get('access_issue') else 'Ⅱ' if account.get('disabled') else ''
+        return (marker + '  ' if marker else '') + self.display_name(account)
 
     def account_weekly_depleted(self, name):
         gemini = next((group for group in self.quota_groups(name) if group['kind'] == 'gemini'), {})
@@ -1699,6 +1705,10 @@ class App(ctk.CTk):
         self.update_selection_style(account, widgets)
         widgets['button'].configure(text=self.account_heading(account))
         widgets['plan'].configure(text=' ' + self.google_plan_name(account) + ' ')
+        state, severity, reason = account_status(account)
+        state_text = state if severity in ('warning', 'error') else f'{state} · {account.get("success") or 0} responses'
+        widgets['status'].configure(text=state_text,
+            text_color={'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': MUTED, 'muted': MUTED}[severity])
         if account.get('access_issue') == 'verification':
             if not widgets['verification_frame'].winfo_manager():
                 widgets['verification_frame'].pack(fill='x', padx=5, pady=(0, 3), after=widgets['button'])
@@ -1706,8 +1716,10 @@ class App(ctk.CTk):
             widgets['verification_frame'].pack_forget()
         for group in self.quota_groups(account['name']):
             visible = {bucket['window'] for bucket in self.visible_quota_buckets(group)} if self.provider_visible(group['kind']) else set()
+            first_visible = next((bucket['window'] for bucket in sorted(group['buckets'], key=lambda b: b['window'] != '5h') if bucket['window'] in visible), None)
             for bucket in group['buckets']:
                 key = (group['kind'], bucket['window'])
+                widgets['quota_icons'][key].configure(image=self.provider_icons[group['kind']] if bucket['window'] == first_visible else None)
                 row = widgets['quota_rows'][key]
                 if bucket['window'] not in visible:
                     row.pack_forget()

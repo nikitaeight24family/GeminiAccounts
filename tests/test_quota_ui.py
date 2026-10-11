@@ -404,6 +404,18 @@ class QuotaUITests(unittest.TestCase):
                 self.assertLess(first.winfo_height() / first._get_widget_scaling(), 130)
                 for item in items:
                     self.assertEqual(len(app.account_widgets[item['name']]['quota_rows']), 4)
+                groups = app.quota_cache['0']['data']['groups']
+                for group in groups:
+                    for bucket in group['buckets']:
+                        bucket['remaining'] = 0
+                app.update_account_row(items[0])
+                for kind in ('gemini', 'claude'):
+                    self.assertIs(app.account_widgets['0']['quota_icons'][(kind, 'weekly')].cget('image'), app.provider_icons[kind])
+                    self.assertIsNone(app.account_widgets['0']['quota_icons'][(kind, '5h')].cget('image'))
+                for group in groups:
+                    for bucket in group['buckets']:
+                        bucket['remaining'] = 1
+                app.update_account_row(items[0])
                 canvas.yview_moveto(0)
                 app.update()
                 app.activity_state['latest'] = {
