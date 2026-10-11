@@ -89,6 +89,61 @@ class ChatGPTAuthTests(unittest.TestCase):
         self.assertEqual(sent['header']['Authorization'], 'Bearer $TOKEN$')
         self.assertEqual(sent['header']['ChatGPT-Account-Id'], 'account-123')
 
+    def test_reset_list_filters_unavailable_and_redeems_selected_credit_once(self):
+        controller = Mock()
+        requests = []
+        def request(_path, _method, payload):
+            requests.append(payload)
+            if _path == '/routing/cooldown/reset':
+                return {'status': 'ok', 'auth_index': payload['auth_index']}
+            if payload['url'].endswith('/usage'):
+                return {'status_code': 200, 'body': json.dumps({'rate_limit_reset_credits': {'available_count': 1}})}
+            if payload['method'] == 'GET':
+                return {'status_code': 200, 'body': json.dumps({'credits': [
+                    {'id': 'ready', 'reset_type': 'codex_rate_limits', 'status': 'available',
+                     'expires_at': '2099-01-01T00:00:00Z'},
+                    {'id': 'used', 'reset_type': 'codex_rate_limits', 'status': 'redeemed'},
+                    {'id': 'other', 'reset_type': 'future_reset_type', 'status': 'available'}]})}
+            return {'status_code': 200, 'body': json.dumps({'code': 'reset', 'windows_reset': 2})}
+        controller.request.side_effect = request
+        account = {'auth_index': 'index-1', 'account': 'account-123'}
+        auth = ChatGPTAuth(controller)
+        self.assertEqual(auth.use_reset_credit(account), 2)
+        self.assertEqual([request.get('method') for request in requests], ['GET', 'GET', 'POST', None])
+        self.assertEqual(set(json.loads(requests[-2]['data'])), {'redeem_request_id'})
+        self.assertEqual(requests[-2]['header']['ChatGPT-Account-Id'], 'account-123')
+
+    def test_unavailable_reset_is_never_consumed(self):
+        controller = Mock()
+        controller.request.return_value = {'status_code': 200, 'body': json.dumps({'credits': []})}
+        with self.assertRaises(AccountError):
+            ChatGPTAuth(controller).use_reset_credit({'auth_index': 'index-1'})
+        self.assertEqual(controller.request.call_count, 1)
+
+    def test_reset_timeout_and_unconfirmed_result_never_retry_or_clear_cooldown(self):
+        for response in (AccountError('timeout'), {'status_code': 200, 'body': '{}'},
+                         {'status_code': 200, 'body': 'broken json'},
+                         {'status_code': 429, 'body': '{}'}):
+            with self.subTest(response=response):
+                controller = Mock()
+                controller.request.side_effect = [response]
+                auth = ChatGPTAuth(controller)
+                with patch.object(auth, 'quota', return_value={'reset_options': [{'id': 'ready'}]}):
+                    with self.assertRaises(AccountError):
+                        auth.use_reset_credit({'auth_index': 'one'})
+                self.assertEqual(controller.request.call_count, 1)
+
+    def test_expired_or_inapplicable_resets_are_hidden(self):
+        controller = Mock()
+        credit = {'id': 'old', 'status': 'available', 'reset_type': 'codex_rate_limits',
+                  'expires_at': '2000-01-01T00:00:00Z'}
+        controller.request.return_value = {'status_code': 200, 'body': json.dumps({'credits': [credit]})}
+        self.assertEqual(ChatGPTAuth(controller).list_reset_credits({'auth_index': 'one'}), [])
+        credit['expires_at'] = '2099-01-01T00:00:00Z'
+        controller.request.return_value = {'status_code': 200, 'body': json.dumps({
+            'credits': [credit], 'applicable_available_count': 0})}
+        self.assertEqual(ChatGPTAuth(controller).list_reset_credits({'auth_index': 'one'}), [])
+
     def test_model_choices_come_only_from_chatgpt_auth_files(self):
         with tempfile.TemporaryDirectory() as directory:
             controller = Controller(proxy_dir=Path(directory) / 'proxy', data_dir=Path(directory) / 'data')

@@ -364,69 +364,146 @@ class App(ctk.CTk):
     def draw_chatgpt_accounts(self):
         frame = self.chatgpt_accounts
         rows = sorted(self.chatgpt_items, key=lambda item: item.get('email') or item.get('name') or '')
+        widgets = getattr(self, 'chatgpt_widgets', {})
+        self.chatgpt_widgets = widgets
+        names = {item['name'] for item in rows}
+        for name in list(widgets):
+            if name not in names:
+                widgets.pop(name)['card'].destroy()
         if not rows:
+            self._chatgpt_order = None
             frame.pack_forget()
             return
         if not frame.winfo_manager():
             frame.pack(fill='x', padx=12, pady=(0, 3), before=self.tokenharbor_accounts)
-        signature = (self.chatgpt_collapsed, len(rows)) if self.chatgpt_collapsed else (
-            self.chatgpt_collapsed, tuple((item.get('name'), item.get('email'),
-                item.get('status'), item.get('disabled'), item.get('success'), item.get('failed'),
-                json.dumps(item.get('quota'), sort_keys=True)) for item in rows))
-        if getattr(self, '_chatgpt_signature', None) == signature and frame.winfo_children():
-            return
-        self._chatgpt_signature = signature
-        for child in frame.winfo_children():
-            child.destroy()
-        header = self.button(frame, ('▸' if self.chatgpt_collapsed else '▾') +
-                             f'  ChatGPT · accounts {len(rows)}', self.toggle_chatgpt_accounts)
-        header.configure(height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
-        header.pack(fill='x', padx=1, pady=(1, 2))
-        if self.chatgpt_collapsed:
-            return
+        if not getattr(self, 'chatgpt_header', None):
+            self.chatgpt_header = self.button(frame, '', self.toggle_chatgpt_accounts)
+            self.chatgpt_header.configure(height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
+            self.chatgpt_header.pack(fill='x', padx=1, pady=(1, 2))
+        self.chatgpt_header.configure(text=('▸' if self.chatgpt_collapsed else '▾') + f'  ChatGPT · accounts {len(rows)}')
         for item in rows:
-            card = ctk.CTkFrame(frame, fg_color='#202938', corner_radius=8,
-                                border_width=1, border_color='#344155')
-            card.pack(fill='x', padx=1, pady=(0, 2))
-            ctk.CTkLabel(card, text=item.get('email') or item.get('label') or 'ChatGPT account',
-                         height=20, anchor='w', font=('Segoe UI', 11), text_color=TEXT).pack(
-                             fill='x', padx=8, pady=(3, 0))
-            status = 'Paused' if item.get('disabled') else item.get('status') or 'Waiting'
-            ctk.CTkLabel(card, text=f'{status} · {item.get("success") or 0} responses',
-                         height=17, anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(
-                             fill='x', padx=8, pady=(0, 3))
-            quota = item.get('quota') or {}
-            for window in quota.get('windows', []):
-                line = ctk.CTkFrame(card, fg_color='transparent')
+            name = item['name']
+            if name not in widgets:
+                card = ctk.CTkFrame(frame, fg_color='#202938', corner_radius=8, border_width=1, border_color='#344155')
+                def label(height=17, color=MUTED):
+                    return ctk.CTkLabel(card, text='', height=height, anchor='w', font=('Segoe UI', 10), text_color=color)
+                heading = label(20, TEXT)
+                heading.configure(font=('Segoe UI', 11))
+                heading.pack(fill='x', padx=8, pady=(3, 0))
+                status = label()
+                status.pack(fill='x', padx=8, pady=(0, 3))
+                windows = ctk.CTkFrame(card, fg_color='transparent')
+                windows.pack(fill='x')
+                widgets[name] = {'card': card, 'heading': heading, 'status': status,
+                    'windows_frame': windows, 'windows': {}, 'credits': label(15),
+                    'reset_details': label(16), 'reset_button': self.button(card, 'Use usage reset', lambda: None),
+                    'error': label(15)}
+                widgets[name]['reset_button'].configure(height=25, font=('Segoe UI', 10))
+            self.update_chatgpt_row(item)
+        order = tuple(item['name'] for item in rows)
+        if getattr(self, '_chatgpt_order', None) != (self.chatgpt_collapsed, order):
+            for row in widgets.values():
+                row['card'].pack_forget()
+            if not self.chatgpt_collapsed:
+                for name in order:
+                    widgets[name]['card'].pack(fill='x', padx=1, pady=(0, 2))
+            self._chatgpt_order = (self.chatgpt_collapsed, order)
+
+    def update_chatgpt_row(self, item):
+        row = self.chatgpt_widgets[item['name']]
+        row['heading'].configure(text=item.get('email') or item.get('label') or 'ChatGPT account')
+        status = 'Paused' if item.get('disabled') else item.get('status') or 'Waiting'
+        row['status'].configure(text=f'{status} · {item.get("success") or 0} responses')
+        quota = item.get('quota') or {}
+        keys = set()
+        for window in quota.get('windows', []):
+            key = window['label']
+            keys.add(key)
+            if key not in row['windows']:
+                line = ctk.CTkFrame(row['windows_frame'], fg_color='transparent')
                 line.pack(fill='x', padx=8, pady=(0, 2))
-                ctk.CTkLabel(line, text=f'{window["label"]} · {window["remaining"]:.0f}%',
-                             width=75, height=15, anchor='w', font=('Segoe UI', 10),
-                             text_color=self.quota_color(window['remaining'] / 100)).pack(side='left')
-                bar = ctk.CTkProgressBar(line, width=75, height=6,
-                    progress_color=self.quota_color(window['remaining'] / 100))
+                label = ctk.CTkLabel(line, text='', width=75, height=15, anchor='w', font=('Segoe UI', 10))
+                label.pack(side='left')
+                bar = ctk.CTkProgressBar(line, width=75, height=6)
                 bar.pack(side='left', padx=(1, 5))
-                bar.set(window['remaining'] / 100)
-                try:
-                    reset = datetime.fromtimestamp(window['reset_at'], timezone.utc).isoformat()
-                    countdown = self.time_until_reset(reset)
-                except (ValueError, TypeError, OverflowError, OSError):
-                    countdown = '—'
-                ctk.CTkLabel(line, text=countdown, height=15, anchor='e',
-                             font=('Segoe UI', 10), text_color=MUTED).pack(side='right')
-            if quota.get('reset_credits') is not None:
-                ctk.CTkLabel(card, text=f'Reset credits: {quota["reset_credits"]}', height=15,
-                             anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(
-                                 fill='x', padx=8, pady=(0, 2))
-            if not quota.get('windows') and not item.get('disabled'):
-                ctk.CTkLabel(card, text=quota.get('error') or 'Quota not loaded yet', height=15,
-                             anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(
-                                 fill='x', padx=8, pady=(0, 2))
+                timer = ctk.CTkLabel(line, text='', height=15, anchor='e', font=('Segoe UI', 10), text_color=MUTED)
+                timer.pack(side='right')
+                row['windows'][key] = (line, label, bar, timer)
+            line, label, bar, timer = row['windows'][key]
+            if not line.winfo_manager():
+                line.pack(fill='x', padx=8, pady=(0, 2))
+            color = self.quota_color(window['remaining'] / 100)
+            label.configure(text=f'{key} · {window["remaining"]:.0f}%', text_color=color)
+            bar.configure(progress_color=color)
+            bar.set(window['remaining'] / 100)
+        for key, (line, *_) in row['windows'].items():
+            if key not in keys:
+                line.pack_forget()
+        def show(widget, text=None, pady=(0, 2)):
+            if text is not None:
+                widget.configure(text=text)
+            if not widget.winfo_manager():
+                widget.pack(fill='x', padx=8, pady=pady)
+        if quota.get('reset_credits') is not None:
+            show(row['credits'], f'Reset credits: {quota["reset_credits"]}')
+        else:
+            row['credits'].pack_forget()
+        options = quota.get('reset_options') or []
+        if options and not item.get('disabled'):
+            expiry = min((entry['expires_at'] for entry in options if entry.get('expires_at')), default=None)
+            details = 'One available usage reset'
+            if expiry:
+                details += ' · earliest expiry ' + self.activity_time(expiry)
+            show(row['reset_details'], details)
+            row['reset_button'].configure(command=lambda account=item: self.confirm_chatgpt_reset(account),
+                                          state='disabled' if self.busy else 'normal')
+            show(row['reset_button'], pady=(1, 5))
+        else:
+            row['reset_details'].pack_forget()
+            row['reset_button'].pack_forget()
+        error = quota.get('reset_error') or (quota.get('error') or 'Quota not loaded yet' if not quota.get('windows') and not item.get('disabled') else '')
+        if error:
+            show(row['error'], error)
+        else:
+            row['error'].pack_forget()
+        self.update_chatgpt_countdowns(item)
+
+    def update_chatgpt_countdowns(self, item):
+        row = getattr(self, 'chatgpt_widgets', {}).get(item['name'])
+        if not row:
+            return
+        for window in (item.get('quota') or {}).get('windows', []):
+            widgets = row['windows'].get(window['label'])
+            if not widgets:
+                continue
+            try:
+                reset = datetime.fromtimestamp(window['reset_at'], timezone.utc).isoformat()
+                countdown = self.time_until_reset(reset)
+            except (ValueError, TypeError, OverflowError, OSError):
+                countdown = '—'
+            if widgets[3].cget('text') != countdown:
+                widgets[3].configure(text=countdown)
 
     def toggle_chatgpt_accounts(self):
         self.chatgpt_collapsed = not self.chatgpt_collapsed
         self.controller.preferences['chatgpt-collapsed'] = self.chatgpt_collapsed
         self.controller.save()
         self.draw_chatgpt_accounts()
+
+    def confirm_chatgpt_reset(self, account):
+        if self.busy:
+            return
+        email = account.get('email') or 'this ChatGPT account'
+        details = 'ChatGPT will apply one available usage reset.'
+        if not messagebox.askyesno('Use ChatGPT reset',
+            f'Use one reset credit for {email}?\n\n{details}\n\nThis action cannot be undone.', parent=self):
+            return
+        def done(windows):
+            self.notice.configure(text=f'ChatGPT usage reset applied for {email} ({windows} windows).',
+                                  text_color=GREEN)
+            self.refresh_chatgpt_accounts()
+        self.work(lambda: ChatGPTAuth(self.controller).use_reset_credit(account),
+                  done, mutation=True)
 
     def add_chatgpt_account(self):
         if self.busy or self.pending_login or self.pending_chatgpt_login:
@@ -930,9 +1007,13 @@ class App(ctk.CTk):
                 self.update_account_row(account)
             return
         position = self.account_list._parent_canvas.yview()[0]
-        for widget in self.account_list.winfo_children():
+        for _, widget, _ in getattr(self, 'account_group_widgets', []):
             widget.destroy()
-        self.account_widgets = {}
+        for name in list(self.account_widgets):
+            if name not in names:
+                self.account_widgets.pop(name)['card'].destroy()
+            else:
+                self.account_widgets[name]['card'].pack_forget()
         self.account_group_widgets = []
         self.account_layout = layout
         for index, account in enumerate(accounts):
@@ -956,6 +1037,10 @@ class App(ctk.CTk):
                 header.pack(**options)
                 self.account_group_widgets.append((index, header, options))
             name = account['name']
+            if name in self.account_widgets:
+                self.account_widgets[name]['card'].pack(fill='x', pady=(0, 1), padx=1)
+                self.update_account_row(account)
+                continue
             card = ctk.CTkFrame(self.account_list, fg_color='#202938', corner_radius=10,
                 border_width=1, border_color=ACCENT if not self.details_collapsed and name == self.selected else '#344155')
             card.pack(fill='x', pady=(0, 1), padx=1)
@@ -984,11 +1069,11 @@ class App(ctk.CTk):
             quota_frame = ctk.CTkFrame(card, fg_color='transparent')
             quota_frame.pack(fill='x', padx=5, pady=(0, 1))
             widgets = {'card': card, 'button': button, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
-                       'active_families': ()}
+                       'active_families': (), 'quota_rows': {}}
             self.account_widgets[account['name']] = widgets
             groups = self.quota_groups(account['name'])
             for group in groups:
-                visible_buckets = sorted(self.visible_quota_buckets(group), key=lambda b: b['window'] != '5h')
+                visible_buckets = sorted(group['buckets'], key=lambda b: b['window'] != '5h')
                 for bucket in visible_buckets:
                     remaining = bucket.get('remaining')
                     text = self.sidebar_quota_text(group, bucket)
@@ -1006,7 +1091,8 @@ class App(ctk.CTk):
                     bar.grid(row=0, column=2, sticky='ew', padx=(3, 0))
                     bar.set(remaining if remaining is not None else 0)
                     widgets['quotas'][(group['kind'], bucket['window'])] = (label, bar)
-            self.update_countdown(name)
+                    widgets['quota_rows'][(group['kind'], bucket['window'])] = header
+            self.update_account_row(account)
         for account_name in self.account_widgets:
             self.update_countdown(account_name)
         self.after_idle(lambda: self.account_list._parent_canvas.yview_moveto(position))
@@ -1319,7 +1405,19 @@ class App(ctk.CTk):
         else:
             widgets['verification_frame'].pack_forget()
         for group in self.quota_groups(account['name']):
-            for bucket in self.visible_quota_buckets(group):
+            visible = {bucket['window'] for bucket in self.visible_quota_buckets(group)}
+            for bucket in group['buckets']:
+                key = (group['kind'], bucket['window'])
+                row = widgets['quota_rows'][key]
+                if bucket['window'] not in visible:
+                    row.pack_forget()
+                elif not row.winfo_manager():
+                    options = {'fill': 'x', 'padx': 3, 'pady': (3 if group['kind'] == 'claude' and bucket['window'] == '5h' else 0, 0)}
+                    siblings = list(widgets['quota_rows'])
+                    following = next((widgets['quota_rows'][k] for k in siblings[siblings.index(key) + 1:] if widgets['quota_rows'][k].winfo_manager()), None)
+                    if following:
+                        options['before'] = following
+                    row.pack(**options)
                 label, bar = widgets['quotas'][(group['kind'], bucket['window'])]
                 remaining = bucket.get('remaining')
                 label.configure(text=self.sidebar_quota_text(group, bucket), text_color=self.quota_color(remaining))
@@ -1384,6 +1482,8 @@ class App(ctk.CTk):
     def tick_countdowns(self):
         for name in self.account_widgets:
             self.update_countdown(name)
+        for item in self.chatgpt_items:
+            self.update_chatgpt_countdowns(item)
         self.update_total_quota()
         if not self.closed:
             self.after(15000, self.tick_countdowns)
@@ -1631,10 +1731,15 @@ class App(ctk.CTk):
         self.quota_updated.configure(wraplength=0)
         data = (cached or {}).get('data', {})
         self.detail_quota_layout = self.quota_layout(account['name'])
+        self.detail_quota_frames = {}
         for group in self.quota_groups(account['name']):
             self.label(self.detail, group['name'], 15, bold=True)
-            for bucket in sorted(self.visible_quota_buckets(group), key=lambda b: b['window'] != '5h'):
-                self.detail_quota_widgets[(group['kind'], bucket['window'])] = self.quota_row('Weekly quota' if bucket['window'] == 'weekly' else '5-hour quota', bucket)
+            parent = ctk.CTkFrame(self.detail, fg_color='transparent')
+            parent.pack(fill='x')
+            for bucket in sorted(group['buckets'], key=lambda b: b['window'] != '5h'):
+                key = (group['kind'], bucket['window'])
+                self.detail_quota_widgets[key] = self.quota_row('Weekly quota' if bucket['window'] == 'weekly' else '5-hour quota', bucket, parent)
+                self.detail_quota_frames[key] = self.detail_quota_widgets[key][1].master
         self.label(self.detail, 'Bars show remaining quota: full = 100%. Missing percentages are shown as No data.', 12, MUTED)
         actions = ctk.CTkFrame(self.detail, fg_color='transparent')
         actions.pack(fill='x', pady=(8, 16))
@@ -1743,12 +1848,21 @@ class App(ctk.CTk):
             self.quota_updated.configure(text=text[:92] + ('…' if len(text) > 92 else ''), text_color='#ffbd93')
         else:
             self.quota_updated.configure(text_color=MUTED)
-        if getattr(self, 'detail_quota_layout', None) != self.quota_layout(self.selected):
-            self.draw_detail()
-            return
+        self.detail_quota_layout = self.quota_layout(self.selected)
         for group in self.quota_groups(self.selected):
-            for bucket in self.visible_quota_buckets(group):
-                self.update_quota_row(self.detail_quota_widgets[(group['kind'], bucket['window'])], bucket)
+            visible = {bucket['window'] for bucket in self.visible_quota_buckets(group)}
+            for bucket in group['buckets']:
+                key = (group['kind'], bucket['window'])
+                frame = self.detail_quota_frames[key]
+                if bucket['window'] not in visible:
+                    frame.pack_forget()
+                elif not frame.winfo_manager():
+                    options = {'fill': 'x', 'pady': 5}
+                    weekly = self.detail_quota_frames.get((group['kind'], 'weekly'))
+                    if bucket['window'] == '5h' and weekly.winfo_manager():
+                        options['before'] = weekly
+                    frame.pack(**options)
+                self.update_quota_row(self.detail_quota_widgets[key], bucket)
         for model, widgets in self.model_widgets.items():
             self.update_quota_row(widgets, data.get('models', {}).get(model))
 

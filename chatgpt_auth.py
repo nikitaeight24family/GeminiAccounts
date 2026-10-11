@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import urllib.parse
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,9 +97,7 @@ class ChatGPTAuth:
         return accounts
 
     def quota(self, account):
-        headers = {'Authorization': 'Bearer $TOKEN$'}
-        if account.get('account'):
-            headers['ChatGPT-Account-Id'] = account['account']
+        headers = self._headers(account)
         result = self.controller.request('/api-call', 'POST', {
             'auth_index': account['auth_index'], 'method': 'GET',
             'url': 'https://chatgpt.com/backend-api/wham/usage', 'header': headers})
@@ -120,7 +119,87 @@ class ChatGPTAuth:
             windows.append({'label': label, 'remaining': max(0, min(100, 100 - used)),
                             'reset_at': window.get('reset_at')})
         credits = body.get('rate_limit_reset_credits') or {}
-        return {'windows': windows, 'reset_credits': credits.get('available_count')}
+        quota = {'windows': windows, 'reset_credits': credits.get('available_count'),
+                 'reset_applicable': credits.get('applicable_available_count')}
+        if isinstance(quota['reset_credits'], int) and quota['reset_credits'] > 0:
+            try:
+                quota['reset_options'] = self.list_reset_credits(account)
+                if quota['reset_applicable'] == 0:
+                    quota['reset_options'] = []
+                    quota['reset_error'] = 'No usage reset applies right now'
+            except (AccountError, ValueError, TypeError):
+                quota['reset_options'] = []
+                quota['reset_error'] = 'Reset details unavailable'
+        return quota
+
+    @staticmethod
+    def _headers(account):
+        headers = {'Authorization': 'Bearer $TOKEN$', 'Content-Type': 'application/json',
+                   'User-Agent': 'codex_cli_rs/0.76.0 (Windows; x86_64) WindowsTerminal'}
+        if account.get('account'):
+            headers['ChatGPT-Account-Id'] = account['account']
+        return headers
+
+    def list_reset_credits(self, account):
+        result = self.controller.request('/api-call', 'POST', {
+            'auth_index': account['auth_index'], 'method': 'GET',
+            'url': 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
+            'header': self._headers(account)})
+        if result.get('status_code') != 200:
+            raise AccountError('ChatGPT reset details are unavailable right now.')
+        body = json.loads(result.get('body') or '{}')
+        if not isinstance(body, dict) or not isinstance(body.get('credits'), list):
+            raise AccountError('ChatGPT did not return a reset list.')
+        if body.get('applicable_available_count') == 0:
+            return []
+        now = datetime.now(timezone.utc)
+        available = []
+        for credit in body['credits']:
+            if (not isinstance(credit, dict) or credit.get('reset_type') != 'codex_rate_limits' or
+                    credit.get('status') != 'available' or not isinstance(credit.get('id'), str) or not credit['id']):
+                continue
+            expires = credit.get('expires_at')
+            if expires:
+                try:
+                    if datetime.fromisoformat(expires.replace('Z', '+00:00')) <= now:
+                        continue
+                except (AttributeError, TypeError, ValueError):
+                    continue
+            available.append({'id': credit['id'], 'title': credit.get('title') or 'Full usage reset',
+                              'expires_at': expires})
+        return available
+
+    def use_reset_credit(self, account):
+        """Redeem one confirmed credit for one account; never retry a POST automatically."""
+        if account.get('disabled') or not account.get('auth_index'):
+            raise AccountError('Enable this ChatGPT account before using a reset.')
+        if not self.quota(account).get('reset_options'):
+            raise AccountError('This reset is no longer available. Refresh the account.')
+        # The provider chooses the credit; its consume endpoint accepts a redeem ID.
+        payload = json.dumps({'redeem_request_id': str(uuid.uuid4())})
+        try:
+            result = self.controller.request('/api-call', 'POST', {
+                'auth_index': account['auth_index'], 'method': 'POST',
+                'url': 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume',
+                'header': {**self._headers(account), 'Content-Type': 'application/json'},
+                'data': payload})
+        except AccountError:
+            raise AccountError('Reset status is unknown. Refresh this account before trying again.') from None
+        if result.get('status_code') != 200:
+            raise AccountError('ChatGPT did not apply the reset (HTTP ' + str(result.get('status_code') or '?') + ').')
+        try:
+            body = json.loads(result.get('body') or '{}')
+        except (ValueError, TypeError):
+            raise AccountError('Reset status is unknown. Refresh this account before trying again.') from None
+        if not isinstance(body, dict) or body.get('code') not in ('reset', 'already_redeemed'):
+            raise AccountError('ChatGPT did not confirm the reset. Refresh this account.')
+        try:
+            cleared = self.controller.request('/routing/cooldown/reset', 'POST', {'auth_index': account['auth_index']})
+            if cleared.get('status') != 'ok' or cleared.get('auth_index') != account['auth_index']:
+                raise AccountError('Cooldown reset not confirmed.')
+        except AccountError:
+            raise AccountError('ChatGPT applied the reset, but the gateway cooldown could not be cleared. Refresh the account; do not spend another reset.') from None
+        return body.get('windows_reset', 0)
 
     def import_file(self, source):
         path = Path(source)

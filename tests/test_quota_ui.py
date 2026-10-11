@@ -32,6 +32,75 @@ class QuotaUITests(unittest.TestCase):
         group['buckets'][1]['remaining'] = None
         self.assertEqual(len(App.visible_quota_buckets(group)), 2)
 
+    def test_chatgpt_cards_and_controls_survive_quota_refresh_and_collapse(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
+            app = App()
+            try:
+                app.chatgpt_collapsed = False
+                item = {'name': 'one', 'email': 'one@example.com', 'quota': {
+                    'windows': [{'label': '5h', 'remaining': 70, 'reset_at': 1792000000}],
+                    'reset_credits': 0}}
+                app.set_chatgpt_accounts([item])
+                row = app.chatgpt_widgets['one']
+                card, controls, header = row['card'], row['windows']['5h'], app.chatgpt_header
+                item = {**item, 'success': 2, 'quota': {'windows': [
+                    {'label': '5h', 'remaining': 42, 'reset_at': 1792001000}],
+                    'reset_credits': 1, 'reset_options': [{'id': 'ready', 'expires_at': '2099-01-01T00:00:00Z'}]}}
+                app.set_chatgpt_accounts([item])
+                self.assertIs(card, app.chatgpt_widgets['one']['card'])
+                self.assertIs(controls, app.chatgpt_widgets['one']['windows']['5h'])
+                self.assertEqual(controls[2].get(), .42)
+                self.assertTrue(row['reset_button'].winfo_manager())
+                app.toggle_chatgpt_accounts()
+                app.toggle_chatgpt_accounts()
+                self.assertIs(card, app.chatgpt_widgets['one']['card'])
+                self.assertIs(header, app.chatgpt_header)
+                with patch('app.messagebox.askyesno', return_value=False), patch.object(app, 'work') as work:
+                    app.confirm_chatgpt_reset(item)
+                    work.assert_not_called()
+                app.set_chatgpt_accounts([])
+                self.assertFalse(card.winfo_exists())
+            finally:
+                app.closed = True
+                app.destroy()
+
+    def test_google_cards_survive_weekly_threshold_verification_and_account_addition(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
+            app = App()
+            try:
+                app.items = [{'name': 'one', 'email': 'one@example.com', 'disabled': False, 'unavailable': False}]
+                app.selected = 'one'
+                app.draw_account_list()
+                card = app.account_widgets['one']['card']
+                bar = app.account_widgets['one']['quotas'][('gemini', '5h')][1]
+                app.draw_detail()
+                detail = app.detail_quota_widgets[('gemini', '5h')]
+                app.quota_cache['one'] = {'data': {'groups': [{'kind': 'gemini', 'buckets': [
+                    {'window': '5h', 'remaining': .42}, {'window': 'weekly', 'remaining': 0}]}]}}
+                app.draw_account_list()
+                app.update_detail_quota()
+                self.assertIs(card, app.account_widgets['one']['card'])
+                self.assertIs(bar, app.account_widgets['one']['quotas'][('gemini', '5h')][1])
+                self.assertFalse(app.account_widgets['one']['quota_rows'][('gemini', '5h')].winfo_manager())
+                self.assertIs(detail, app.detail_quota_widgets[('gemini', '5h')])
+                self.assertFalse(app.detail_quota_frames[('gemini', '5h')].winfo_manager())
+                app.quota_cache['one']['data']['groups'][0]['buckets'][1]['remaining'] = 1
+                app.items[0]['access_issue'] = 'verification'
+                app.items.append({'name': 'two', 'disabled': False, 'unavailable': False})
+                app.draw_account_list()
+                app.update_detail_quota()
+                self.assertIs(card, app.account_widgets['one']['card'])
+                self.assertTrue(app.account_widgets['one']['quota_rows'][('gemini', '5h')].winfo_manager())
+                self.assertIs(detail, app.detail_quota_widgets[('gemini', '5h')])
+                self.assertTrue(app.detail_quota_frames[('gemini', '5h')].winfo_manager())
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_depleted_weekly_accounts_are_below_a_divider(self):
         import customtkinter as ctk
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), \

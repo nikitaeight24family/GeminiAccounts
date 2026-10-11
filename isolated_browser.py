@@ -3,8 +3,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import threading
-import time
 from pathlib import Path
 
 from backend import AccountError
@@ -44,6 +42,8 @@ def find_browser():
 def open_isolated(url):
     """Use a unique temporary profile for every sign-in, including concurrent ones."""
     browser, kind = find_browser()
+    # Do not remove the profile when the launcher process exits: Chromium may
+    # hand the window to a child process that is still completing OAuth.
     profile = Path(tempfile.mkdtemp(prefix='gemini-chatgpt-signin-'))
     args = [str(browser), '--user-data-dir=' + str(profile), '--no-first-run',
             '--no-default-browser-check', '--new-window',
@@ -54,13 +54,4 @@ def open_isolated(url):
         shutil.rmtree(profile, ignore_errors=True)
         raise AccountError('Could not open the separate ChatGPT sign-in browser.') from error
 
-    def cleanup():
-        process.wait()
-        for _ in range(20):
-            try:
-                shutil.rmtree(profile)
-                return
-            except OSError:
-                time.sleep(1)
-    threading.Thread(target=cleanup, daemon=True).start()
     return process
