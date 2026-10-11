@@ -40,6 +40,13 @@ class ChatGPTAuthTests(unittest.TestCase):
         self.assertNotIn('openai_api_key', converted)
         self.assertNotIn('agent_identity', converted)
 
+    def test_subscription_comes_from_live_quota_without_inventing_free(self):
+        controller = Mock()
+        controller.request.return_value = {'status_code': 200, 'body': json.dumps({'plan_type': 'pro'})}
+        self.assertEqual(ChatGPTAuth(controller).quota({'auth_index': 'one'})['plan_type'], 'pro')
+        controller.request.return_value['body'] = '{}'
+        self.assertIsNone(ChatGPTAuth(controller).quota({'auth_index': 'one'})['plan_type'])
+
     def test_rejects_api_key_file_and_incomplete_tokens(self):
         with self.assertRaises(AccountError):
             gateway_credential({'OPENAI_API_KEY': 'api-test'})

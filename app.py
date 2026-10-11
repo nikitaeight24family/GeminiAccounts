@@ -89,6 +89,7 @@ class App(ctk.CTk):
         self.gateway_jobs_checked = 0
         self.tokenharbor_collapsed = self.controller.preferences.get('tokenharbor-collapsed', True)
         self.chatgpt_collapsed = self.controller.preferences.get('chatgpt-collapsed', True)
+        self.google_accounts_collapsed = self.controller.preferences.get('google-accounts-collapsed', False)
         self.chatgpt_items = []
         self.hide_account_names = self.controller.preferences.get('hide-account-names', False)
         self.activity_rows = {}
@@ -137,8 +138,14 @@ class App(ctk.CTk):
         self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.tokenharbor_accounts.pack(fill='x', padx=12, pady=(0, 5))
         self.draw_chatgpt_accounts()
+        self.google_accounts_header = self.button(self.sidebar, '', self.toggle_google_accounts)
+        self.google_accounts_header.configure(image=self.provider_icons['gemini'], compound='left', height=27, anchor='w',
+                                              font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
+        self.google_accounts_header.pack(fill='x', padx=13, pady=(0, 2))
         self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
         self.account_list.pack(fill='both', expand=True, padx=12)
+        if self.google_accounts_collapsed:
+            self.account_list.pack_forget()
         self.account_list._scrollbar.grid_remove()
         self.service = ctk.CTkLabel(self.sidebar, text='Connecting…', text_color=MUTED, font=('Segoe UI', 10), height=14)
         self.service.pack(anchor='w', padx=18)
@@ -428,14 +435,19 @@ class App(ctk.CTk):
                 card = ctk.CTkFrame(frame, fg_color='#202938', corner_radius=8, border_width=1, border_color='#344155')
                 def label(height=17, color=MUTED):
                     return ctk.CTkLabel(card, text='', height=height, anchor='w', font=('Segoe UI', 10), text_color=color)
-                heading = label(20, TEXT)
+                heading_row = ctk.CTkFrame(card, fg_color='transparent')
+                heading_row.pack(fill='x', padx=8, pady=(3, 0))
+                heading_row.grid_columnconfigure(0, weight=1)
+                heading = ctk.CTkLabel(heading_row, text='', width=1, height=20, anchor='w', text_color=TEXT)
                 heading.configure(font=('Segoe UI', 11), image=self.provider_icons['openai'], compound='left')
-                heading.pack(fill='x', padx=8, pady=(3, 0))
+                heading.grid(row=0, column=0, sticky='ew')
+                model = ctk.CTkLabel(heading_row, text='', width=1, height=20, font=('Segoe UI', 9, 'bold'), text_color='#bac9df')
+                model.grid(row=0, column=1, sticky='e', padx=(4, 0))
                 status = label()
                 status.pack(fill='x', padx=8, pady=(0, 3))
                 windows = ctk.CTkFrame(card, fg_color='transparent')
                 windows.pack(fill='x')
-                widgets[name] = {'card': card, 'heading': heading, 'status': status,
+                widgets[name] = {'card': card, 'heading': heading, 'model': model, 'status': status,
                     'windows_frame': windows, 'windows': {}, 'credits': label(15),
                     'reset_details': label(16), 'reset_button': self.button(card, 'Use usage reset', lambda: None),
                     'error': label(15)}
@@ -450,11 +462,21 @@ class App(ctk.CTk):
                     widgets[name]['card'].pack(fill='x', padx=1, pady=(0, 2))
             self._chatgpt_order = (self.chatgpt_collapsed, order)
 
+    @staticmethod
+    def chatgpt_plan_name(item):
+        plan = (item.get('quota') or {}).get('plan_type') or item.get('plan_type')
+        if not isinstance(plan, str) or not plan.strip():
+            return 'Plan unknown'
+        plan = plan.strip().lower()
+        names = {'free': 'Free', 'plus': 'Plus', 'pro': 'Pro', 'team': 'Team',
+                 'business': 'Business', 'enterprise': 'Enterprise', 'edu': 'Edu', 'go': 'Go'}
+        return names.get(plan, plan.replace('_', ' ').title()[:32])
+
     def update_chatgpt_row(self, item):
         row = self.chatgpt_widgets[item['name']]
         row['heading'].configure(text=self.display_name(item, 'OpenAI'))
         status = 'Paused' if item.get('disabled') else item.get('status') or 'Waiting'
-        row['status'].configure(text=f'{status} · {item.get("success") or 0} responses')
+        row['status'].configure(text=f'{self.chatgpt_plan_name(item)} · {status} · {item.get("success") or 0} responses')
         quota = item.get('quota') or {}
         keys = set()
         for window in quota.get('windows', []):
@@ -765,11 +787,12 @@ class App(ctk.CTk):
             self.after(5000, self.poll_activity)
             return
         self.activity_busy = True
+        chatgpt_accounts = copy.deepcopy(self.chatgpt_items)
         def fetch():
             try:
                 accounts, records, strategy = self.controller.activity_snapshot()
                 self.harbor_activity.observe(records, TokenHarbor(self.controller, self.integrations).auth_keys())
-                return accounts, copy.deepcopy(self.activity.ingest(records, accounts)), strategy, None, self.controller.quota_wait_status()
+                return accounts, copy.deepcopy(self.activity.ingest(records, accounts + chatgpt_accounts)), strategy, None, self.controller.quota_wait_status()
             except Exception:
                 return None, None, None, 'Cannot reach the proxy. Showing cached data.', {'jobs': []}
         def done(result):
@@ -784,6 +807,7 @@ class App(ctk.CTk):
                 self.activity_strategy = strategy
                 self.render_activity()
                 self.draw_account_list()
+                self.draw_chatgpt_accounts()
                 self.update_tokenharbor_status()
                 waiting = [job for job in quota_wait.get('jobs', []) if job.get('state') == 'waiting']
                 if waiting:
@@ -797,7 +821,8 @@ class App(ctk.CTk):
                     except (ValueError, TypeError):
                         age = 9999
                     if 0 <= age < 120:
-                        self.fetch_quota(latest['name'])
+                        if latest['name'] in {item['name'] for item in self.items}:
+                            self.fetch_quota(latest['name'])
                 self.queue_policy()
             if not self.closed:
                 self.after(5000, self.poll_activity)
@@ -812,7 +837,9 @@ class App(ctk.CTk):
         choice = self.controller.preferences.get('reset-group', 'auto')
         if choice in ('gemini', 'claude'):
             return choice
-        latest = sorted(self.activity_state['latest'].values(), key=lambda e: e['at'], reverse=True)
+        latest = sorted((event for event in self.activity_state['latest'].values()
+                         if event['name'] in {account['name'] for account in self.items}),
+                        key=lambda e: e['at'], reverse=True)
         if latest:
             model = latest[0].get('upstream_model') or self.model_aliases.get(latest[0]['model'], latest[0]['model'])
             if model == 'claude-sonnet-4-5' or model.startswith('gemini'):
@@ -911,7 +938,7 @@ class App(ctk.CTk):
         for key in list(self.activity_rows):
             if key not in by_name:
                 self.activity_rows.pop(key).destroy()
-        for account in self.items:
+        for account in self.items + self.chatgpt_items:
             key = account['name']
             if key not in self.activity_rows:
                 self.activity_rows[key] = self.label(self.stats_accounts, '', 13)
@@ -1038,7 +1065,19 @@ class App(ctk.CTk):
         self.controller.save()
         self.draw_tokenharbor_accounts()
 
+    def toggle_google_accounts(self):
+        self.google_accounts_collapsed = not self.google_accounts_collapsed
+        self.controller.preferences['google-accounts-collapsed'] = self.google_accounts_collapsed
+        self.controller.save()
+        if self.google_accounts_collapsed:
+            self.account_list.pack_forget()
+        else:
+            self.account_list.pack(fill='both', expand=True, padx=12, before=self.service)
+        self.draw_account_list()
+
     def draw_account_list(self):
+        self.google_accounts_header.configure(text=('▸' if self.google_accounts_collapsed else '▾') +
+                                             f'  Google Gemini · accounts {len(self.items)}')
         self.draw_tokenharbor_accounts()
         self.update_total_quota()
         accounts = sorted(self.items, key=self.account_sort_key)
@@ -1128,7 +1167,7 @@ class App(ctk.CTk):
             if account.get('access_issue') == 'verification':
                 verification_frame.pack(fill='x', padx=5, pady=(0, 3))
             quota_frame = ctk.CTkFrame(card, fg_color='transparent')
-            quota_frame.pack(fill='x', padx=5, pady=(0, 1))
+            quota_frame.pack(fill='x', padx=5, pady=0)
             widgets = {'card': card, 'button': button, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
                        'active_families': (), 'quota_rows': {}}
             self.account_widgets[account['name']] = widgets
@@ -1139,7 +1178,7 @@ class App(ctk.CTk):
                     remaining = bucket.get('remaining')
                     text = self.sidebar_quota_text(group, bucket)
                     header = ctk.CTkFrame(quota_frame, fg_color='transparent')
-                    header.pack(fill='x', padx=3, pady=(3 if group['kind'] == 'claude' and bucket['window'] == '5h' else 0, 0))
+                    header.pack(fill='x', padx=3, pady=(1 if group['kind'] == 'claude' and bucket['window'] == '5h' else 0, 0))
                     header.grid_columnconfigure(2, weight=1)
                     icon = ctk.CTkLabel(header, text='', image=self.provider_icons[group['kind']] if bucket is visible_buckets[0] else None, height=14, width=14)
                     icon.grid(row=0, column=0, padx=(0, 4))
@@ -1621,7 +1660,11 @@ class App(ctk.CTk):
         # These Claude-compatible aliases actually route to Gemini subscriptions.
         if model == 'claude-sonnet-4-5' or model.startswith('gemini'):
             return 'gemini'
-        if model.startswith(('claude', 'gpt', 'o1', 'o3', 'o4')):
+        if model.startswith('gpt-oss'):
+            return 'claude'
+        if model.startswith(('gpt', 'o1', 'o3', 'o4', 'codex')):
+            return 'openai'
+        if model.startswith('claude'):
             return 'claude'
         return None
 
@@ -1634,7 +1677,7 @@ class App(ctk.CTk):
             if family:
                 resets[family] = min(resets.get(family, float('inf')), job['retry_at'])
         labels = []
-        for family, title in (('claude', 'Claude'), ('gemini', 'Gemini')):
+        for family, title in (('claude', 'Claude'), ('gemini', 'Gemini'), ('openai', 'OpenAI')):
             if family in resets:
                 minutes = math.ceil(max(0, resets[family] - now) / 60)
                 duration = f'{minutes // 60}h {minutes % 60:02}m' if minutes >= 60 else f'{minutes}m'
@@ -1661,7 +1704,7 @@ class App(ctk.CTk):
         running = {job.get('upstream_model') or
                    getattr(self, 'model_aliases', {}).get(job.get('model'), job.get('model', ''))
                    for job in getattr(self, 'gateway_jobs', []) if job.get('state') == 'running'}
-        enabled = {a['name'] for a in self.items if not a.get('disabled')}
+        enabled = {a['name'] for a in self.items + getattr(self, 'chatgpt_items', []) if not a.get('disabled')}
         latest = {}
         for model, event in self.activity_state['latest'].items():
             actual = event.get('upstream_model') or getattr(self, 'model_aliases', {}).get(event.get('model') or model, event.get('model') or model)
@@ -1808,16 +1851,25 @@ class App(ctk.CTk):
             families = tuple(kind for kind in ('gemini', 'claude') if providers.get(kind) == name)
             self.draw_active_badges(widgets, families,
                 running_models.get(families[-1], '') if families else self.last_account_model(name))
-            is_active = name in active
-            if widgets.get('active_highlight') != is_active:
-                widgets['active_highlight'] = is_active
-                if is_active:
-                    self.draw_rainbow_border(widgets, (time.monotonic() / 8) % 1)
-                else:
-                    card._canvas.delete('rainbow')
-                    widgets.pop('rainbow_size', None)
-                    widgets.pop('rainbow_segments', None)
+            self.update_active_border(widgets, name in active)
+        for name, widgets in getattr(self, 'chatgpt_widgets', {}).items():
+            is_active = providers.get('openai') == name
+            caption = running_models.get('openai', '') if is_active else self.last_account_model(name)
+            if widgets['model'].cget('text') != caption:
+                widgets['model'].configure(text=caption)
+            self.update_active_border(widgets, is_active)
         self.after(500, self.animate_active_borders)
+
+    def update_active_border(self, widgets, is_active):
+        card = widgets['card']
+        if widgets.get('active_highlight') != is_active:
+            widgets['active_highlight'] = is_active
+            if not is_active:
+                card._canvas.delete('rainbow')
+                widgets.pop('rainbow_size', None)
+                widgets.pop('rainbow_segments', None)
+        if is_active and card.winfo_ismapped():
+            self.draw_rainbow_border(widgets, (time.monotonic() / 8) % 1)
 
     def private_account_name(self, provider, identity):
         groups = self.controller.preferences.setdefault('private-account-numbers', {})

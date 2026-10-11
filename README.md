@@ -43,6 +43,7 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 
 ## Features
 
+- Google Gemini accounts have their own collapsible list with a saved expand/collapse preference. ChatGPT cards show the reported subscription plan, active-request border and recent model, using the same activity tracking as Google cards.
 - The eye button hides account names across cards, details and request history using stable numbered aliases. The preference persists; clicking again restores names. ChatGPT cards and their list header carry an OpenAI icon.
 
 - Choose models directly in Claude or Codex after connecting that application from **Connect applications**. The connection offers distinct available Gemini Pro, Flash and Claude model IDs; selecting one sends requests to that exact model. To refresh a client's model menu after account changes, open **Connect applications** again and approve reconnecting it. Client configurations change only after this explicit action.

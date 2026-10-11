@@ -69,6 +69,60 @@ class QuotaUITests(unittest.TestCase):
                 app.closed = True
                 app.destroy()
 
+    def test_google_collapse_and_gpt_activity_preserve_widgets(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), \
+                patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
+            app = App()
+            try:
+                app.items = [{'name': 'google', 'auth_index': 'google-index', 'disabled': False, 'unavailable': False}]
+                app.chatgpt_items = [{'name': 'gpt', 'auth_index': 'gpt-index', 'email': 'gpt@example.com', 'disabled': False, 'plan_type': 'plus'}]
+                app.draw_account_list()
+                app.draw_chatgpt_accounts()
+                app.toggle_chatgpt_accounts()
+                app.update()
+                google_card = app.account_widgets['google']['card']
+                gpt_card = app.chatgpt_widgets['gpt']['card']
+                now = datetime.now(timezone.utc).isoformat()
+                record = {'execution_id': 'gpt-response', 'auth_index': 'gpt-index', 'model': 'gpt-6.1', 'timestamp': now}
+                with patch.object(app.controller, 'activity_snapshot', return_value=(app.items, [record], 'priority')), \
+                        patch.object(app.controller, 'quota_wait_status', return_value={'jobs': []}), \
+                        patch.object(app, 'work', side_effect=lambda fetch, done: done(fetch())):
+                    app.poll_activity()
+                self.assertEqual(app.activity_state['stats']['gpt']['success'], 1)
+                self.assertEqual(app.activity_state['latest']['gpt-6.1']['name'], 'gpt')
+                app.gateway_jobs = [{'model': 'gpt-6.1', 'state': 'running'}]
+                app.gateway_jobs_checked = time.monotonic()
+                app.animate_active_borders()
+                self.assertEqual(app.active_provider_accounts(), {'openai': 'gpt'})
+                self.assertIn('Plus', app.chatgpt_widgets['gpt']['status'].cget('text'))
+                self.assertEqual(App.chatgpt_plan_name({'plan_type': 'plus', 'quota': {'plan_type': 'pro'}}), 'Pro')
+                self.assertEqual(App.chatgpt_plan_name({}), 'Plan unknown')
+                self.assertEqual(app.chatgpt_widgets['gpt']['model'].cget('text'), 'gpt-6.1')
+                self.assertTrue(gpt_card._canvas.find_withtag('rainbow'))
+                self.assertFalse(google_card._canvas.find_withtag('rainbow'))
+                app.toggle_google_accounts()
+                app.update()
+                self.assertFalse(google_card.winfo_ismapped())
+                self.assertTrue(gpt_card.winfo_ismapped())
+                app.draw_account_list()
+                self.assertIs(google_card, app.account_widgets['google']['card'])
+                self.assertTrue(app.controller.preferences['google-accounts-collapsed'])
+                app.toggle_google_accounts()
+                app.update()
+                self.assertTrue(google_card.winfo_ismapped())
+                self.assertIs(google_card, app.account_widgets['google']['card'])
+                app.gateway_jobs[0]['state'] = 'waiting'
+                app.animate_active_borders()
+                self.assertFalse(gpt_card._canvas.find_withtag('rainbow'))
+                self.assertEqual(app.chatgpt_widgets['gpt']['model'].cget('text'), 'gpt-6.1')
+                app.recent_account_models['gpt']['at'] = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
+                app.animate_active_borders()
+                self.assertEqual(app.chatgpt_widgets['gpt']['model'].cget('text'), '')
+                self.assertIs(gpt_card, app.chatgpt_widgets['gpt']['card'])
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_five_hour_rows_hide_below_one_percent_weekly(self):
         group = {'buckets': [{'window': '5h', 'remaining': 1},
                              {'window': 'weekly', 'remaining': .0099}]}

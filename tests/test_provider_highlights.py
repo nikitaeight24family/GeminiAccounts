@@ -40,6 +40,13 @@ class ProviderHighlightTests(unittest.TestCase):
         self.assertEqual(App.last_account_model(view, 'a', now + timedelta(seconds=59)), '3 Flash')
         self.assertEqual(App.last_account_model(view, 'a', now + timedelta(seconds=60)), '')
 
+    def test_openai_subscription_models_do_not_share_google_claude_pool(self):
+        for model in ('gpt-6.1-sol', 'o3', 'o4-mini', 'codex-mini-latest'):
+            self.assertEqual(App.model_family(model), 'openai')
+        self.assertEqual(App.model_family('gpt-oss-120b-medium'), 'claude')
+        self.assertEqual(App.quota_wait_text([{'model': 'gpt-6.1-sol', 'retry_at': 1060}], now=1000),
+                         'until OpenAI · 1m')
+
     def test_wait_caption_is_short_and_names_actual_provider(self):
         jobs = [{'model': 'claude-opus-4-6-thinking', 'retry_at': 1000 + 151 * 3600}]
         self.assertEqual(App.quota_wait_text(jobs, now=1000), 'until Claude · 151h 00m')

@@ -54,7 +54,7 @@ class AccountsTests(unittest.TestCase):
         from unittest.mock import Mock
         c = Mock()
         c.accounts.return_value = []
-        ui = SimpleNamespace(busy=False, selected='a', items=[{'name': 'a', 'email': 'a@example.com'}],
+        ui = SimpleNamespace(busy=False, hide_account_names=False, selected='a', items=[{'name': 'a', 'email': 'a@example.com'}],
                              controller=c, quota_cache={'a': {}}, notice=Mock(), loaded=Mock())
         ui.work = lambda fn, done, **kw: done(fn())
         with patch('app.messagebox.askyesno', return_value=False):

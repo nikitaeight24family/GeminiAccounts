@@ -56,7 +56,7 @@ def gateway_credential(raw):
     result = {'type': 'codex', 'id_token': tokens['id_token'],
               'access_token': tokens['access_token'], 'refresh_token': tokens['refresh_token'],
               'account_id': account_id, 'email': email,
-              'plan_type': identity.get('chatgpt_plan_type') or raw.get('plan_type') or 'free',
+              'plan_type': identity.get('chatgpt_plan_type') or raw.get('plan_type') or '',
               'last_refresh': raw.get('last_refresh') or datetime.now(timezone.utc).isoformat(),
               'expired': expire}
     return result
@@ -229,7 +229,7 @@ class ChatGPTAuth:
             windows.append({'label': label, 'remaining': max(0, min(100, 100 - used)),
                             'reset_at': window.get('reset_at')})
         credits = body.get('rate_limit_reset_credits') or {}
-        quota = {'windows': windows, 'reset_credits': credits.get('available_count'),
+        quota = {'windows': windows, 'plan_type': body.get('plan_type'), 'reset_credits': credits.get('available_count'),
                  'reset_applicable': credits.get('applicable_available_count')}
         if isinstance(quota['reset_credits'], int) and quota['reset_credits'] > 0:
             try:
