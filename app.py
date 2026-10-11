@@ -61,6 +61,7 @@ class App(ctk.CTk):
         self.model_cache = {}
         self.quota_cache = {}
         self.quota_pending = set()
+        self.quota_render_job = None
         self.account_widgets = {}
         self.detail_account = object()
         self.detail_quota_widgets = {}
@@ -72,10 +73,12 @@ class App(ctk.CTk):
         self.login_url = None
         self.activity = Activity(self.controller.data_dir / 'activity.json')
         self.activity_state = copy.deepcopy(self.activity.state)
+        self.recent_account_models = self.latest_models_by_account(self.activity_state)
         self.activity_started = False
         self.activity_busy = False
         self.gateway_jobs = []
         self.gateway_jobs_checked = 0
+        self.tokenharbor_collapsed = self.controller.preferences.get('tokenharbor-collapsed', True)
         self.activity_rows = {}
         self.policy_busy = False
         self.policy_job = None
@@ -200,7 +203,7 @@ class App(ctk.CTk):
         self.after(120, lambda: self.refresh(prepare=True))
         self.after(60000, self.periodic_quota)
         self.after(15000, self.tick_countdowns)
-        self.after(150, self.animate_active_borders)
+        self.after(500, self.animate_active_borders)
         self.after(200, self.poll_gateway_jobs)
         self.after(30000, self.check_for_updates)
         if self.controller.preferences.get('details-collapsed'):
@@ -447,6 +450,7 @@ class App(ctk.CTk):
             else:
                 self.items = accounts
                 self.activity_state = state
+                self.recent_account_models = self.latest_models_by_account(state)
                 self.activity_strategy = strategy
                 self.render_activity()
                 self.draw_account_list()
@@ -612,16 +616,20 @@ class App(ctk.CTk):
             return
         client = TokenHarbor(self.controller, self.integrations)
         keys = client.keys()
-        signature = tuple(keys)
+        signature = (tuple(keys), self.tokenharbor_collapsed)
         if getattr(self, '_tokenharbor_key_signature', None) == signature and frame.winfo_children():
             return
         self._tokenharbor_key_signature = signature
         for child in frame.winfo_children():
             child.destroy()
         self.tokenharbor_widgets = []
-        header = ctk.CTkLabel(frame, text=f'TokenHarbor · keys {len(keys)}', height=18,
-            anchor='w', font=('Segoe UI', 11, 'bold'), text_color='#f7ca70')
-        header.pack(fill='x', padx=6, pady=(2, 3))
+        self.tokenharbor_highlight = None
+        header = self.button(frame, ('▸' if self.tokenharbor_collapsed else '▾') +
+            f'  TokenHarbor · keys {len(keys)}', self.toggle_tokenharbor_accounts)
+        header.configure(height=28, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
+        header.pack(fill='x', padx=1, pady=(2, 3))
+        if self.tokenharbor_collapsed:
+            return
         if not keys:
             ctk.CTkLabel(frame, text='No TokenHarbor keys connected', height=17,
                 anchor='w', font=('Segoe UI', 10), text_color=MUTED).pack(fill='x', padx=8, pady=(0, 3))
@@ -636,6 +644,12 @@ class App(ctk.CTk):
         add = self.button(frame, '+ Add TokenHarbor account', lambda: self.tokenharbor_settings(self))
         add.configure(height=24, fg_color='#303e59')
         add.pack(fill='x', padx=1, pady=(2, 0))
+
+    def toggle_tokenharbor_accounts(self):
+        self.tokenharbor_collapsed = not self.tokenharbor_collapsed
+        self.controller.preferences['tokenharbor-collapsed'] = self.tokenharbor_collapsed
+        self.controller.save()
+        self.draw_tokenharbor_accounts()
 
     def draw_account_list(self):
         self.draw_tokenharbor_accounts()
@@ -1187,13 +1201,25 @@ class App(ctk.CTk):
     def active_account_names(self):
         return set(self.active_provider_accounts().values())
 
+    @staticmethod
+    def latest_models_by_account(state):
+        latest = {}
+        for event in state.get('events', []):
+            name = event.get('name')
+            if name and event.get('at') and event.get('at', '') >= latest.get(name, {}).get('at', ''):
+                latest[name] = event
+        for event in state.get('latest', {}).values():
+            name = event.get('name')
+            if name and event.get('at') and event.get('at', '') >= latest.get(name, {}).get('at', ''):
+                latest[name] = event
+        for name, stats in state.get('stats', {}).items():
+            if stats.get('last_model') and stats.get('last', '') >= latest.get(name, {}).get('at', ''):
+                latest[name] = {'at': stats['last'], 'upstream_model': stats['last_model']}
+        return latest
+
     def last_account_model(self, name, now=None):
-        stats = self.activity_state.get('stats', {}).get(name, {})
-        candidates = [e for e in self.activity_state.get('events', []) if e.get('name') == name]
-        candidates += [e for e in self.activity_state.get('latest', {}).values() if e.get('name') == name]
-        if stats.get('last_model') and stats.get('last'):
-            candidates.insert(0, {'at': stats['last'], 'upstream_model': stats['last_model']})
-        last = max(candidates, key=lambda e: e.get('at', ''), default={})
+        recent = getattr(self, 'recent_account_models', None)
+        last = (recent if recent is not None else App.latest_models_by_account(self.activity_state)).get(name, {})
         try:
             timestamp = datetime.fromisoformat(last['at'].replace('Z', '+00:00'))
             age = ((now or datetime.now(timezone.utc)) - timestamp).total_seconds()
@@ -1305,28 +1331,33 @@ class App(ctk.CTk):
             families = tuple(kind for kind in ('gemini', 'claude') if providers.get(kind) == name)
             self.draw_active_badges(widgets, families,
                 running_models.get(families[-1], '') if families else self.last_account_model(name))
-            if name in active:
-                self.draw_rainbow_border(widgets, (time.monotonic() / 8) % 1)
-            elif widgets.pop('rainbow_size', None):
-                card._canvas.delete('rainbow')
-                widgets.pop('rainbow_segments', None)
+            is_active = name in active
+            if widgets.get('active_highlight') != is_active:
+                widgets['active_highlight'] = is_active
+                if is_active:
+                    self.draw_rainbow_border(widgets, (time.monotonic() / 8) % 1)
+                else:
+                    card._canvas.delete('rainbow')
+                    widgets.pop('rainbow_size', None)
+                    widgets.pop('rainbow_segments', None)
         harbor_active = any(job.get('state') == 'running' and
                             'tokenharbor' in (job.get('model') or '').lower()
                             for job in getattr(self, 'gateway_jobs', []))
-        for card in getattr(self, 'tokenharbor_widgets', []):
-            card.configure(border_color=ACCENT if harbor_active else '#344155')
-            if harbor_active:
-                card.configure(border_width=2)
-            else:
-                card.configure(border_width=1)
-        self.after(100, self.animate_active_borders)
+        if getattr(self, 'tokenharbor_highlight', None) != harbor_active:
+            self.tokenharbor_highlight = harbor_active
+            for card in getattr(self, 'tokenharbor_widgets', []):
+                card.configure(border_width=2 if harbor_active else 1,
+                    border_color=ACCENT if harbor_active else '#344155')
+        self.after(500, self.animate_active_borders)
 
     def display_name(self, account):
         return self.controller.preferences.get('labels', {}).get(account['name']) or account.get('email') or 'Google account'
 
     def update_selection_style(self, account, widgets):
         selected = not self.details_collapsed and account['name'] == self.selected
-        widgets['card'].configure(border_width=1, border_color=ACCENT if selected else '#344155')
+        active = widgets.get('active_highlight', False)
+        widgets['card'].configure(border_width=2 if active else 1,
+            border_color=ACCENT if selected or active else '#344155')
         widgets['button'].configure(fg_color='#303e59' if selected else CARD, hover=not self.details_collapsed)
 
     def select(self, account):
@@ -1484,6 +1515,21 @@ class App(ctk.CTk):
     def quota_color(remaining):
         return MUTED if remaining is None else (GREEN if remaining > .3 else '#f5c56b' if remaining > .1 else '#ff8d8d')
 
+    def schedule_quota_render(self):
+        if self.quota_render_job is None:
+            self.quota_render_job = self.after(120, self.render_quota_updates)
+
+    def render_quota_updates(self):
+        self.quota_render_job = None
+        if self.closed:
+            return
+        self.draw_account_list()
+        for account_name in self.account_widgets:
+            self.update_countdown(account_name)
+        if self.selected:
+            self.update_detail_quota()
+        self.queue_policy()
+
     def fetch_quota(self, name):
         if name in self.quota_pending:
             return
@@ -1528,15 +1574,8 @@ class App(ctk.CTk):
             self.quota_cache[name] = {'data': data if data is not None else old.get('data', {}),
                 'at': datetime.now().astimezone() if data is not None else old.get('at'),
                 'checked': time.monotonic(), 'error': error}
-            account = next((a for a in self.items if a['name'] == name), None)
-            if account:
-                self.draw_account_list()
-            for account_name in self.account_widgets:
-                self.update_countdown(account_name)
-            self.update_total_quota()
-            if self.selected == name:
-                self.update_detail_quota()
-            self.queue_policy()
+            if any(a['name'] == name for a in self.items):
+                self.schedule_quota_render()
         self.work(fetch, done)
 
     def periodic_quota(self):

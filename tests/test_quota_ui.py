@@ -79,6 +79,31 @@ class QuotaUITests(unittest.TestCase):
                 app.closed = True
                 app.destroy()
 
+    def test_tokenharbor_keys_collapse_to_count_without_rebuilding_each_refresh(self):
+        import customtkinter as ctk
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch('app.TokenHarbor.keys', return_value=['thk_example_key_1234']):
+            app = App()
+            try:
+                app.draw_tokenharbor_accounts()
+                collapsed = app.tokenharbor_accounts.winfo_children()
+                self.assertEqual(len(collapsed), 1)
+                self.assertIn('keys 1', collapsed[0].cget('text'))
+                app.draw_tokenharbor_accounts()
+                self.assertIs(collapsed[0], app.tokenharbor_accounts.winfo_children()[0])
+                app.toggle_tokenharbor_accounts()
+                self.assertEqual(len(app.tokenharbor_widgets), 1)
+                self.assertTrue(any('Add TokenHarbor' in child.cget('text')
+                                    for child in app.tokenharbor_accounts.winfo_children()
+                                    if isinstance(child, ctk.CTkButton)))
+                app.toggle_tokenharbor_accounts()
+                self.assertEqual(len(app.tokenharbor_accounts.winfo_children()), 1)
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_ten_accounts_fit_and_all_four_limits_remain_visible(self):
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
             app = App()
