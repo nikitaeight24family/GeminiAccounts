@@ -157,6 +157,7 @@ class App(ctk.CTk):
         self.account_list._scrollbar.grid_remove()
         self.service = ctk.CTkLabel(self.sidebar, text='Connecting…', text_color=MUTED, font=('Segoe UI', 10), height=14)
         self.service.pack(anchor='w', padx=18)
+        self.sidebar_spacer = ctk.CTkFrame(self.sidebar, height=0, fg_color='transparent')
         self.pool_summary_groups = {}
         google_summary = self.create_pool_summary('google', 'Google Gemini')
         self.total_quota_frame = ctk.CTkFrame(google_summary, fg_color='transparent')
@@ -729,6 +730,11 @@ class App(ctk.CTk):
         else:
             self.google_accounts_header.pack_forget()
             self.account_list.pack_forget()
+        if self.google_accounts_collapsed or not self.google_visible():
+            if not self.sidebar_spacer.winfo_manager():
+                self.sidebar_spacer.pack(fill='both', expand=True, before=self.service)
+        else:
+            self.sidebar_spacer.pack_forget()
         for provider, group in getattr(self, 'pool_summary_groups', {}).items():
             visible = self.provider_visible('gemini') if provider == 'google' else self.provider_visible('openai')
             if visible and not group['frame'].winfo_manager():
