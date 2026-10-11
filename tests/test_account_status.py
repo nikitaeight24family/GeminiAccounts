@@ -1,10 +1,26 @@
 import json
 import unittest
-from account_status import account_status, safe_detail
+from account_status import account_status, google_account_status, safe_detail
 from ui_locale import translate
 
 
 class AccountStatusTests(unittest.TestCase):
+    def test_google_provider_limits_are_independent(self):
+        account = {'status': 'error', 'cooldowns': [{'scope': 'model', 'reason': 'quota', 'remaining_seconds': 100}]}
+        groups = [{'kind': 'gemini', 'buckets': [{'remaining': .847}, {'remaining': .234}]},
+                  {'kind': 'claude', 'buckets': [{'remaining': 0}]}]
+        self.assertEqual(google_account_status(account, groups)[0], 'Claude quota exhausted')
+        groups[0]['buckets'][0]['remaining'] = 0
+        self.assertEqual(google_account_status(account, groups)[0], 'Limit exhausted')
+        groups[0]['buckets'][0]['remaining'] = .847
+        groups[1]['buckets'][0]['remaining'] = .5
+        self.assertEqual(google_account_status(account, groups)[0], 'Model quota restricted')
+
+    def test_google_real_credential_problem_takes_precedence(self):
+        groups = [{'kind': 'claude', 'buckets': [{'remaining': 0}]}]
+        self.assertEqual(google_account_status({'status': 'blocked'}, groups)[0], 'Account blocked')
+        self.assertEqual(google_account_status({'disabled': True}, groups)[0], 'Paused')
+
     def test_real_quota_snapshot_is_not_error(self):
         account = {'status': 'error', 'unavailable': True, 'status_message': '',
                    'cooldowns': [{'scope': 'credential', 'reason': 'credential_quota', 'retry_at': '2030-01-01T00:00:00Z'}],

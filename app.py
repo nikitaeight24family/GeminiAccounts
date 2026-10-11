@@ -21,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter import font as tkfont
 from backend import Controller, AccountError
-from account_status import account_status
+from account_status import account_status, google_account_status
 from brand_icons import ANTIGRAVITY_PNG
 from activity import Activity
 from harbor_activity import HarborActivity, key_id, key_label
@@ -1705,7 +1705,7 @@ class App(ctk.CTk):
         self.update_selection_style(account, widgets)
         widgets['button'].configure(text=self.account_heading(account))
         widgets['plan'].configure(text=' ' + self.google_plan_name(account) + ' ')
-        state, severity, reason = account_status(account)
+        state, severity, reason = google_account_status(account, self.quota_groups(account['name']))
         state_text = state if severity in ('warning', 'error') else f'{state} · {account.get("success") or 0} responses'
         widgets['status'].configure(text=state_text,
             text_color={'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': MUTED, 'muted': MUTED}[severity])

@@ -79,3 +79,30 @@ def account_status(account, now=None):
     if not state or state in ('waiting', 'pending', 'initializing'):
         return 'Waiting', 'muted', detail
     return 'Provider status: ' + safe_detail(raw), 'warning', detail
+
+
+def google_account_status(account, groups):
+    """Google credentials can serve independent Gemini and Claude quotas."""
+    status = account_status(account)
+    label, severity, detail = status
+    if severity == 'error' or label in ('Paused', 'Verification required'):
+        return status
+    exhausted = set()
+    for group in groups:
+        kind = group.get('kind')
+        if kind not in ('gemini', 'claude'):
+            continue
+        values = [b.get('remaining') for b in group.get('buckets', [])
+                  if isinstance(b.get('remaining'), (int, float))]
+        if values:
+            if any(value <= 0 for value in values):
+                exhausted.add(kind)
+    if len(exhausted) == 2:
+        return 'Limit exhausted', 'warning', ''
+    if exhausted:
+        provider = 'Gemini' if 'gemini' in exhausted else 'Claude'
+        return provider + ' quota exhausted', 'warning', ''
+    if label == 'Limit exhausted':
+        # A model cooldown does not prove that all models or providers are depleted.
+        return 'Model quota restricted', 'warning', ''
+    return status

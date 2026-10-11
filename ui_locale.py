@@ -99,6 +99,8 @@ RU = {
 }
 
 PHRASES = {
+    'Gemini quota exhausted': 'Лимит Gemini исчерпан', 'Claude quota exhausted': 'Лимит Claude исчерпан',
+    'Model quota restricted': 'Ограничен лимит модели',
     'Limit exhausted': 'Лимит исчерпан', 'Account blocked': 'Аккаунт заблокирован',
     'Access denied': 'Доступ запрещён', 'Request error': 'Ошибка запроса',
     'Rate limited': 'Ограничение частоты', 'Waiting to retry': 'Ожидание повтора',
