@@ -30,7 +30,7 @@ class SkinCache:
             brush = ImageDraw.Draw(corner)
             brush.rounded_rectangle((0, 0, size*3-1, size*3-1), radius*3,
                                     fill=outline if border else fill)
-            if border:
+            if border and size > border*2:
                 brush.rounded_rectangle((border*3, border*3, (size-border)*3-1, (size-border)*3-1),
                                         max(0, radius-border)*3, fill=fill)
             corner = corner.resize((size, size), Image.Resampling.LANCZOS)

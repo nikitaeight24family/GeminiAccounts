@@ -504,7 +504,21 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.work(lambda: ChatGPTAuth(self.controller).accounts_with_quotas(maintain_pool=True), self.set_chatgpt_accounts)
 
     def set_chatgpt_accounts(self, accounts):
-        self.chatgpt_items = accounts
+        previous = {item['name']: item for item in self.chatgpt_items}
+        merged = []
+        for item in accounts:
+            old = previous.get(item['name'], {})
+            quota = item.get('quota')
+            cached = old.get('quota') or {}
+            if quota is None:
+                if cached:
+                    item['quota'] = cached
+            elif quota.get('error') and not quota.get('windows') and cached.get('windows'):
+                item['quota'] = {**cached, 'error': quota['error']}
+            if not item.get('plan_type') and old.get('plan_type'):
+                item['plan_type'] = old['plan_type']
+            merged.append(item)
+        self.chatgpt_items = merged
         self.draw_chatgpt_accounts()
         self.update_openai_pool_quota()
 
@@ -539,7 +553,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         for item in rows:
             name = item['name']
             if name not in widgets:
-                card = ctk.CTkFrame(frame, fg_color='#202938', corner_radius=8, border_width=1, border_color='#344155')
+                card = ctk.CTkFrame(frame, height=1, fg_color='#202938', corner_radius=8, border_width=1, border_color='#344155')
                 def label(height=17, color=MUTED):
                     return ctk.CTkLabel(card, text='', height=height, anchor='w', font=('Segoe UI', 10), text_color=color)
                 heading_row = ctk.CTkFrame(card, fg_color='transparent')
@@ -564,7 +578,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 status = ctk.CTkLabel(status_row, text='', height=17, anchor='w', font=('Segoe UI', 10), text_color=MUTED)
                 status.pack(side='left', fill='x', expand=True)
                 self.attach_tooltip(status, lambda n=name: str(next((a.get('success', 0) for a in self.chatgpt_items if a['name'] == n), 0)) + ' responses')
-                windows = ctk.CTkFrame(card, fg_color='transparent')
+                windows = ctk.CTkFrame(card, height=1, fg_color='transparent')
+                missing_window = ctk.CTkLabel(windows, text='5h: Not provided by OpenAI', height=15,
+                                             anchor='w', font=('Segoe UI', 10), text_color=MUTED)
                 # Leave the card border visible beside the quota rows.
                 windows.pack(fill='x', padx=4)
                 reset_row = ctk.CTkFrame(controls, fg_color='transparent', height=18, width=18)
@@ -578,7 +594,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 reset_details = ctk.CTkLabel(self, text='', height=24, corner_radius=5,
                                             fg_color='#303b50', font=('Segoe UI', 10), text_color=TEXT)
                 widgets[name] = {'card': card, 'heading': heading, 'pause': pause, 'model': model, 'status': status, 'plan': plan, 'priority': priority,
-                    'windows_frame': windows, 'windows': {}, 'credits': credits, 'reset_row': reset_row,
+                    'windows_frame': windows, 'windows': {}, 'missing_window': missing_window, 'credits': credits, 'reset_row': reset_row,
                     'reset_details': reset_details, 'reset_button': reset_button, 'reset_buttons': [reset_button],
                     'error': label(15)}
                 def hide_reset_tip(event=None, tip=reset_details):
@@ -654,6 +670,16 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         for key, (line, *_) in row['windows'].items():
             if key not in keys:
                 line.pack_forget()
+        if keys and '5h' not in keys:
+            if not row['missing_window'].winfo_manager():
+                row['missing_window'].pack(fill='x', padx=8, pady=(0, 2), before=row['windows'][next(iter(keys))][0])
+        else:
+            row['missing_window'].pack_forget()
+        if keys:
+            if not row['windows_frame'].winfo_manager():
+                row['windows_frame'].pack(fill='x', padx=4, before=row['error'] if row['error'].winfo_manager() else None)
+        else:
+            row['windows_frame'].pack_forget()
         def show(widget, text=None, pady=(0, 2)):
             if text is not None:
                 widget.configure(text=text)

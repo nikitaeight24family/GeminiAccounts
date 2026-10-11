@@ -145,6 +145,7 @@ PHRASES = {
     'Waiting': 'Ожидание', 'active': 'активен', 'disabled': 'отключён',
     'pooled remaining': 'общий остаток', 'accounts ': 'аккаунтов ', 'keys ': 'ключей ',
     'Reset credits: ': 'Сбросов лимита: ', 'Quota not loaded yet': 'Лимиты ещё не загружены',
+    '5h: Not provided by OpenAI': '5ч: OpenAI не передал данные',
     'One available usage reset': 'Доступен один сброс лимита', 'earliest expiry ': 'истекает ',
     'Reset details unavailable': 'Данные о сбросах недоступны', 'No usage reset applies right now': 'Сейчас сброс недоступен',
     'Quota HTTP ': 'Лимиты: HTTP ', 'Updated ': 'Обновлено ',

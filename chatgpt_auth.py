@@ -123,6 +123,24 @@ class ChatGPTAuth:
                 'data': {'groups': [{'kind': 'claude', 'buckets': buckets}]}}
         rows = rank_accounts(accounts, caches, 'claude', now,
                              priorities=self.controller.preferences.get('account-priorities', {}))
+        # A provider-confirmed available account without a 5h window is used
+        # before timed pools, until the provider actually refuses requests.
+        from quota_limits import blocked_families
+        unmetered = set()
+        for account in accounts:
+            quota = account.get('quota') or {}
+            windows = quota.get('windows') or []
+            if (quota.get('allowed') is True and not quota.get('limit_reached') and
+                    not quota.get('error') and not account.get('disabled') and
+                    not account.get('unavailable') and account.get('status') != 'error' and
+                    not account.get('cooldowns') and
+                    not any(w.get('label') == '5h' for w in windows) and
+                    'openai' not in blocked_families(self.controller.preferences, account['name'],
+                                                   self.quota_limit_groups(quota))):
+                unmetered.add(account['name'])
+        rows.sort(key=lambda row: 0 if row['name'] in unmetered else 1)
+        for index, row in enumerate(rows):
+            row['priority'] = len(rows) - index
         fresh = {a['name']: a for a in self.accounts() if not a.get('disabled')}
         if set(fresh) != {row['name'] for row in rows}:
             return False
@@ -233,7 +251,8 @@ class ChatGPTAuth:
             windows.append({'label': label, 'remaining': max(0, min(100, 100 - used)),
                             'reset_at': window.get('reset_at')})
         credits = body.get('rate_limit_reset_credits') or {}
-        quota = {'windows': windows, 'plan_type': body.get('plan_type'), 'reset_credits': credits.get('available_count'),
+        quota = {'windows': windows, 'allowed': rate.get('allowed'), 'limit_reached': rate.get('limit_reached'),
+                 'plan_type': body.get('plan_type'), 'reset_credits': credits.get('available_count'),
                  'reset_applicable': credits.get('applicable_available_count')}
         if isinstance(quota['reset_credits'], int) and quota['reset_credits'] > 0:
             try:

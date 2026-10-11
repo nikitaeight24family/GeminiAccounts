@@ -88,6 +88,8 @@ Both Google and ChatGPT can start a full unused five-hour window with a minimal 
 
 Confirmed provider quota blocks queue affected requests with streaming keep-alives. Requests resume after a reset or when a new usable account joins. Cancelling the client cancels its wait; pending requests are not saved to disk. Reserve exclusions do not fabricate provider cooldowns. Forwarded HTTP 429 responses use a short client retry interval so an old Retry-After deadline does not hide recovered accounts for many minutes.
 
+When OpenAI confirms an account is available but does not report a five-hour window, Omni uses it before accounts with timed windows. Actual provider failures, cooldowns, pauses and configured quota reserves still control eligibility. Missing windows are labelled explicitly rather than shown as invented percentages. Importing an account preserves existing cards, loaded quotas and subscription badges.
+
 ChatGPT cards show one drawn reset button per available **usage-reset credit**, in the same header row as priority and pause. Zero credits leave no label or button. Hover reveals availability and expiry. Confirmation and a fresh availability check are required. The provider chooses the credit consumed; Omni does not automatically repeat a timed-out reset.
 
 Quota exhaustion is shown as a quota status. Verification, invalid credentials, access restrictions and provider errors remain distinct, and unfamiliar status messages stay visible. Active borders clear on idle or quota wait; recent models remain visible for one minute. Desktop countdowns update every 15 seconds.

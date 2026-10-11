@@ -6,6 +6,18 @@ from ui_render import queue_for
 
 
 class RenderTests(unittest.TestCase):
+    def test_thin_rounded_skins_with_border_larger_than_interior(self):
+        from ui_skin import SkinCache
+        root = tk.Tk()
+        try:
+            cache = SkinCache(root)
+            for width, height, border in ((3, 8, 2), (8, 3, 2), (4, 8, 2), (1, 8, 2)):
+                with self.subTest(width=width, height=height):
+                    skin = cache.get((width, height, 2, border, '#202938', '#ffffff', '#7090ff'))
+                    self.assertEqual((skin.width(), skin.height()), (width, height))
+        finally:
+            root.destroy()
+
     def test_static_card_skin_survives_value_changes_and_is_shared(self):
         root = ctk.CTk()
         try:

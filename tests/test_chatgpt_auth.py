@@ -263,6 +263,55 @@ class ChatGPTAuthTests(unittest.TestCase):
         changes = [call.args[2] for call in controller.request.call_args_list if call.args[0] == '/auth-files/fields']
         self.assertEqual([change['name'] for change in changes], ['later', 'first'])
 
+    def test_available_account_without_5h_goes_first_until_refused_or_reserved(self):
+        import time
+        now = time.time()
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(data_dir=directory)
+            timed = {'name': 'timed', 'provider': 'codex', 'quota': {'windows': [
+                {'label': '5h', 'remaining': 90, 'reset_at': now + 1000},
+                {'label': '1w', 'remaining': 90, 'reset_at': now + 600000}]}}
+            untimed = {'name': 'untimed', 'provider': 'codex', 'status': 'active',
+                       'quota': {'allowed': True, 'limit_reached': False, 'windows': [
+                           {'label': '1w', 'remaining': 100, 'reset_at': now + 600000}]}}
+            accounts = [timed, untimed]
+            controller.preferences = {'account-priorities': {'timed': 999}}
+            controller.request = Mock(side_effect=lambda path, *args:
+                {'files': accounts} if path == '/auth-files' else {'strategy': 'fill-first'})
+            auth = ChatGPTAuth(controller)
+            self.assertTrue(auth.apply_reset_priority(accounts))
+            self.assertGreater(untimed['priority'], timed['priority'])
+            for change in ({'unavailable': True}, {'status': 'error'},
+                           {'cooldowns': [{'scope': 'credential', 'reason': 'quota', 'retry_at': '2099-01-01T00:00:00Z'}]}):
+                with self.subTest(change=change):
+                    untimed.update(change)
+                    auth.apply_reset_priority(accounts)
+                    self.assertGreater(timed['priority'], untimed['priority'])
+                    for key in change:
+                        untimed.pop(key)
+            untimed['quota']['allowed'] = False
+            auth.apply_reset_priority(accounts)
+            self.assertGreater(timed['priority'], untimed['priority'])
+            untimed['quota']['allowed'] = True
+            controller.preferences['quota-floors'] = {'untimed': {'openai': {'weekly': 100}}}
+            auth.apply_reset_priority(accounts)
+            self.assertGreater(timed['priority'], untimed['priority'])
+            controller.preferences['quota-floors'] = {}
+            untimed['disabled'] = True
+            auth.apply_reset_priority(accounts)
+            self.assertEqual(timed['priority'], 1)
+
+    def test_weekly_only_usage_does_not_invent_a_5h_window(self):
+        controller = Mock()
+        controller.preferences = {}
+        controller.request.return_value = {'status_code': 200, 'body': json.dumps({
+            'plan_type': 'plus', 'rate_limit': {'allowed': True, 'limit_reached': False,
+                'primary_window': {'used_percent': 0, 'limit_window_seconds': 604800},
+                'secondary_window': None}})}
+        quota = ChatGPTAuth(controller).quota({'name': 'untimed', 'auth_index': 'six'})
+        self.assertTrue(quota['allowed'])
+        self.assertEqual(quota['windows'], [{'label': '1w', 'remaining': 100, 'reset_at': None}])
+
     def test_chatgpt_429_is_returned_without_google_retry_loop(self):
         backend = ThreadingHTTPServer(('127.0.0.1', 0), MockGateway)
         backend.files = []

@@ -13,6 +13,49 @@ from harbor_activity import key_id
 
 
 class QuotaUITests(unittest.TestCase):
+    def test_import_preserves_existing_quota_and_new_card_stays_compact(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                app.chatgpt_collapsed = False
+                quota = {'plan_type': 'pro', 'windows': [
+                    {'label': '5h', 'remaining': 70, 'reset_at': time.time() + 300},
+                    {'label': '1w', 'remaining': 80, 'reset_at': time.time() + 600}]}
+                app.set_chatgpt_accounts([{'name': 'one', 'quota': quota}])
+                app.update()
+                row = app.chatgpt_widgets['one']
+                card, bar = row['card'], row['windows']['5h'][2]
+                app.set_chatgpt_accounts([{'name': 'one', 'success': 5}, {'name': 'two'}])
+                app.update()
+                self.assertIs(card, app.chatgpt_widgets['one']['card'])
+                self.assertIs(bar, row['windows']['5h'][2])
+                self.assertEqual(bar.get(), .7)
+                self.assertIn('Pro', row['plan'].cget('text'))
+                new = app.chatgpt_widgets['two']
+                self.assertFalse(new['windows_frame'].winfo_manager())
+                self.assertLess(new['card']._reverse_widget_scaling(new['card'].winfo_reqheight()), 120)
+                app.set_chatgpt_accounts([{'name': 'one', 'quota': {'windows': [], 'error': 'Quota HTTP 503'}}, {'name': 'two', 'quota': quota}])
+                app.update()
+                self.assertEqual(bar.get(), .7)
+                self.assertIn('Quota HTTP 503', row['error'].cget('text'))
+                self.assertTrue(new['windows_frame'].winfo_manager())
+                self.assertLess(new['card']._reverse_widget_scaling(new['card'].winfo_reqheight()), 120)
+                app.set_chatgpt_accounts([{'name': 'two', 'quota': {'windows': [quota['windows'][1]]}}])
+                app.update()
+                self.assertTrue(new['missing_window'].winfo_manager())
+                self.assertNotIn('5h', [w['label'] for w in app.chatgpt_items[0]['quota']['windows']])
+                app.set_chatgpt_accounts([{'name': 'two', 'quota': {'windows': []}}])
+                app.update()
+                self.assertFalse(card.winfo_exists())
+                self.assertFalse(new['windows_frame'].winfo_manager())
+                self.assertLess(new['card']._reverse_widget_scaling(new['card'].winfo_reqheight()), 120)
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_chatgpt_status_changes_preserve_card_and_show_cause(self):
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), \
                 patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), patch.object(App, 'check_for_updates'):
