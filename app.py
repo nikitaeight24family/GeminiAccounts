@@ -32,6 +32,7 @@ from activity import Activity
 from token_capacity import TokenCapacity
 from harbor_activity import HarborActivity, key_id, key_label
 from routing import rank_accounts, quota_projection, quota_entry
+from chatgpt_routing import is_free_account
 from integrations import Integrations
 from tokenharbor import TokenHarbor
 from chatgpt_auth import ChatGPTAuth
@@ -106,6 +107,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.gateway_jobs_checked = 0
         self.tokenharbor_collapsed = self.controller.preferences.get('tokenharbor-collapsed', True)
         self.chatgpt_collapsed = self.controller.preferences.get('chatgpt-collapsed', True)
+        self.chatgpt_free_collapsed = self.controller.preferences.get('chatgpt-free-collapsed', True)
         self.google_accounts_collapsed = self.controller.preferences.get('google-accounts-collapsed', False)
         self.chatgpt_items = []
         self.chatgpt_refresh_pending = False
@@ -169,6 +171,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.sidebar_footer = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.sidebar_footer.pack(side='bottom', fill='x')
         self.chatgpt_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        self.chatgpt_free_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar_footer, fg_color='transparent')
         self.draw_chatgpt_accounts()
         self.google_accounts_header = self.button(self.sidebar, '', self.toggle_google_accounts)
@@ -653,9 +656,10 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.capacity_result.configure(text='\n'.join(lines))
 
     def draw_chatgpt_accounts(self):
-        frame = self.chatgpt_accounts
         rows = sorted(self.chatgpt_items, key=lambda item: (-self.account_priority(item),
                       item.get('email') or item.get('name') or ''))
+        free_rows = [item for item in rows if is_free_account(item)]
+        paid_rows = [item for item in rows if not is_free_account(item)]
         widgets = getattr(self, 'chatgpt_widgets', {})
         self.chatgpt_widgets = widgets
         names = {item['name'] for item in rows}
@@ -663,25 +667,48 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             if name not in names:
                 widgets.pop(name)['card'].destroy()
         if not self.provider_visible('openai'):
-            frame.pack_forget()
+            self.chatgpt_accounts.pack_forget()
+            self.chatgpt_free_accounts.pack_forget()
             return
         if not rows and not self.provider_api_count('openai'):
             self._chatgpt_order = None
-            frame.pack_forget()
+            self.chatgpt_accounts.pack_forget()
+            self.chatgpt_free_accounts.pack_forget()
             return
-        if not frame.winfo_manager():
-            frame.pack(fill='x', padx=12, pady=(0, 3), **({'before': self.google_accounts_header} if self.google_accounts_header.winfo_manager() else {'before': self.sidebar_spacer} if self.sidebar_spacer.winfo_manager() else {}))
-        if not getattr(self, 'chatgpt_header', None):
-            self.chatgpt_header = self.button(frame, '', self.toggle_chatgpt_accounts)
-            self.chatgpt_header.configure(image=self.provider_icons['openai'], compound='left', height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
-            self.chatgpt_header.pack(fill='x', padx=1, pady=(1, 2))
-        self.chatgpt_header.configure(text=('▸' if self.chatgpt_collapsed else '▾') + f'  ChatGPT · {len(rows)+self.provider_api_count("openai")}pcs')
-        if not hasattr(self, 'chatgpt_compact'):
-            self.chatgpt_compact = self.make_quota_dots(self.chatgpt_header, ('5h', '1w'))
-        self.show_quota_dots(self.chatgpt_compact, self.chatgpt_collapsed, after=self.chatgpt_header)
+        anchor = self.google_accounts_header if getattr(self, 'google_accounts_header', None) and self.google_accounts_header.winfo_manager() else self.sidebar_spacer
+        def section(frame, header_name, compact_name, title, count, collapsed, command):
+            if not frame.winfo_manager():
+                options = {'fill': 'x', 'padx': 12, 'pady': (0, 3)}
+                if anchor.winfo_manager():
+                    options['before'] = anchor
+                frame.pack(**options)
+            header = getattr(self, header_name, None)
+            if header is None:
+                header = self.button(frame, '', command)
+                header.configure(image=self.provider_icons['openai'], compound='left', height=27, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
+                header.pack(fill='x', padx=1, pady=(1, 2))
+                setattr(self, header_name, header)
+            header.configure(text=('▸' if collapsed else '▾') + f'  {title} · {count}pcs')
+            compact = getattr(self, compact_name, None)
+            if compact is None:
+                compact = self.make_quota_dots(header, ('5h', '1w'))
+                setattr(self, compact_name, compact)
+            self.show_quota_dots(compact, collapsed, after=header)
+            return header
+        if paid_rows or self.provider_api_count('openai'):
+            section(self.chatgpt_accounts, 'chatgpt_header', 'chatgpt_compact', 'ChatGPT', len(paid_rows) + self.provider_api_count('openai'), self.chatgpt_collapsed, self.toggle_chatgpt_accounts)
+        else:
+            self.chatgpt_accounts.pack_forget()
+        if free_rows:
+            section(self.chatgpt_free_accounts, 'chatgpt_free_header', 'chatgpt_free_compact', 'ChatGPT Free', len(free_rows), self.chatgpt_free_collapsed, self.toggle_chatgpt_free_accounts)
+        else:
+            self.chatgpt_free_accounts.pack_forget()
         self.update_compact_quotas()
         for item in rows:
             name = item['name']
+            frame = self.chatgpt_free_accounts if is_free_account(item) else self.chatgpt_accounts
+            if name in widgets and widgets[name]['card'].master is not frame:
+                widgets.pop(name)['card'].destroy()
             if name not in widgets:
                 card = ctk.CTkFrame(frame, height=1, fg_color='#202938', corner_radius=8, border_width=1, border_color='#344155')
                 def label(height=17, color=MUTED):
@@ -746,14 +773,21 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 card.bind('<Destroy>', lambda event, tip=reset_details, owned=card:
                           tip.destroy() if event.widget is owned and tip.winfo_exists() else None, add='+')
             self.update_chatgpt_row(item)
-        order = tuple(item['name'] for item in rows)
-        if getattr(self, '_chatgpt_order', None) != (self.chatgpt_collapsed, order):
+        order = tuple(item['name'] for item in paid_rows)
+        free_order = tuple(item['name'] for item in free_rows)
+        # Keep the legacy first two tuple positions stable for diagnostics and
+        # existing integrations; append the free-section state after them.
+        state = (self.chatgpt_collapsed, order, self.chatgpt_free_collapsed, free_order)
+        if getattr(self, '_chatgpt_order', None) != state:
             for row in widgets.values():
                 row['card'].pack_forget()
             if not self.chatgpt_collapsed:
                 for name in order:
                     widgets[name]['card'].pack(fill='x', padx=1, pady=(0, 2))
-            self._chatgpt_order = (self.chatgpt_collapsed, order)
+            if not self.chatgpt_free_collapsed:
+                for name in free_order:
+                    widgets[name]['card'].pack(fill='x', padx=1, pady=(0, 2))
+            self._chatgpt_order = state
 
     @staticmethod
     def chatgpt_plan_name(item):
@@ -895,6 +929,13 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
     def toggle_chatgpt_accounts(self):
         self.chatgpt_collapsed = not self.chatgpt_collapsed
         self.controller.preferences['chatgpt-collapsed'] = self.chatgpt_collapsed
+        self.controller.save()
+        self.draw_chatgpt_accounts()
+        self.refresh_api_accounts(use_cache=True)
+
+    def toggle_chatgpt_free_accounts(self):
+        self.chatgpt_free_collapsed = not self.chatgpt_free_collapsed
+        self.controller.preferences['chatgpt-free-collapsed'] = self.chatgpt_free_collapsed
         self.controller.save()
         self.draw_chatgpt_accounts()
         self.refresh_api_accounts(use_cache=True)

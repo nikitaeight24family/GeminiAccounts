@@ -213,7 +213,7 @@ class Controller:
     def accounts(self):
         result = self.request('/auth-files')
         # Strip everything except display/routing metadata before it reaches the UI.
-        allowed = ('name', 'auth_index', 'email', 'project_id', 'disabled', 'status', 'unavailable', 'cooldowns', 'success', 'failed', 'last_refresh', 'created_at', 'priority')
+        allowed = ('name', 'auth_index', 'email', 'project_id', 'disabled', 'status', 'unavailable', 'cooldowns', 'success', 'failed', 'last_refresh', 'created_at', 'priority', 'plan_type', 'supported_models', 'models', 'model_ids')
         accounts = []
         for item in result.get('files', []):
             if item.get('provider', item.get('type')) != 'antigravity':

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from backend import AccountError, atomic_write
 from routing import rank_accounts
+from chatgpt_routing import is_free_account
 
 
 def jwt_claims(token):
@@ -144,6 +145,12 @@ class ChatGPTAuth:
         def load(account):
             try:
                 quota = self.quota(account)
+                # Keep routing data alongside the quota.  The catalog is
+                # provider-reported, so new models are picked up automatically.
+                try:
+                    account['supported_models'] = self.controller.models(account)
+                except (AccountError, ValueError, TypeError):
+                    account['supported_models'] = []
                 if on_quota:
                     on_quota({**account, 'quota': quota})
                 if maintain_pool and self.start_full_quota_window(account, quota) == 200:
@@ -198,6 +205,11 @@ class ChatGPTAuth:
                                                    self.quota_limit_groups(quota))):
                 unmetered.add(account['name'])
         rows.sort(key=lambda row: 0 if row['name'] in unmetered else 1)
+        # Free subscriptions are the first pool for GPT models they advertise.
+        # The gateway's per-account model catalog prevents this ordering from
+        # sending an unsupported model to a free credential.
+        free_names = {account['name'] for account in accounts if is_free_account(account)}
+        rows.sort(key=lambda row: 0 if row['name'] in free_names else 1)
         for index, row in enumerate(rows):
             row['priority'] = len(rows) - index
         fresh = {a['name']: a for a in self.accounts() if not a.get('disabled')}

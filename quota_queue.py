@@ -5,6 +5,7 @@ import queue
 import secrets
 import threading
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +17,7 @@ from response_guard import StreamProbe, usable_message
 from gateway_diagnostics import Diagnostics
 from request_texts import RequestTextStore
 from provider_errors import failure_reason, provider_error_metadata
+from chatgpt_routing import accounts_for_model
 
 PING = b'event: ping\ndata: {"type":"ping"}\n\n'
 HOP = {'connection', 'transfer-encoding', 'content-length', 'keep-alive',
@@ -82,6 +84,11 @@ def quota_wait(files, model, aliases, now=None):
     quota = []
     enabled = [a for a in files if not a.get('disabled') and
                a.get('provider', a.get('type')) in providers]
+    # A model present in the free subscription catalog must never be held up
+    # or counted against paid GPT credentials.  The catalog is dynamic and is
+    # refreshed from /auth-files/models, so this also covers future models.
+    if model.startswith('gpt-'):
+        enabled = accounts_for_model(enabled, model)
     for account in enabled:
         if account.get('access_issue') in ('verification', 'login', 'denied'):
             continue
@@ -123,6 +130,39 @@ class QueueServer(ThreadingHTTPServer):
         self.heartbeat_seconds = 10
         self.verifications_path = None
         self.aliases_checked = 0
+        self.model_catalog = {}
+        self.model_catalog_checked = 0
+
+    def refresh_model_catalog(self, accounts):
+        """Refresh per-account GPT catalogs without naming a specific model."""
+        if time.monotonic() - self.model_catalog_checked < 15:
+            for account in accounts:
+                if account.get('name') in self.model_catalog:
+                    account['supported_models'] = self.model_catalog[account['name']]
+            return
+        self.model_catalog_checked = time.monotonic()
+        conn = http.client.HTTPConnection(*self.upstream, timeout=5)
+        try:
+            for account in accounts:
+                plan = str(account.get('plan_type') or '').strip().lower()
+                if account.get('provider', account.get('type')) != 'codex' or not plan.startswith('free'):
+                    continue
+                query = '/v0/management/auth-files/models?' + urllib.parse.urlencode({'name': account.get('name', '')})
+                conn.request('GET', query, headers={'Authorization': 'Bearer ' + self.key})
+                response = conn.getresponse()
+                if response.status != 200:
+                    response.read()
+                    continue
+                payload = json.loads(response.read() or b'{}')
+                models = frozenset(item.get('id') for item in payload.get('models', [])
+                                   if isinstance(item, dict) and isinstance(item.get('id'), str)
+                                   and item['id'].startswith('gpt-'))
+                self.model_catalog[account.get('name')] = models
+                account['supported_models'] = models
+        except (OSError, ValueError, TypeError, http.client.HTTPException):
+            pass
+        finally:
+            conn.close()
 
     def refresh_aliases(self):
         # Hot model selection must also update quota-wait model scoping.
@@ -337,6 +377,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     self.server.refresh_aliases()
                     accounts = self.server.accounts()
+                    self.server.refresh_model_catalog(accounts)
                     reset = quota_wait(accounts, model, self.server.aliases)
                 except (OSError, ValueError, http.client.HTTPException):
                     reset = None

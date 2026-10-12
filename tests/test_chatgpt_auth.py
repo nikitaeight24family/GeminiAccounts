@@ -15,6 +15,7 @@ from backend import Controller
 from chatgpt_auth import ChatGPTAuth, gateway_credential, same_oauth_session
 from isolated_browser import open_isolated
 from quota_queue import QueueServer, quota_wait
+from chatgpt_routing import free_model_catalog, accounts_for_model, is_free_account
 from tests.test_quota_queue import Mock as MockGateway
 
 
@@ -27,6 +28,27 @@ def fake_jwt():
 
 
 class ChatGPTAuthTests(unittest.TestCase):
+    def test_free_routing_uses_provider_catalog_not_a_model_name(self):
+        accounts = [
+            {'provider': 'codex', 'plan_type': 'free', 'supported_models': ['gpt-new-reasoner']},
+            {'provider': 'codex', 'plan_type': 'plus', 'supported_models': ['gpt-new-reasoner', 'gpt-paid-only']},
+        ]
+        self.assertTrue(is_free_account(accounts[0]))
+        self.assertEqual(free_model_catalog(accounts), {'gpt-new-reasoner'})
+        self.assertEqual(accounts_for_model(accounts, 'gpt-new-reasoner'), [accounts[0]])
+        self.assertEqual(accounts_for_model(accounts, 'gpt-paid-only'), accounts)
+
+    def test_free_supported_model_waits_only_on_free_accounts(self):
+        files = [
+            {'provider': 'codex', 'plan_type': 'free', 'supported_models': ['gpt-new'], 'cooldowns': []},
+            {'provider': 'codex', 'plan_type': 'plus', 'supported_models': ['gpt-new'],
+             'cooldowns': [{'scope': 'credential', 'http_status': 429, 'reason': 'quota',
+                            'retry_at': '2099-01-01T00:00:00Z'}]},
+        ]
+        self.assertIsNone(quota_wait(files, 'gpt-new', {}))
+        files[0]['cooldowns'] = files[1]['cooldowns']
+        self.assertIsNotNone(quota_wait(files, 'gpt-new', {}))
+
     @patch('chatgpt_auth.urllib.request.build_opener')
     def test_manual_callback_and_code_are_forwarded_to_local_listener(self, opener):
         response = Mock(); response.__enter__ = Mock(return_value=response); response.__exit__ = Mock(return_value=False)
