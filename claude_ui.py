@@ -144,7 +144,7 @@ class ClaudePanel(ctk.CTkFrame):
             if quota.get('reserved') and severity!='error':
                 status, severity = 'Quota reserve reached', 'warning'
             color = {'error':'#ff6b7a','warning':'#f7ca70','normal':'#66d7b0','muted':'#9daec4'}[severity]
-            row['status'].configure(text=f'{status} · {account.get("success") or 0} responses', text_color=color)
+            row['status'].configure(text=app.uptime_status(row['status'], account, f'{status} · {account.get("success") or 0} responses'), text_color=color)
             app.update_priority_counter(row['priority'], account)
             lookup = {w['label']:w for w in quota.get('windows', [])}
             for label, (value, bar, timer) in row['windows'].items():

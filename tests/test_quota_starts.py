@@ -17,21 +17,41 @@ class QuotaStartTests(unittest.TestCase):
             self.calls.append(args)
             return {'status_code': 200, 'body': '{}'}
         self.c.request = request
+        self.c.quotas = lambda account: {'groups': [{'kind': k, 'buckets': [{'window': '5h', 'remaining': .999}]} for k in ('gemini', 'claude')]}
         self.data = {'groups': [{'kind': kind, 'buckets': [
             {'window': '5h', 'remaining': 1}, {'window': 'weekly', 'remaining': 1}]} for kind in ('gemini', 'claude')]}
-        self.data['models'] = {'gemini-3-flash': {}, 'gpt-oss-120b-medium': {}}
+        self.data['models'] = {'gemini-3.1-pro-low': {}, 'gpt-oss-120b-medium': {}}
     def tearDown(self): self.temp.cleanup()
+    def test_http_success_without_quota_consumption_is_not_window_start(self):
+        self.c.quotas = lambda account: self.data
+        self.c.start_full_quota_windows(self.account, self.data, now=820)
+        self.c.start_full_quota_windows(self.account, self.data, now=1000)
+        self.assertIs(self.c.quota_starts['a:gemini']['window_started'], False)
+        self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=1600), [])
+        self.assertEqual(len(self.calls), 2)
+    def test_metered_ping_confirms_start_and_old_flash_success_is_migrated_once(self):
+        self.c.quota_starts['a:gemini'] = {'armed': False, 'model': 'gemini-3-flash',
+            'endpoint': 'daily', 'status': 200, 'attempt_at': 900, 'full_since': 500}
+        self.c.start_full_quota_windows(self.account, self.data, now=1000)
+        state = self.c.quota_starts['a:gemini']
+        self.assertEqual(state['model'], 'gemini-3.1-pro-low')
+        self.assertIs(state['window_started'], True)
+        self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=1100), [])
+        self.assertEqual(len(self.calls), 1)
     def test_once_per_provider_and_survives_restart(self):
         self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=820), [])
         self.assertEqual(len(self.c.start_full_quota_windows(self.account, self.data, now=1000)), 2)
         for call in self.calls:
             self.assertEqual(call[2]['url'], 'https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent')
             self.assertEqual(call[2]['auth_index'], 'idx')
-            self.assertEqual(json.loads(call[2]['data'])['request']['generationConfig']['maxOutputTokens'], 1)
+            payload = json.loads(call[2]['data'])
+            self.assertEqual(payload['request']['generationConfig']['maxOutputTokens'], 32 if payload['model'].startswith('gemini') else 1)
+            self.assertEqual(payload['requestType'], 'agent')
+            self.assertEqual(payload['userAgent'], 'antigravity')
             self.assertEqual(json.loads(call[2]['data'])['request']['contents'][0]['parts'][0]['text'], 'Hi')
-            self.assertIn(json.loads(call[2]['data'])['model'], ('gemini-3-flash', 'gpt-oss-120b-medium'))
+            self.assertIn(json.loads(call[2]['data'])['model'], ('gemini-3.1-pro-low', 'gpt-oss-120b-medium'))
         self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=1100), [])
-        restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request
+        restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request; restarted.quotas = self.c.quotas
         self.assertEqual(restarted.start_full_quota_windows(self.account, self.data, now=1200), [])
         self.assertEqual(len(self.calls), 2)
     def test_only_fresh_full_quota_and_available_week(self):
@@ -78,7 +98,7 @@ class QuotaStartTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
     def test_partial_quota_cancels_grace_and_restart_keeps_deadline(self):
         self.c.start_full_quota_windows(self.account, self.data, now=1000)
-        restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request
+        restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request; restarted.quotas = self.c.quotas
         self.assertEqual(restarted.start_full_quota_windows(self.account, self.data, now=1179), [])
         for group in self.data['groups']: group['buckets'][0]['remaining'] = .99
         self.assertEqual(restarted.start_full_quota_windows(self.account, self.data, now=1180), [])

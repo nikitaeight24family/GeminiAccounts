@@ -2,6 +2,26 @@
 import re
 
 RU = {
+    'Paste': 'Вставить',
+    'PING': 'ПИНГ',
+    'Background quota-start ping: HTTP ': 'Проверочный пинг запуска квоты: HTTP ',
+    'Quota window started': 'Отсчёт квоты запущен',
+    'Quota window did not start': 'Отсчёт квоты не запущен',
+    'MoreLogin / another browser': 'MoreLogin / другой браузер',
+    'Copy the link into MoreLogin or another browser.\nComplete Google sign-in on this computer.': 'Скопируйте ссылку в MoreLogin или другой браузер.\nВойдите в Google на этом компьютере.',
+    'Open browser': 'Открыть браузер', 'Copy sign-in link': 'Копировать ссылку',
+    'If localhost is blocked, paste the full callback address here.': 'Если localhost заблокирован, вставьте сюда полный адрес возврата.',
+    'Complete sign-in': 'Завершить вход', 'Waiting for sign-in…': 'Ожидание входа…',
+    'Link copied. Open it in your browser profile.': 'Ссылка скопирована. Откройте её в нужном профиле браузера.',
+    'Completing sign-in…': 'Завершение входа…',
+    'Callback accepted. Waiting for Google confirmation…': 'Адрес принят. Ожидаем подтверждения Google…',
+    'Start Google sign-in again before pasting its callback.': 'Начните вход в Google заново, затем вставьте адрес возврата.',
+    'Paste the full localhost callback address from the browser.': 'Вставьте полный адрес localhost из браузера.',
+    'This callback belongs to another sign-in. Use the current link.': 'Адрес относится к другому входу. Используйте текущую ссылку.',
+    'Google sign-in was declined. Start sign-in again.': 'Вход в Google отклонён. Начните вход заново.',
+    'The callback address has no valid authorization code.': 'В адресе возврата нет корректного кода авторизации.',
+    'This sign-in expired or failed. Start Google sign-in again.': 'Время входа истекло или произошёл сбой. Начните вход в Google заново.',
+    'The gateway did not accept this callback. Check sign-in status.': 'Сервис не принял адрес возврата. Проверьте состояние входа.',
     'Keep window on top': 'Поверх всех окон',
     'Unpin window': 'Открепить окно',
 
@@ -194,7 +214,9 @@ RU.update({
     'Grok account added.': 'Аккаунт Grok добавлен.', 'Grok sign-in did not finish.': 'Вход в Grok не завершён.',
     'Could not open the Grok sign-in browser.': 'Не удалось открыть браузер для входа в Grok.',
 })
-PHRASES.update({' available · quota not reported': ' доступны · квота не сообщается', ' models · ': ' моделей · '})
+PHRASES.update({' available · quota not reported': ' доступны · квота не сообщается', ' models · ': ' моделей · ',
+                'PING': 'ПИНГ', 'Background quota-start ping: HTTP ': 'Проверочный пинг запуска квоты: HTTP ',
+                'Quota window started': 'Отсчёт квоты запущен', 'Quota window did not start': 'Отсчёт квоты не запущен'})
 
 
 def translate(text, language):

@@ -39,6 +39,8 @@ Omni was previously named **Gemini Accounts**. The repository retains its histor
 2. Click the small **+ in a provider strip at the bottom** and choose account sign-in or API key. Google, ChatGPT, Claude, Grok and TokenHarbor connections have their own menus. ChatGPT sign-in opens an isolated Edge/Chrome profile for each account, so multiple accounts can be added without switching the browser's everyday account. Enter the password and 2FA code on the official sign-in page. Existing Codex `auth.json` files can still be imported from the same menu.
 3. Open **Connect applications** and approve setup of installed clients. Original configs are backed up. Restarting running clients requires separate consent.
 
+**MoreLogin and other browser profiles:** choose **Google Gemini → + → MoreLogin / another browser**. Copy the sign-in link from Omni into the intended profile on the same computer. If the browser blocks the final `localhost` redirect, copy the full blocked address (including `state` and `code`), paste it into Omni's sign-in window and click **Complete sign-in**. A pasted `Blocked URL:` prefix is accepted. Omni checks the current sign-in session, forwards the code to the local gateway and waits for Google confirmation. Authorization codes are not saved to preferences or the request journal. Expired or mismatched callbacks produce an inline error; start a new sign-in if the session expired.
+
 A desktop shortcut is created. Updates preserve accounts and configurations; active requests block an update. Install Claude / Codex clients separately.
 
 ## Terminal: Windows, macOS and Linux
@@ -96,7 +98,7 @@ Quota reserves are enforced through the local gateway's per-account model exclus
 
 The boundary uses the provider's reported quota. Configured ChatGPT reserves are refreshed before routing each generation request, independently of the desktop window. Display quotas refresh every minute and after relevant activity; an in-flight response can cross the boundary before the next measurement. A reserve is a stop condition for future requests, not an exact token budget. With a nonzero boundary and missing quota data, that family is held until quota data becomes available.
 
-Both Google and ChatGPT can start a full unused five-hour window with a minimal request after three minutes: Gemini Flash / GPT-OSS for Google, Luna for ChatGPT. Real client usage suppresses the ping, weekly exhaustion and user reserves are respected, and retries are bounded.
+Both Google and ChatGPT can start a full unused five-hour window with a minimal request after three minutes: Gemini 3.1 Pro Low / GPT-OSS for Google, Luna for ChatGPT. Gemini Flash responses do not start Google's metered window, so the Gemini ping allows at most 32 output tokens and verifies the reported quota drop. Real client usage suppresses the ping, weekly exhaustion and user reserves are respected, and retries are bounded. Background pings appear separately in Routing statistics and do not inflate client response counts; HTTP success alone is not reported as a confirmed window start.
 
 Confirmed provider quota blocks queue affected requests with streaming keep-alives. Requests resume after a reset or when a new usable account joins. Cancelling the client cancels its wait; pending requests are not saved to disk. Reserve exclusions do not fabricate provider cooldowns. Forwarded HTTP 429 responses use a short client retry interval so an old Retry-After deadline does not hide recovered accounts for many minutes.
 

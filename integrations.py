@@ -287,6 +287,9 @@ class Integrations:
             '[model_providers.gemini_accounts]', 'name = "Omni"',
             'base_url = "http://127.0.0.1:8317/v1"', 'wire_api = "responses"',
             'experimental_bearer_token = ' + json.dumps(key),
+            # Keep ChatGPT identity available to Codex browser/desktop services.
+            # Model requests still use the explicit local gateway bearer above.
+            'requires_openai_auth = true',
             'stream_idle_timeout_ms = 604800000', 'request_max_retries = 2',
             'supports_websockets = false', '',
         ])

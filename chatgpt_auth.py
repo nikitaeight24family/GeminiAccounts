@@ -208,7 +208,7 @@ class ChatGPTAuth:
             model = next((model for model in preferred if model in models), None)
             if not model:
                 return None
-            state.update(armed=False, attempt_at=now, status='pending', model=model)
+            state.update(armed=False, attempt_at=now, probe_sent_at=now, status='pending', model=model)
             save()
         payload = {'model': model, 'instructions': 'Reply with a single dot.',
                    'input': [{'role': 'user', 'content': [{'type': 'input_text', 'text': 'Hi'}]}],

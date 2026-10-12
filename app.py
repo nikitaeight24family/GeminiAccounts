@@ -5,6 +5,7 @@ import queue
 import threading
 import time
 import webbrowser
+import urllib.parse
 from pathlib import Path
 import os
 import sys
@@ -338,6 +339,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.after(60000, self.periodic_quota)
         self.after(15000, self.tick_countdowns)
         self.after(500, self.animate_active_borders)
+        self.after(33, self.animate_border_colors)
         self.after(200, self.poll_gateway_jobs)
         self.after(30000, self.check_for_updates)
         if self.controller.preferences.get('details-collapsed'):
@@ -504,8 +506,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             self.start_activity()
 
     def update_mode_label(self):
-        items = self.items
-        enabled = [a for a in items if not a['disabled']]
+        items = self.routing_accounts()
+        enabled = [a for a in items if not a.get('disabled')]
         if not enabled:
             mode = 'No accounts enabled'
         elif len(enabled) == len(items) and self.controller.preferences.get('mode') != 'single':
@@ -515,6 +517,33 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         else:
             mode = f'Enabled accounts: {len(enabled)} of {len(items)}'
         self.mode_label.configure(text=mode)
+
+    def routing_accounts(self):
+        return list({a['name']: a for field in ('items', 'chatgpt_items', 'claude_items', 'grok_items', 'api_items')
+                     for a in getattr(self, field, [])}.values())
+
+    def uptime_status(self, widget, account, text):
+        from account_uptime import update_uptime
+        states = self.controller.preferences.setdefault('account-uptime', {})
+        duration, changed = update_uptime(states, account, time.time())
+        if changed:
+            self.controller.save()
+        widget.uptime_account = account
+        widget.uptime_base = text
+        return text + ' · ' + duration
+
+    def tick_account_uptimes(self):
+        rows = list(getattr(self, 'chatgpt_widgets', {}).values()) + list(getattr(self, 'account_widgets', {}).values())
+        rows += list(getattr(self, 'api_rows', {}).values())
+        for panel in ('claude_panel', 'grok_panel'):
+            rows += list(getattr(getattr(self, panel, None), 'rows', {}).values())
+        widgets = [row.get('status') or row.get('state') for row in rows]
+        widgets += [row[1] for row in getattr(self, 'tokenharbor_rows', {}).values()]
+        for widget in widgets:
+            if widget is not None and hasattr(widget, 'uptime_account'):
+                text = self.uptime_status(widget, widget.uptime_account, widget.uptime_base)
+                if widget.cget('text') != text:
+                    widget.configure(text=text)
 
     def refresh_chatgpt_accounts(self):
         if not self.controller.key or self.closed:
@@ -542,6 +571,23 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.chatgpt_items = merged
         self.draw_chatgpt_accounts()
         self.update_openai_pool_quota()
+        self.update_mode_label()
+
+    def remove_chatgpt_account(self, name):
+        account = next((a for a in self.chatgpt_items if a['name'] == name), None)
+        if not account or not messagebox.askyesno('Remove account?',
+                'Remove ' + self.display_name(account, 'OpenAI') + ' from Omni?', parent=self):
+            return
+        def remove():
+            self.controller.request('/auth-files?' + urllib.parse.urlencode({'name': name}), 'DELETE')
+            for field in ('account-priorities', 'quota-floors', 'labels'):
+                self.controller.preferences.get(field, {}).pop(name, None)
+            self.controller.save()
+            accounts = ChatGPTAuth(self.controller).accounts()
+            if any(a['name'] == name for a in accounts):
+                raise AccountError('The gateway did not confirm account removal. Refresh the list.')
+            return accounts
+        self.work(remove, self.set_chatgpt_accounts, mutation=True)
 
     def observe_token_capacity(self, name, provider, plan, groups):
         models = self.activity_state.get('model_tokens', {}).get(name, {})
@@ -634,6 +680,10 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 controls.grid(row=0, column=2, sticky='e')
                 pause = self.account_pause_button(controls, name, 'openai')
                 pause.pack(side='right')
+                remove = self.button(controls, '×', lambda n=name: self.remove_chatgpt_account(n))
+                remove.configure(width=18, height=18, font=('Segoe UI', 12), fg_color='transparent')
+                remove.pack(side='right')
+                self.attach_tooltip(remove, 'Remove account')
                 model = ctk.CTkLabel(heading_row, text='', width=1, height=20, font=('Segoe UI', 9, 'bold'), text_color='#bac9df')
                 model.grid(row=0, column=1, sticky='e', padx=(4, 0))
                 status_row = ctk.CTkFrame(card, fg_color='transparent')
@@ -660,7 +710,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                                        fg_color='transparent', image=self.playback_icons['reset'], compound='left', border_spacing=0)
                 reset_details = ctk.CTkLabel(self, text='', height=24, corner_radius=5,
                                             fg_color='#303b50', font=('Segoe UI', 10), text_color=TEXT)
-                widgets[name] = {'card': card, 'heading': heading, 'pause': pause, 'model': model, 'status': status, 'plan': plan, 'priority': priority,
+                widgets[name] = {'card': card, 'heading': heading, 'pause': pause, 'remove': remove, 'model': model, 'status': status, 'plan': plan, 'priority': priority,
                     'windows_frame': windows, 'windows': {}, 'missing_window': missing_window, 'credits': credits, 'reset_row': reset_row,
                     'reset_details': reset_details, 'reset_button': reset_button, 'reset_buttons': [reset_button],
                     'error': label(15)}
@@ -708,7 +758,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         row['plan'].configure(text=' ' + self.chatgpt_plan_name(item) + ' ')
         self.update_priority_counter(row['priority'], item)
         color = {'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': GREEN, 'muted': MUTED}[severity]
-        row['status'].configure(text=f'{status} · {item.get("success") or 0} resp.', text_color=color,
+        row['status'].configure(text=self.uptime_status(row['status'], item, f'{status} · {item.get("success") or 0} resp.'), text_color=color,
                                 wraplength=0, justify='left')
         quota = item.get('quota') or {}
         keys = set()
@@ -1157,7 +1207,11 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             try:
                 accounts, records, strategy = self.controller.activity_snapshot()
                 self.harbor_activity.observe(records, TokenHarbor(self.controller, self.integrations).auth_keys())
-                return accounts, copy.deepcopy(self.activity.ingest(records, accounts + chatgpt_accounts)), strategy, None, self.controller.quota_wait_status()
+                self.activity.ingest(records, accounts + chatgpt_accounts)
+                with self.controller.quota_start_lock:
+                    probes = copy.deepcopy(self.controller.quota_starts)
+                state = self.activity.ingest_probes(accounts + chatgpt_accounts, probes)
+                return accounts, copy.deepcopy(state), strategy, None, self.controller.quota_wait_status()
             except Exception:
                 return None, None, None, 'Cannot reach the proxy. Showing cached data.', {'jobs': []}
         def done(result):
@@ -1281,6 +1335,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             return 'Time unknown'
 
     def render_activity(self):
+        self.update_mode_label()
+        self.tick_account_uptimes()
         state = self.activity_state
         by_name = {a['name']: a for a in self.items + self.chatgpt_items + self.claude_items + self.grok_items}
         def name(key):
@@ -1288,7 +1344,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 self.private_account_name('Account', key) if self.hide_account_names and key else key or 'Unknown account')
         strategy = getattr(self, 'activity_strategy', 'unknown')
         text = ('Earliest-reset priority • ' + ('Gemini' if self.policy_group == 'gemini' else 'Claude / GPT')) if self.policy_rows else 'Fill one account first → switch when unavailable' if strategy == 'fill-first' else 'Round-robin accounts' if strategy == 'round-robin' else 'Strategy: ' + strategy
-        enabled = sum(not a['disabled'] for a in self.items)
+        enabled = sum(not a.get('disabled') for a in self.routing_accounts())
         self.stats_strategy.configure(text=f'{text} • enabled accounts: {enabled} • updated every 5 seconds', text_color=MUTED)
         latest = sorted(state['latest'].values(), key=lambda e: e['at'], reverse=True)
         if latest:
@@ -1327,9 +1383,10 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         events = [e for e in state['events'] if mode == 'All events' or (mode == 'Switches' and e['switch']) or (mode == 'Errors' and e['failed'])]
         lines = []
         for e in reversed(events[-100:]):
-            title = 'SWITCH' if e['switch'] else 'ERROR' if e['failed'] else 'RESPONSE'
+            title = 'PING' if e.get('probe') else 'SWITCH' if e['switch'] else 'ERROR' if e['failed'] else 'RESPONSE'
             route = (name(e['from']) + ' → ' if e['from'] else '') + name(e['name'])
-            lines.append(f"{self.activity_time(e['at'])} • {title}\n{route} • {model_name(e.get('upstream_model') or e['model'], self.model_aliases)}\n{e['reason']} • {e['latency_ms'] / 1000:.1f} s • {e['tokens']:,} tokens\n")
+            detail = e['reason'] if e.get('probe') else f"{e['reason']} • {e['latency_ms'] / 1000:.1f} s • {e['tokens']:,} tokens"
+            lines.append(f"{self.activity_time(e['at'])} • {title}\n{route} • {model_name(e.get('upstream_model') or e['model'], self.model_aliases)}\n{detail}\n")
         content = self.ui_style.text(self.redact_private_text('\n'.join(lines))) or 'No events yet. New requests will appear automatically.'
         if getattr(self, 'journal_content', None) != content:
             scroll = self.stats_journal.yview()[0]
@@ -1423,6 +1480,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                     line, color = f'Error {event.get("status") or "?"} at {at} · balance unknown', '#ffbd93'
                 else:
                     line, color = f'OK at {at} · balance/reset in dashboard', MUTED
+            line = self.uptime_status(label, {'name': fingerprint, 'status': 'active',
+                'status_message': json.dumps({'error': {'code': event.get('status')}}) if event and event.get('status') in (401, 403) else ''}, line)
             if label.cget('text') != line:
                 label.configure(text=line, text_color=color)
             active = latest.get('key_id') == fingerprint
@@ -2145,7 +2204,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         if reserved and severity != 'error':
             state, severity = 'Quota reserve reached · ' + ' / '.join(kind.title() for kind in sorted(reserved)), 'warning'
         state_text = state if severity in ('warning', 'error') else f'{state} · {account.get("success") or 0} responses'
-        widgets['status'].configure(text=state_text,
+        widgets['status'].configure(text=self.uptime_status(widgets['status'], account, state_text),
             text_color={'error': '#ff6b7a', 'warning': '#f7ca70', 'normal': MUTED, 'muted': MUTED}[severity])
         if account.get('access_issue') == 'verification':
             if not widgets['verification_frame'].winfo_manager():
@@ -2316,6 +2375,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
     def latest_models_by_account(state):
         latest = {}
         for event in state.get('events', []):
+            if event.get('probe'):
+                continue
             name = event.get('name')
             if name and event.get('at') and event.get('at', '') >= latest.get(name, {}).get('at', ''):
                 latest[name] = event
@@ -2455,14 +2516,30 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             if widgets['model'].cget('text') != caption:
                 widgets['model'].configure(text=caption)
             self.update_active_border(widgets, is_active)
-            reset_icon = self.playback_icons['reset-rainbow'][int(time.monotonic()*2) % 12]
-            for button in widgets['reset_buttons']:
-                if button.winfo_manager():
-                    button.configure(image=reset_icon)
         self.claude_panel.animate()
         self.grok_panel.animate()
         self.animate_api_accounts()
         self.after(500, self.animate_active_borders)
+
+    def animate_border_colors(self):
+        if self.closed:
+            return
+        rows = list(getattr(self, 'account_widgets', {}).values())
+        rows += list(getattr(self, 'chatgpt_widgets', {}).values())
+        rows += list(getattr(self, 'api_rows', {}).values())
+        for panel in ('claude_panel', 'grok_panel'):
+            rows += list(getattr(getattr(self, panel, None), 'rows', {}).values())
+        phase = (time.monotonic() / 8) % 1
+        for widgets in rows:
+            if widgets.get('active_highlight') and widgets['card'].winfo_ismapped():
+                self.draw_rainbow_border(widgets, phase)
+        frames = self.playback_icons['reset-rainbow']
+        reset_icon = frames[int(time.monotonic() * 30) % len(frames)]
+        for widgets in getattr(self, 'chatgpt_widgets', {}).values():
+            for button in widgets.get('reset_buttons', []):
+                if button.winfo_ismapped():
+                    button.configure(image=reset_icon)
+        self.after(33, self.animate_border_colors)
 
     def update_active_border(self, widgets, is_active):
         card = widgets['card']
@@ -2942,8 +3019,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                               text_color=GREEN if client.connected() else MUTED,
                               wraplength=520, justify='left')
         status.pack(anchor='w', padx=24)
-        keys_frame = ctk.CTkFrame(window, fg_color='transparent')
-        keys_frame.pack(fill='x', padx=24, pady=(10, 0))
+        keys_frame = ctk.CTkScrollableFrame(window, fg_color='transparent', height=150)
+        keys_frame.pack(fill='both', expand=True, padx=24, pady=(10, 0))
         ctk.CTkLabel(keys_frame, text='Connected TokenHarbor keys (rotated by gateway)',
                      text_color=TEXT, anchor='w').pack(fill='x')
         def refresh_keys():
@@ -2963,11 +3040,13 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 return
             self.work(lambda: client.remove_key(key), lambda _: (refresh_keys(), status.configure(text='TokenHarbor key removed.', text_color=GREEN)), mutation=True)
         refresh_keys()
-        ctk.CTkLabel(window,
+        footer = ctk.CTkFrame(window, fg_color=PANEL)
+        footer.pack(fill='x', padx=0, pady=0)
+        ctk.CTkLabel(footer,
                      text='Free account API: 60 requests/minute, 1,800/hour.\n'
                           'Haiku campaign allowance and expiry: see TokenHarbor dashboard.',
                      text_color=MUTED, justify='left').pack(anchor='w', padx=24, pady=(8, 4))
-        self.button(window, 'View current allowance',
+        self.button(footer, 'View current allowance',
                     lambda: webbrowser.open('https://tokenharbor.ai/dashboard')).pack(
                         fill='x', padx=24, pady=(0, 6))
         def connect():
@@ -3016,8 +3095,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                               lambda _: status.configure(text='Claude Desktop restarted. Choose Haiku in the model menu.',
                                                           text_color=GREEN))
             self.work(perform, done, mutation=True)
-        connect_button = self.button(window, 'Connect free model', connect, primary=True)
-        connect_button.pack(fill='x', padx=24, pady=(10, 8))
+        connect_button = self.button(footer, 'Connect free model', connect, primary=True)
+        connect_button.pack(fill='x', padx=24, pady=(0, 6))
         def disconnect():
             if not messagebox.askyesno('Remove TokenHarbor?',
                     'Remove the TokenHarbor key and model from the local gateway and connected Claude menu?',
@@ -3030,9 +3109,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                     disconnect_button.configure(state='disabled')
                 self.draw_tokenharbor_accounts()
             self.work(client.disconnect, done, mutation=True)
-        disconnect_button = self.button(window, 'Remove TokenHarbor connection', disconnect)
+        disconnect_button = self.button(footer, 'Remove TokenHarbor connection', disconnect)
         disconnect_button.configure(state='normal' if client.connected() else 'disabled')
-        disconnect_button.pack(fill='x', padx=24, pady=(0, 12))
+        disconnect_button.pack(fill='x', padx=24, pady=(0, 8))
 
     def bind_account_rename(self, widget, name, provider):
         widget.bind('<Double-Button-1>', lambda event: self.edit_account_name(widget, name, provider), add='+')
@@ -3117,16 +3196,16 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         draw.arc((11, 11, 53, 53), 35, 320, fill=255, width=6)
         draw.polygon([(45, 8), (58, 21), (40, 23)], fill=255)
         icons['reset-rainbow'] = []
-        for phase in range(12):
-            icon = Image.new('RGBA', (64, 64))
+        reset_mask = mask.resize((32, 32), Image.Resampling.LANCZOS)
+        for phase in range(180):
+            icon = Image.new('RGBA', (32, 32))
             pixels = icon.load()
-            for y in range(64):
-                for x in range(64):
-                    alpha = mask.getpixel((x, y))
+            for y in range(32):
+                for x in range(32):
+                    alpha = reset_mask.getpixel((x, y))
                     if alpha:
-                        rgb = colorsys.hsv_to_rgb((phase/12 + (x+y)/128) % 1, .72, 1)
+                        rgb = colorsys.hsv_to_rgb((phase/180 + (x+y)/64) % 1, .72, 1)
                         pixels[x, y] = (*[round(v*255) for v in rgb], alpha)
-            icon = icon.resize((32, 32), Image.Resampling.LANCZOS)
             icons['reset-rainbow'].append(ctk.CTkImage(light_image=icon, dark_image=icon, size=(12, 12)))
         return icons
 
@@ -3208,12 +3287,13 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         except OSError:
             self.notice.configure(text='Could not save the account label.', text_color='#ffbd93')
 
-    def add_account(self):
+    def add_account(self, manual_browser=False):
         if self.busy or self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login:
             return
-        self.work(self.controller.begin_login, self.login_started, mutation=True)
+        self.work(self.controller.begin_login,
+                  lambda result: self.login_started(result, manual_browser=manual_browser), mutation=True)
 
-    def login_started(self, result):
+    def login_started(self, result, manual_browser=False):
         self.login_url, state = result
         self.pending_login = (state, time.monotonic())
         self.add_button.configure(state='disabled')
@@ -3221,16 +3301,97 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.notice.configure(text='Choose your Google account in the browser and complete sign-in. It will appear here automatically.', text_color=ACCENT)
         self.login_window = ctk.CTkToplevel(self)
         self.login_window.title('Add account')
-        self.login_window.geometry('480x260')
+        self.login_window.geometry('480x340')
         self.login_window.resizable(False, False)
         self.login_window.configure(fg_color=PANEL)
         self.login_window.transient(self)
         ctk.CTkLabel(self.login_window, text='Complete Google sign-in', font=('Segoe UI', 22, 'bold'), text_color=TEXT).pack(pady=(26, 10))
-        ctk.CTkLabel(self.login_window, text='Choose an account in the opened browser.\nThe saved sign-in will appear in the list automatically.', font=('Segoe UI', 13), text_color=MUTED).pack(pady=8)
-        self.button(self.login_window, 'Reopen sign-in page', lambda: webbrowser.open(self.login_url)).pack(pady=14)
-        ctk.CTkLabel(self.login_window, text='Waiting for sign-in… You can close this window.', text_color=MUTED, font=('Segoe UI', 12)).pack()
-        webbrowser.open(self.login_url)
+        ctk.CTkLabel(self.login_window, text='Copy the link into MoreLogin or another browser.\nComplete Google sign-in on this computer.', font=('Segoe UI', 12), text_color=MUTED).pack(pady=(0, 8))
+        link_controls = ctk.CTkFrame(self.login_window, fg_color='transparent', height=1)
+        link_controls.pack(pady=(0, 10))
+        self.button(link_controls, 'Open browser', lambda: webbrowser.open(self.login_url)).pack(side='left', padx=(0, 6))
+        self.google_copy_link_button = self.button(link_controls, 'Copy sign-in link', self.copy_google_login_link)
+        self.google_copy_link_button.pack(side='left')
+        ctk.CTkLabel(self.login_window, text='If localhost is blocked, paste the full callback address here.',
+                    font=('Segoe UI', 12), text_color=MUTED, wraplength=430).pack(pady=(0, 4))
+        callback_row = ctk.CTkFrame(self.login_window, fg_color='transparent')
+        callback_row.pack(fill='x', padx=20, pady=(0, 6))
+        self.google_callback_entry = ctk.CTkEntry(callback_row, placeholder_text='http://localhost:…/oauth-callback?…',
+                                                 height=30)
+        self.google_callback_entry.pack(side='left', fill='x', expand=True)
+        self.google_paste_callback_button = self.button(callback_row, 'Paste', self.paste_google_callback)
+        self.google_paste_callback_button.configure(width=58, height=30)
+        self.google_paste_callback_button.pack(side='right', padx=(6, 0))
+        self.google_callback_entry.bind('<Control-KeyPress>', self.google_callback_paste_key, add='+')
+        self.google_callback_entry.bind('<Return>', lambda _: self.submit_google_callback())
+        self.google_callback_button = self.button(self.login_window, 'Complete sign-in', self.submit_google_callback)
+        self.google_callback_button.configure(height=28)
+        self.google_callback_button.pack(pady=(0, 6))
+        self.google_callback_status = ctk.CTkLabel(self.login_window, text='Waiting for sign-in…', text_color=MUTED,
+                                                  font=('Segoe UI', 11), wraplength=440)
+        self.google_callback_status.pack(fill='x', padx=20)
+        self.google_callback_busy = False
+        if not manual_browser:
+            webbrowser.open(self.login_url)
         self.after(1800, self.poll_login)
+
+    def copy_google_login_link(self):
+        if self.login_url:
+            self.clipboard_clear()
+            self.clipboard_append(self.login_url)
+            self.google_callback_status.configure(text='Link copied. Open it in your browser profile.', text_color=GREEN)
+
+    def submit_google_callback(self):
+        if not self.pending_login or self.google_callback_busy:
+            return
+        callback = self.google_callback_entry.get().strip()
+        if not callback:
+            self.google_callback_status.configure(text='Paste the full localhost callback address from the browser.', text_color='#ffbd93')
+            return
+        state = self.pending_login[0]
+        self.google_callback_busy = True
+        self.google_callback_button.configure(state='disabled')
+        self.google_callback_status.configure(text='Completing sign-in…', text_color=MUTED)
+        def submit():
+            try:
+                return self.controller.complete_google_login(callback, state), None
+            except AccountError as error:
+                return None, str(error)
+        def done(result):
+            if not self.pending_login or self.pending_login[0] != state:
+                return
+            answer, error = result
+            if error:
+                self.google_callback_busy = False
+                if self.google_callback_status.winfo_exists():
+                    self.google_callback_status.configure(text=error, text_color='#ffbd93')
+                    self.google_callback_button.configure(state='normal')
+                return
+            if answer.get('completed'):
+                self.finish_login('Account saved. You can select it for Claude.', True)
+            elif self.google_callback_status.winfo_exists():
+                self.google_callback_entry.delete(0, 'end')
+                self.google_callback_status.configure(text='Callback accepted. Waiting for Google confirmation…', text_color=GREEN)
+                # Keep the submit button disabled: accepted codes are single-use.
+        self.work(submit, done)
+
+    def google_callback_paste_key(self, event):
+        # Tk's Ctrl-v binding depends on the active keyboard layout on Windows.
+        if event.keycode == 86 or str(event.keysym).lower() == 'v':
+            self.paste_google_callback()
+            return 'break'
+
+    def paste_google_callback(self):
+        if self.google_callback_busy:
+            return
+        try:
+            text = self.clipboard_get().strip()
+        except tk.TclError:
+            self.google_callback_status.configure(text='Clipboard is empty or unavailable.', text_color='#ffbd93')
+            return
+        self.google_callback_entry.delete(0, 'end')
+        self.google_callback_entry.insert(0, text)
+        self.google_callback_entry.focus_set()
 
     def poll_login(self):
         if not self.pending_login or self.closed:

@@ -41,6 +41,48 @@ class Activity:
         models = self.state['model_tokens'].setdefault(name, {})
         models[model] = models.get(model, 0) + tokens
 
+    def ingest_probes(self, accounts, probes):
+        """Show persisted timer probes without counting them as client responses."""
+        names = {account['name'] for account in accounts}
+        seen = set(self.state.get('probe_seen', []))
+        changed = False
+        for key, probe in probes.items():
+            if not isinstance(probe, dict) or ':' not in key:
+                continue
+            name, family = key.rsplit(':', 1)
+            status, attempt = probe.get('status'), probe.get('attempt_at')
+            if name not in names or not probe.get('model') or not isinstance(status, int) or not isinstance(attempt, (int, float)):
+                continue
+            sent = probe.get('probe_sent_at')
+            if sent is not None:
+                if sent != attempt:
+                    continue
+            elif not isinstance(probe.get('full_since'), (int, float)) or probe['full_since'] > attempt:
+                continue
+            identifier = f'probe:{key}:{attempt}'
+            if identifier in seen:
+                continue
+            try:
+                timestamp = datetime.fromtimestamp(attempt, timezone.utc).isoformat()
+            except (ValueError, OverflowError, OSError):
+                continue
+            seen.add(identifier)
+            reason = 'Background quota-start ping: HTTP ' + str(status)
+            if probe.get('window_started') is True:
+                reason += ' · Quota window started'
+            elif probe.get('window_started') is False:
+                reason += ' · Quota window did not start'
+            self.state['events'].append({'id': identifier, 'at': timestamp, 'name': name,
+                'model': probe['model'], 'upstream_model': probe['model'], 'failed': status != 200,
+                'code': status, 'tokens': 0, 'latency_ms': 0, 'switch': False, 'from': None,
+                'probe': True, 'reason': reason})
+            changed = True
+        if changed:
+            self.state['probe_seen'] = sorted(seen)[-10000:]
+            self.state['events'] = sorted(self.state['events'], key=lambda event: event['at'])[-2000:]
+            atomic_write(self.path, json.dumps(self.state, ensure_ascii=False).encode('utf-8'))
+        return self.state
+
     def pin_model_aliases(self, aliases):
         """Keep historical model captions accurate before changing a gateway alias."""
         changed = False

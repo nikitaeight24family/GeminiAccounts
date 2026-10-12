@@ -46,6 +46,16 @@ def account_status(account, now=None):
         if active:
             cooldowns.append(entry)
     quota = account.get('quota') or {}
+    quota_error = str(quota.get('error') or '')
+    if quota_error:
+        # A failed quota fetch is not evidence that the credential is usable.
+        match = re.search(r'\bHTTP\s+(\d{3})\b', quota_error, re.I)
+        quota_code = match.group(1) if match else ''
+        if quota_code == '401':
+            return 'Sign in again', 'error', quota_error
+        if quota_code == '403':
+            return 'Access denied', 'error', quota_error
+        return 'Quota unavailable', 'warning', quota_error
     depleted = []
     for window in quota.get('windows') or []:
         try:

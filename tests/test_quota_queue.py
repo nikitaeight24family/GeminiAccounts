@@ -29,6 +29,8 @@ class Mock(BaseHTTPRequestHandler):
     def do_POST(self):
         self.server.last_request = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
         self.server.calls += 1
+        if getattr(self.server, "block_after_request", False):
+            self.server.files = [account(seconds=3600)]
         time.sleep(getattr(self.server, 'header_delay', 0))
         data = (b'event: message_start\ndata: {"type":"message_start","message":{"id":"real"}}\n\n'
                 b'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"OK"}}\n\n'
@@ -255,6 +257,20 @@ class QueueTests(unittest.TestCase):
         response = self.client.getresponse()
         self.assertEqual(response.status, 200)
         self.assertIn(b'message_start', response.read())
+    def test_new_account_wakes_request_after_provider_429_long_cooldown(self):
+        self.backend.files = []
+        self.backend.status = 429
+        self.backend.block_after_request = True
+        response = self.post()
+        self.assertEqual(response.read(len(PING)), PING)
+        self.assertEqual(self.backend.calls, 1)
+        self.backend.status = 200
+        self.backend.block_after_request = False
+        self.backend.files.append({'provider': 'antigravity', 'name': 'new', 'disabled': False, 'cooldowns': []})
+        data = response.read()
+        self.assertIn(b'OK', data)
+        self.assertEqual(self.backend.calls, 2)
+
     def test_429_without_cooldown_is_held_and_resumes_without_client_retry(self):
         self.backend.files = []
         self.backend.status = 429

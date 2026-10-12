@@ -13,6 +13,11 @@ from harbor_activity import key_id
 
 
 class QuotaUITests(unittest.TestCase):
+    def test_background_ping_does_not_replace_the_last_client_model(self):
+        state = {'events': [{'name': 'one', 'at': '2026-10-12T00:00:00Z', 'model': 'gpt-client'},
+                            {'name': 'one', 'at': '2026-10-12T00:01:00Z', 'model': 'gpt-probe', 'probe': True}]}
+        self.assertEqual(App.latest_models_by_account(state)['one']['model'], 'gpt-client')
+
     def test_capacity_calculator_and_rainbow_reset_icons(self):
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
                 patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
@@ -26,6 +31,7 @@ class QuotaUITests(unittest.TestCase):
                     {'label': '5h', 'remaining': 90, 'reset_at': 4070908800}]}}
                 app.set_chatgpt_accounts([item])
                 row = app.chatgpt_widgets['one']
+                self.assertIn('remove', row)
                 self.assertTrue(all(b.cget('image') in app.playback_icons['reset-rainbow'] for b in row['reset_buttons']))
                 for remaining, tokens in ((1, 0), (.99, 1000), (.98, 2000), (.97, 3000)):
                     app.activity_state['model_tokens'] = {'one': {'gpt-test': tokens}}
@@ -103,6 +109,7 @@ class QuotaUITests(unittest.TestCase):
                 app.update()
                 self.assertEqual(bar.get(), .7)
                 self.assertIn('Quota HTTP 503', row['error'].cget('text'))
+                self.assertNotIn('Available', row['status'].cget('text'))
                 self.assertTrue(new['windows_frame'].winfo_manager())
                 self.assertLess(new['card']._reverse_widget_scaling(new['card'].winfo_reqheight()), 120)
                 app.set_chatgpt_accounts([{'name': 'two', 'quota': {'windows': [quota['windows'][1]]}}])

@@ -66,3 +66,9 @@ class AccountStatusTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class QuotaFetchStatusTests(unittest.TestCase):
+    def test_http_error_is_shown_instead_of_available(self):
+        self.assertEqual(account_status({'status': 'active', 'quota': {'error': 'Quota HTTP 401'}}), ('Sign in again', 'error', 'Quota HTTP 401'))
+        self.assertEqual(account_status({'status': 'active', 'quota': {'error': 'Quota HTTP 503'}})[:2], ('Quota unavailable', 'warning'))

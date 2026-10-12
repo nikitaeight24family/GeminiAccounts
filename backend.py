@@ -593,7 +593,7 @@ class Controller:
                 'subscription': self.subscription(account), 'reserved_families': sorted(blocked)}
 
     def start_full_quota_windows(self, account, quotas, now=None, last_used=None):
-        """Start a fresh five-hour window once per account/provider, using one output token."""
+        """Send one bounded, metered ping; verify quota consumption independently of HTTP."""
         if account.get('disabled') or account.get('access_issue'):
             return []
         now = time.time() if now is None else now
@@ -605,8 +605,9 @@ class Controller:
                 continue
             if kind not in ('gemini', 'claude'):
                 continue
-            # Never fall back to expensive Pro/Sonnet/Opus for a timer trigger.
-            model = 'gemini-3-flash' if kind == 'gemini' else 'gpt-oss-120b-medium'
+            # Flash answers do not start the Gemini quota window. Use the
+            # verified low-tier Pro only; never try a series of fallback models.
+            model = 'gemini-3.1-pro-low' if kind == 'gemini' else 'gpt-oss-120b-medium'
             if model not in quotas.get('models', {}):
                 continue
             buckets = {b.get('window'): b for b in group.get('buckets', [])}
@@ -616,6 +617,9 @@ class Controller:
             key = account['name'] + ':' + kind
             with self.quota_start_lock:
                 state = self.quota_starts.setdefault(key, {'armed': True})
+                if (kind == 'gemini' and state.get('model') == 'gemini-3-flash' and
+                        state.get('status') == 200 and not state.get('unmetered_flash_migrated')):
+                    state.update(armed=True, failures=0, attempt_at=0, unmetered_flash_migrated=True)
                 if state.get('endpoint') != 'daily':
                     # Failed probes on the production host must not exhaust the
                     # retry budget for the working Antigravity endpoint.
@@ -649,11 +653,14 @@ class Controller:
                 if now - state['full_since'] < 180:
                     continue
                 # Persist the claim before sending, including across app restarts.
-                state.update(armed=False, attempt_at=now, status='pending', model=model)
+                state.update(armed=False, attempt_at=now, probe_sent_at=now, status='pending', model=model)
                 atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
             payload = {'project': account.get('project_id') or 'aicode-consumers', 'model': model,
+                'userAgent': 'antigravity', 'requestType': 'agent', 'requestId': 'agent-' + secrets.token_hex(16),
                 'request': {'contents': [{'role': 'user', 'parts': [{'text': 'Hi'}]}],
-                            'generationConfig': {'maxOutputTokens': 1}}}
+                            'sessionId': secrets.token_hex(16),
+                            'generationConfig': {'maxOutputTokens': 32 if kind == 'gemini' else 1}}}
+            window_started = None
             try:
                 response = self.request('/api-call', 'POST', {'auth_index': account['auth_index'], 'method': 'POST',
                     'url': 'https://daily-cloudcode-pa.googleapis.com/v1internal:generateContent',
@@ -663,10 +670,23 @@ class Controller:
                 issue = self.access_issue(response.get('body'))
                 if issue.get('access_issue') == 'verification':
                     self.remember_verification(account['name'], issue)
+                if status == 200:
+                    # A successful answer can be unmetered. Do not mistake it
+                    # for a running window or keep sending more greetings.
+                    try:
+                        fresh = self.quotas(account)
+                        fresh_group = next((g for g in fresh.get('groups', []) if g.get('kind') == kind), {})
+                        fresh_bucket = next((b for b in fresh_group.get('buckets', []) if b.get('window') == '5h'), {})
+                        value = fresh_bucket.get('remaining')
+                        if isinstance(value, (int, float)):
+                            window_started = value < remaining
+                    except AccountError:
+                        pass
             except AccountError:
                 status = 0
             with self.quota_start_lock:
-                state.update(status=status, failures=0 if status == 200 else state.get('failures', 0) + 1)
+                state.update(status=status, window_started=window_started,
+                             failures=0 if status == 200 else state.get('failures', 0) + 1)
                 atomic_write(self.quota_start_path, json.dumps(self.quota_starts).encode())
             results.append({'kind': kind, 'status': status})
         return results
@@ -746,7 +766,45 @@ class Controller:
             raise AccountError('Could not obtain a safe Google sign-in URL.')
         query = dict(urllib.parse.parse_qsl(parts.query))
         query['prompt'] = 'select_account consent'
+        self.google_login_state = state
+        self.google_login_redirect = query.get('redirect_uri', 'http://localhost:51121/oauth-callback')
         return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query))), state
+
+    def complete_google_login(self, callback, state):
+        """Accept a blocked local callback without navigating to the pasted URL."""
+        if state != getattr(self, 'google_login_state', None):
+            raise AccountError('Start Google sign-in again before pasting its callback.')
+        text = callback.strip()
+        if text.startswith('Blocked URL:'):
+            text = text[len('Blocked URL:'):].strip()
+        try:
+            parts = urllib.parse.urlsplit(text)
+            expected = urllib.parse.urlsplit(self.google_login_redirect)
+            query = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
+            valid = (len(text) <= 32000 and parts.scheme == expected.scheme == 'http' and
+                     parts.hostname in ('localhost', '127.0.0.1', '::1') and
+                     parts.port == expected.port and parts.path == expected.path and
+                     not parts.username and not parts.password and not parts.fragment)
+        except (ValueError, AttributeError):
+            valid, query = False, {}
+        if not valid:
+            raise AccountError('Paste the full localhost callback address from the browser.')
+        if query.get('state') != [state]:
+            raise AccountError('This callback belongs to another sign-in. Use the current link.')
+        if query.get('error'):
+            raise AccountError('Google sign-in was declined. Start sign-in again.')
+        codes = query.get('code', [])
+        if len(codes) != 1 or not codes[0] or len(codes[0]) > 4096:
+            raise AccountError('The callback address has no valid authorization code.')
+        status = self.login_status(state)
+        if status.get('status') == 'ok':
+            return {'status': 'ok', 'completed': True}
+        if status.get('status') != 'wait':
+            raise AccountError('This sign-in expired or failed. Start Google sign-in again.')
+        result = self.request('/oauth-callback', 'POST', {'provider': 'antigravity', 'state': state, 'code': codes[0]})
+        if result.get('status') != 'ok':
+            raise AccountError('The gateway did not accept this callback. Check sign-in status.')
+        return {'status': 'ok', 'completed': False}
 
     def login_status(self, state):
         return self.request('/get-auth-status?' + urllib.parse.urlencode({'state': state}))

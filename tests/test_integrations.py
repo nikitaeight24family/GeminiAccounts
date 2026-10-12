@@ -51,6 +51,11 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(config['model_provider'], 'gemini_accounts')
         self.assertTrue(config['features']['example'])
         self.assertEqual(config['model_providers']['gemini_accounts']['wire_api'], 'responses')
+        provider = config['model_providers']['gemini_accounts']
+        self.assertTrue(provider['requires_openai_auth'])
+        self.assertEqual(provider['experimental_bearer_token'], 'local-test-key')
+        profile_provider = tomllib.loads(paths['codex'][1].read_text())['model_providers']['gemini_accounts']
+        self.assertEqual(profile_provider, provider)
         self.assertEqual(tomllib.loads(paths['codex'][1].read_text())['model_provider'], 'gemini_accounts')
         self.assertNotIn(b'local-test-key', self.client.backup_path.read_bytes())
         self.client.restore()

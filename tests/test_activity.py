@@ -7,6 +7,34 @@ from activity import Activity
 
 
 class ActivityTests(unittest.TestCase):
+    def test_timer_pings_are_visible_once_without_fabricated_client_usage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'activity.json'
+            tracker = Activity(path)
+            accounts = [{'name': 'a', 'auth_index': 'A'}]
+            probes = {'a:gemini': {'model': 'gemini-3-flash', 'status': 200, 'attempt_at': 1791758005, 'probe_sent_at': 1791758005},
+                      'a:claude': {'model': 'gpt-oss-120b-medium', 'status': 429, 'attempt_at': 1791758006, 'full_since': 1791757000},
+                      'unknown:codex': {'model': 'gpt-test', 'status': 200, 'attempt_at': 1791758005},
+                      'a:pending': {'model': 'gpt-test', 'status': 'pending', 'attempt_at': 1791758005},
+                      'a:unmeasured': {'model': 'gpt-test', 'status': 200},
+                      'a:cancelled': {'model': 'gpt-test', 'status': 200, 'attempt_at': 1791758007, 'probe_sent_at': 1791756000},
+                      'a:real-usage': {'model': 'gpt-test', 'status': 200, 'attempt_at': 1791758007}}
+            state = tracker.ingest_probes(accounts, probes)
+            self.assertEqual(len(state['events']), 2)
+            self.assertTrue(state['events'][0]['probe'])
+            self.assertEqual(state['events'][0]['code'], 200)
+            self.assertTrue(state['events'][1]['failed'])
+            self.assertEqual(state['stats'], {})
+            self.assertEqual(state['latest'], {})
+            self.assertEqual(state['model_tokens'], {})
+            restored = Activity(path)
+            restored.ingest_probes(accounts, probes)
+            self.assertEqual(len(restored.state['events']), 2)
+            probes['a:gemini']['attempt_at'] += 18000
+            probes['a:gemini']['probe_sent_at'] = probes['a:gemini']['attempt_at']
+            restored.ingest_probes(accounts, probes)
+            self.assertEqual(len(restored.state['events']), 3)
+
     def test_retries_are_correlated_and_secrets_not_persisted(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'activity.json'

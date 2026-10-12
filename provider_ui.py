@@ -142,13 +142,14 @@ class ProviderSupport:
             return
         window = ctk.CTkToplevel(self)
         window.title(service)
-        window.geometry('370x245' if service=='OpenAI' else '370x205')
+        window.geometry('370x245' if service in ('OpenAI', 'Gemini') else '370x205')
         window.resizable(False, False)
         window.transient(self)
         self.label(window, service, 22, bold=True)
         self.label(window, 'Choose how to connect', 12)
         actions = {
-            'Gemini': [('Sign in with Google', self.add_account)],
+            'Gemini': [('Sign in with Google', self.add_account),
+                       ('MoreLogin / another browser', lambda: self.add_account(manual_browser=True))],
             'OpenAI': [('Sign in with ChatGPT', self.sign_in_chatgpt), ('Import auth.json', self.import_chatgpt_file)],
             'Claude': [('Sign in with Claude', self.sign_in_claude)],
             'Grok': [('Sign in with Grok', self.sign_in_grok)],
@@ -306,7 +307,7 @@ class ProviderSupport:
             if not account.get('status'):
                 status = 'Key registered' if account.get('registered') else 'Checking gateway'
                 severity = 'normal' if account.get('registered') else 'muted'
-            row['state'].configure(text=status, text_color={'normal':'#66d7b0','muted':'#9daec4','warning':'#f7ca70','error':'#ff6b7a'}[severity])
+            row['state'].configure(text=self.uptime_status(row['state'], account, status), text_color={'normal':'#66d7b0','muted':'#9daec4','warning':'#f7ca70','error':'#ff6b7a'}[severity])
             self.update_active_border(row, account['name'] in self.active_account_names())
         order = tuple((a['name'],self.api_provider_collapsed(a['provider'])) for a in visible)
         if order != getattr(self, '_api_order', None):

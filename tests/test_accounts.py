@@ -178,6 +178,59 @@ class AccountsTests(unittest.TestCase):
         with self.assertRaises(AccountError):
             self.controller.begin_login()
 
+    def test_blocked_google_callback_is_forwarded_only_to_local_management(self):
+        from unittest.mock import Mock
+        c = self.controller
+        c.google_login_state = 'current-state'
+        c.google_login_redirect = 'http://localhost:51121/oauth-callback'
+        c.login_status = Mock(return_value={'status': 'wait'})
+        c.request = Mock(return_value={'status': 'ok'})
+        result = c.complete_google_login('Blocked URL: http://localhost:51121/oauth-callback?state=current-state&code=4%2Fsecret&scope=email profile', 'current-state')
+        self.assertFalse(result['completed'])
+        c.request.assert_called_once_with('/oauth-callback', 'POST', {
+            'provider': 'antigravity', 'state': 'current-state', 'code': '4/secret'})
+        for path in Path(self.temp.name).glob('*.json'):
+            self.assertNotIn('4/secret', path.read_text('utf-8'))
+
+    def test_invalid_google_callbacks_never_submit_auth_codes(self):
+        from unittest.mock import Mock
+        c = self.controller
+        c.google_login_state = 'current-state'
+        c.google_login_redirect = 'http://localhost:51121/oauth-callback'
+        c.request = Mock()
+        cases = [
+            'https://example.com/oauth-callback?state=current-state&code=secret',
+            'http://localhost:51122/oauth-callback?state=current-state&code=secret',
+            'http://localhost:51121/other?state=current-state&code=secret',
+            'http://localhost:51121/oauth-callback?state=other&code=secret',
+            'http://localhost:51121/oauth-callback?state=current-state&state=other&code=secret',
+            'http://localhost:51121/oauth-callback?state=current-state&code=a&code=b',
+            'http://localhost:51121/oauth-callback?state=current-state&code=',
+            'http://localhost:51121/oauth-callback?state=current-state&error=access_denied',
+            'http://user@localhost:51121/oauth-callback?state=current-state&code=secret',
+        ]
+        for callback in cases:
+            with self.subTest(callback=callback), self.assertRaises(AccountError):
+                c.complete_google_login(callback, 'current-state')
+        with self.assertRaises(AccountError):
+            c.complete_google_login(cases[0], 'other-state')
+        c.request.assert_not_called()
+
+    def test_expired_and_already_completed_google_login_do_not_resubmit(self):
+        from unittest.mock import Mock
+        c = self.controller
+        c.google_login_state = 'current-state'
+        c.google_login_redirect = 'http://localhost:51121/oauth-callback'
+        c.request = Mock()
+        callback = 'http://localhost:51121/oauth-callback?state=current-state&code=secret'
+        c.login_status = Mock(return_value={'status': 'ok'})
+        self.assertTrue(c.complete_google_login(callback, 'current-state')['completed'])
+        for status in ('error', 'unknown'):
+            c.login_status.return_value = {'status': status}
+            with self.assertRaises(AccountError):
+                c.complete_google_login(callback, 'current-state')
+        c.request.assert_not_called()
+
     def test_pool_does_not_enable_unverified_account(self):
         self.items[0]['access_issue'] = 'verification'
         self.controller.route()
