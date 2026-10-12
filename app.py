@@ -22,7 +22,7 @@ import tkinter as tk
 from tkinter import filedialog
 from tkinter import font as tkfont
 from backend import Controller, AccountError
-from account_status import account_status, google_account_status, safe_detail
+from account_status import account_status, google_account_status, safe_detail, status_details
 from brand_icons import ANTIGRAVITY_PNG, GITHUB_PNG
 from omni_brand import omni_icon
 from quota_dots import quota_dot
@@ -868,10 +868,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                     button.pack(side='left')
             else:
                 button.pack_forget()
-        error = reason
         quota_error = quota.get('error') or ('Quota not loaded yet' if not quota.get('windows') and not item.get('disabled') else '')
-        if quota_error:
-            error = '\n'.join(filter(None, (error, str(quota_error))))
+        error = status_details(status, reason, quota_error)
         row['error'].configure(text_color=color if reason else MUTED, wraplength=230, justify='left')
         if error:
             show(row['error'], self.redact_private_text(error), pady=(0, 6))
@@ -944,6 +942,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
 
     def chatgpt_login_started(self, result):
         url, state = result
+        self.chatgpt_login_url = url
         self.pending_chatgpt_login = (state, time.monotonic())
         self.add_button.configure(state='disabled')
         self.add_chatgpt_button.configure(state='disabled')
@@ -960,19 +959,92 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                               text_color=ACCENT)
         self.chatgpt_login_window = ctk.CTkToplevel(self)
         self.chatgpt_login_window.title('ChatGPT sign-in')
-        self.chatgpt_login_window.geometry('470x235')
+        self.chatgpt_login_window.geometry('500x370')
         self.chatgpt_login_window.resizable(False, False)
         self.chatgpt_login_window.configure(fg_color=PANEL)
         self.chatgpt_login_window.transient(self)
         ctk.CTkLabel(self.chatgpt_login_window, text='Complete ChatGPT sign-in',
-                     font=('Segoe UI', 21, 'bold'), text_color=TEXT).pack(pady=(25, 10))
+                     font=('Segoe UI', 21, 'bold'), text_color=TEXT).pack(pady=(22, 8))
         ctk.CTkLabel(self.chatgpt_login_window,
-                     text='Enter your email, password and 2FA code in the separate browser.\nThis app never receives your password or 2FA code.',
-                     font=('Segoe UI', 12), text_color=MUTED, justify='center').pack(pady=(0, 12))
-        self.button(self.chatgpt_login_window, 'Cancel sign-in', self.cancel_chatgpt_login).pack(pady=(0, 8))
-        ctk.CTkLabel(self.chatgpt_login_window, text='Waiting for sign-in…',
-                     text_color=MUTED, font=('Segoe UI', 11)).pack()
+                     text='Sign in in any browser profile. If localhost is blocked,\ncopy the callback URL or authorization code back here.',
+                     font=('Segoe UI', 12), text_color=MUTED, justify='center').pack(pady=(0, 8))
+        link_controls = ctk.CTkFrame(self.chatgpt_login_window, fg_color='transparent')
+        link_controls.pack(pady=(0, 8))
+        self.button(link_controls, 'Open browser', lambda: webbrowser.open(self.chatgpt_login_url)).pack(side='left', padx=(0, 6))
+        self.chatgpt_copy_link_button = self.button(link_controls, 'Copy sign-in link', self.copy_chatgpt_login_link)
+        self.chatgpt_copy_link_button.pack(side='left')
+        ctk.CTkLabel(self.chatgpt_login_window, text='Paste the full callback address or enter only the code:',
+                     font=('Segoe UI', 11), text_color=MUTED).pack(pady=(0, 3))
+        callback_row = ctk.CTkFrame(self.chatgpt_login_window, fg_color='transparent')
+        callback_row.pack(fill='x', padx=20, pady=(0, 6))
+        self.chatgpt_callback_entry = ctk.CTkEntry(callback_row,
+            placeholder_text='http://localhost:1455/auth/callback?... or code', height=30)
+        self.chatgpt_callback_entry.pack(side='left', fill='x', expand=True)
+        self.chatgpt_paste_callback_button = self.button(callback_row, 'Paste', self.paste_chatgpt_callback)
+        self.chatgpt_paste_callback_button.configure(width=58, height=30)
+        self.chatgpt_paste_callback_button.pack(side='right', padx=(6, 0))
+        self.chatgpt_callback_entry.bind('<Control-KeyPress>', self.chatgpt_callback_paste_key, add='+')
+        self.chatgpt_callback_entry.bind('<Return>', lambda _: self.submit_chatgpt_callback())
+        self.chatgpt_callback_button = self.button(self.chatgpt_login_window, 'Complete sign-in', self.submit_chatgpt_callback)
+        self.chatgpt_callback_button.configure(height=28)
+        self.chatgpt_callback_button.pack(pady=(0, 5))
+        self.chatgpt_callback_status = ctk.CTkLabel(self.chatgpt_login_window, text='Waiting for sign-in…',
+                     text_color=MUTED, font=('Segoe UI', 11), wraplength=460)
+        self.chatgpt_callback_status.pack(fill='x', padx=20, pady=(0, 3))
+        self.button(self.chatgpt_login_window, 'Cancel sign-in', self.cancel_chatgpt_login).pack()
         self.after(1800, self.poll_chatgpt_login)
+
+    def copy_chatgpt_login_link(self):
+        if getattr(self, 'chatgpt_login_url', None):
+            self.clipboard_clear()
+            self.clipboard_append(self.chatgpt_login_url)
+            self.chatgpt_callback_status.configure(text='Link copied. Open it in your browser profile.', text_color=GREEN)
+
+    def submit_chatgpt_callback(self):
+        if not self.pending_chatgpt_login or getattr(self, 'chatgpt_callback_busy', False):
+            return
+        value = self.chatgpt_callback_entry.get().strip()
+        if not value:
+            self.chatgpt_callback_status.configure(text='Paste the callback address or authorization code.', text_color='#ffbd93')
+            return
+        state = self.pending_chatgpt_login[0]
+        self.chatgpt_callback_busy = True
+        self.chatgpt_callback_button.configure(state='disabled')
+        self.chatgpt_callback_status.configure(text='Completing sign-in…', text_color=MUTED)
+        def submit():
+            try:
+                return ChatGPTAuth(self.controller).complete_login(value, state), None
+            except AccountError as error:
+                return None, str(error)
+        def done(result):
+            if not self.pending_chatgpt_login or self.pending_chatgpt_login[0] != state:
+                return
+            answer, error = result
+            if error:
+                self.chatgpt_callback_busy = False
+                self.chatgpt_callback_status.configure(text=error, text_color='#ffbd93')
+                self.chatgpt_callback_button.configure(state='normal')
+            else:
+                self.chatgpt_callback_entry.delete(0, 'end')
+                self.chatgpt_callback_status.configure(text='Code accepted. Waiting for ChatGPT confirmation…', text_color=GREEN)
+        self.work(submit, done)
+
+    def chatgpt_callback_paste_key(self, event):
+        if event.keycode == 86 or str(event.keysym).lower() == 'v':
+            self.paste_chatgpt_callback()
+            return 'break'
+
+    def paste_chatgpt_callback(self):
+        if getattr(self, 'chatgpt_callback_busy', False):
+            return
+        try:
+            value = self.clipboard_get().strip()
+        except tk.TclError:
+            self.chatgpt_callback_status.configure(text='Clipboard is empty or unavailable.', text_color='#ffbd93')
+            return
+        self.chatgpt_callback_entry.delete(0, 'end')
+        self.chatgpt_callback_entry.insert(0, value)
+        self.chatgpt_callback_entry.focus_set()
 
     def poll_chatgpt_login(self):
         if not self.pending_chatgpt_login or self.closed:
@@ -1603,7 +1675,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             card.pack(fill='x', pady=(0, 1), padx=1)
             status = self.sidebar_account_status(account)
             heading_row = ctk.CTkFrame(card, fg_color='transparent')
-            heading_row.pack(fill='x', pady=0, padx=5)
+            heading_row.pack(fill='x', pady=(7, 0), padx=7)
             heading_row.grid_columnconfigure(0, weight=1)
             controls = ctk.CTkFrame(heading_row, fg_color='transparent', width=1, height=19)
             controls.grid(row=0, column=1, sticky='e')
@@ -1643,7 +1715,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             if account.get('access_issue') == 'verification':
                 verification_frame.pack(fill='x', padx=5, pady=(0, 3))
             quota_frame = ctk.CTkFrame(card, fg_color='transparent')
-            quota_frame.pack(fill='x', padx=5, pady=0)
+            quota_frame.pack(fill='x', padx=7, pady=(0, 7))
             widgets = {'card': card, 'button': button, 'pause': pause, 'plan': plan, 'status': state, 'priority': priority, 'quota_icons': {}, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
                        'active_families': (), 'quota_rows': {}}
             self.account_widgets[account['name']] = widgets
@@ -2483,18 +2555,28 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
     def draw_rainbow_border(self, widgets, phase):
         card = widgets['card']
         canvas = card._canvas
-        size = (min(card.winfo_width(), canvas.winfo_width()),
-                min(card.winfo_height(), canvas.winfo_height()))
         scale = card._get_widget_scaling()
-        if min(size) <= 5 * scale + 5:
+        size = (canvas.winfo_width(), canvas.winfo_height(), scale)
+        if min(size[:2]) < 12 * scale:
             return
-        if size != widgets.get('rainbow_size'):
-            canvas.delete('rainbow')
-            # Coordinates belong to the canvas, which can lag behind the frame
-            # during layout. Keep the entire stroke inside both surfaces.
+        segments = widgets.get('rainbow_segments')
+        if not segments:
+            segments = [(canvas.create_line(0, 0, 0, 0, width=2.5 * scale,
+                        capstyle='round', tags='rainbow'), i / 192) for i in range(192)]
+            widgets['rainbow_segments'] = segments
+        if not widgets.get('rainbow_resize_bound'):
+            def resize_border(event):
+                if widgets.get('active_highlight'):
+                    self.draw_rainbow_border(widgets, (time.monotonic() / 8) % 1)
+            canvas.bind('<Configure>', resize_border, add='+')
+            widgets['rainbow_resize_bound'] = True
+        if widgets.get('rainbow_size') != size:
             inset = 2.5 * scale + 2
-            x0, y0, x1, y1 = inset, inset, size[0] - 1 - inset, size[1] - 1 - inset
-            radius = min(8.5 * scale, (x1-x0)/2, (y1-y0)/2)
+            x0, y0 = inset, inset
+            x1, y1 = size[0] - inset, size[1] - inset
+            radius = min(float(card.cget('corner_radius')) * scale - inset,
+                         (x1 - x0) / 2, (y1 - y0) / 2)
+            radius = max(0, radius)
             points = []
             for cx, cy, start in [(x0 + radius, y0 + radius, 180), (x1 - radius, y0 + radius, 270),
                                   (x1 - radius, y1 - radius, 0), (x0 + radius, y1 - radius, 90)]:
@@ -2502,21 +2584,20 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                     angle = math.radians(start + step * 7.5)
                     points.append((cx + radius * math.cos(angle), cy + radius * math.sin(angle)))
             points.append(points[0])
-            # Split straight edges too, so every side carries a flowing gradient.
-            segments = []
-            distance = 0
-            for a, b in zip(points, points[1:]):
-                length = math.dist(a, b)
-                count = max(1, math.ceil(length / (7 * scale)))
-                for part in range(count):
-                    p = tuple(a[i] + (b[i] - a[i]) * part / count for i in (0, 1))
-                    q = tuple(a[i] + (b[i] - a[i]) * (part + 1) / count for i in (0, 1))
-                    item = canvas.create_line(*p, *q, width=2.5 * scale, capstyle='round', tags='rainbow')
-                    segments.append((item, distance))
-                    distance += length / count
-            widgets['rainbow_segments'] = [(item, offset / distance) for item, offset in segments]
+            lengths = [math.dist(a, b) for a, b in zip(points, points[1:])]
+            perimeter = sum(lengths)
+            def at(distance):
+                for a, b, length in zip(points, points[1:], lengths):
+                    if distance <= length and length:
+                        return tuple(a[j] + (b[j] - a[j]) * distance / length for j in (0, 1))
+                    distance -= length
+                return points[0]
+            for i, (item, _) in enumerate(segments):
+                canvas.coords(item, *at(perimeter * i / len(segments)),
+                              *at(perimeter * (i + 1) / len(segments)))
+                canvas.itemconfigure(item, width=2.5 * scale)
             widgets['rainbow_size'] = size
-        for item, offset in widgets['rainbow_segments']:
+        for item, offset in segments:
             rgb = colorsys.hsv_to_rgb((phase + offset) % 1, .72, 1)
             canvas.itemconfigure(item, fill='#' + ''.join(f'{round(value * 255):02x}' for value in rgb))
         canvas.tag_raise('rainbow')

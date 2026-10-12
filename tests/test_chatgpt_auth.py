@@ -27,6 +27,25 @@ def fake_jwt():
 
 
 class ChatGPTAuthTests(unittest.TestCase):
+    @patch('chatgpt_auth.urllib.request.build_opener')
+    def test_manual_callback_and_code_are_forwarded_to_local_listener(self, opener):
+        response = Mock(); response.__enter__ = Mock(return_value=response); response.__exit__ = Mock(return_value=False)
+        opener.return_value.open.return_value = response
+        auth = ChatGPTAuth(Mock())
+        self.assertEqual(auth.complete_login('http://localhost:1455/auth/callback?state=s&code=abc12345', 's'), {'accepted': True})
+        first_url = opener.return_value.open.call_args.args[0].full_url
+        self.assertIn('code=abc12345', first_url)
+        auth.complete_login('abc12345', 's')
+        second_url = opener.return_value.open.call_args.args[0].full_url
+        self.assertTrue(second_url.startswith('http://127.0.0.1:1455/auth/callback?'))
+
+    def test_manual_callback_rejects_wrong_origin_or_state(self):
+        auth = ChatGPTAuth(Mock())
+        with self.assertRaises(AccountError):
+            auth.complete_login('https://example.com/auth/callback?state=s&code=abc12345', 's')
+        with self.assertRaisesRegex(AccountError, 'another ChatGPT sign-in'):
+            auth.complete_login('http://localhost:1455/auth/callback?state=other&code=abc12345', 's')
+
     def test_shared_codex_session_is_rejected_before_gateway_upload(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'import.json'

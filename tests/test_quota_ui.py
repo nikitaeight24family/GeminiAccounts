@@ -77,6 +77,28 @@ class QuotaUITests(unittest.TestCase):
                     self.assertGreaterEqual(box[1], 0)
                     self.assertLessEqual(box[2], canvas.winfo_width())
                     self.assertLessEqual(box[3], canvas.winfo_height())
+                    ids = canvas.find_withtag('rainbow')
+                    with patch.object(canvas, 'winfo_width', return_value=canvas.winfo_width() + 50):
+                        app.draw_rainbow_border(row, .5)
+                    self.assertEqual(ids, canvas.find_withtag('rainbow'))
+            finally:
+                app.closed = True
+                app.destroy()
+
+    def test_quota_failure_does_not_repeat_status_below_card(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                app.chatgpt_collapsed = False
+                app.set_chatgpt_accounts([{'name': 'one', 'quota': {'error': 'Quota unavailable',
+                    'windows': [{'label': '5h', 'remaining': 70, 'reset_at': time.time() + 300}]}}])
+                row = app.chatgpt_widgets['one']
+                self.assertIn('Quota unavailable', row['status'].cget('text'))
+                self.assertFalse(row['error'].winfo_manager())
+                self.assertEqual(row['windows']['5h'][2].get(), .7)
             finally:
                 app.closed = True
                 app.destroy()

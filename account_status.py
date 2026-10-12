@@ -12,6 +12,19 @@ def safe_detail(value):
     return ' '.join(text.split())[:600]
 
 
+def status_details(label, *details):
+    """Show each cause once, omitting the label already in the status row."""
+    seen = {safe_detail(label).casefold()}
+    result = []
+    for detail in details:
+        for line in str(detail or '').splitlines():
+            line = safe_detail(line)
+            if line and line.casefold() not in seen:
+                result.append(line)
+                seen.add(line.casefold())
+    return '\n'.join(result)
+
+
 def account_status(account, now=None):
     """Return label, severity and reason. Unknown states remain visible."""
     now = time.time() if now is None else now

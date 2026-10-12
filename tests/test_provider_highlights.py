@@ -95,6 +95,17 @@ class ProviderHighlightTests(unittest.TestCase):
         view.items[2]['disabled'] = True
         self.assertEqual(App.active_provider_accounts(view), {'claude': 'b'})
 
+    def test_gemini_and_openai_highlights_are_independent(self):
+        now = datetime.now(timezone.utc).isoformat()
+        view = SimpleNamespace(items=[{'name': 'google'}], chatgpt_items=[{'name': 'gpt'}],
+            model_family=App.model_family, activity_state={'latest': {
+                'gemini-pro-agent': {'name': 'google', 'at': now},
+                'gpt-6-astra': {'name': 'gpt', 'at': now}}},
+            gateway_jobs=[{'model': 'gemini-pro-agent', 'state': 'running'},
+                          {'model': 'gpt-6-astra', 'state': 'running'}],
+            gateway_jobs_checked=time.monotonic())
+        self.assertEqual(App.active_provider_accounts(view), {'gemini': 'google', 'openai': 'gpt'})
+
     def test_flash_history_does_not_claim_running_pro_request(self):
         now = datetime.now(timezone.utc).isoformat()
         view = SimpleNamespace(items=[{'name': 'flash', 'disabled': False}], model_family=App.model_family,

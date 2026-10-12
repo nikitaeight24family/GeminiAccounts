@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 import urllib.parse
+import urllib.request
+import urllib.error
 import uuid
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -97,6 +99,37 @@ class ChatGPTAuth:
 
     def login_status(self, state):
         return self.controller.request('/get-auth-status?' + urllib.parse.urlencode({'state': state}))
+
+    def complete_login(self, value, state):
+        """Forward a browser callback (or pasted code) to the local OAuth listener."""
+        value = str(value or '').strip()
+        if not value:
+            raise AccountError('Paste the callback address or authorization code.')
+        if '://' in value:
+            parts = urllib.parse.urlsplit(value)
+            if (parts.scheme != 'http' or parts.hostname not in ('localhost', '127.0.0.1')
+                    or parts.port != 1455 or parts.path != '/auth/callback'):
+                raise AccountError('Paste the localhost:1455 ChatGPT callback from the browser.')
+            query = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
+            if query.get('state', [None]) != [state]:
+                raise AccountError('This callback belongs to another ChatGPT sign-in.')
+            code = query.get('code', [None])
+            if len(code) != 1 or not code[0]:
+                raise AccountError('The callback does not contain an authorization code.')
+            target = value
+        else:
+            if any(char.isspace() for char in value) or len(value) < 8:
+                raise AccountError('Enter the authorization code shown by ChatGPT.')
+            target = 'http://127.0.0.1:1455/auth/callback?' + urllib.parse.urlencode({'code': value, 'state': state})
+        request = urllib.request.Request(target, method='GET')
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=12) as response:
+                response.read(4096)
+        except urllib.error.HTTPError as error:
+            raise AccountError('The local ChatGPT sign-in listener rejected the code (HTTP %s).' % error.code) from None
+        except OSError:
+            raise AccountError('The local ChatGPT sign-in listener is not responding. Start a new sign-in.') from None
+        return {'accepted': True}
 
     def cancel_login(self, state):
         return self.controller.request('/oauth-session?' + urllib.parse.urlencode({'state': state}), 'DELETE')
