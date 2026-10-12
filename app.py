@@ -37,7 +37,6 @@ from tokenharbor import TokenHarbor
 from chatgpt_auth import ChatGPTAuth
 from claude_ui import ClaudeSupport, ClaudePanel
 from provider_ui import ProviderSupport, GrokPanel
-from isolated_browser import open_isolated
 from model_names import model_name
 
 BG = '#10141d'
@@ -946,16 +945,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.pending_chatgpt_login = (state, time.monotonic())
         self.add_button.configure(state='disabled')
         self.add_chatgpt_button.configure(state='disabled')
-        try:
-            open_isolated(url)
-        except AccountError as error:
-            self.pending_chatgpt_login = None
-            self.add_button.configure(state='normal')
-            self.add_chatgpt_button.configure(state='normal')
-            self.notice.configure(text=str(error), text_color='#ffbd93')
-            self.work(lambda: ChatGPTAuth(self.controller).cancel_login(state), lambda _: None)
-            return
-        self.notice.configure(text='Complete ChatGPT sign-in in the separate browser window. The account will appear here automatically.',
+        self.notice.configure(text='Copy the sign-in link or open it manually in your browser. The account will appear here automatically.',
                               text_color=ACCENT)
         self.chatgpt_login_window = ctk.CTkToplevel(self)
         self.chatgpt_login_window.title('ChatGPT sign-in')
