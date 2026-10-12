@@ -21,7 +21,10 @@ Omni manages **Google Antigravity / Gemini, ChatGPT, Claude, Grok and TokenHarbo
 
 *Screenshots use demo accounts, sample quotas and synthetic calculator measurements. No personal credentials or actual token-capacity claims are shown.*
 
-## Omni 1.4.9 highlights
+## Omni 1.5.0 highlights
+
+- Successful Gemini and other provider responses remain highlighted for 60 seconds after completion, including fast requests missed between queue polls and long responses. Quota waits, failures and background probes do not activate the highlight.
+- ChatGPT imports reject sessions shared with local Codex and duplicate sessions already connected to Omni, preventing old token copies from replacing renewed credentials. Use a separate ChatGPT sign-in for each application.
 
 - TokenHarbor Haiku 5.5 appears in Claude Desktop's Code menu when its key is added after connecting Claude, including profiles that only use ChatGPT models. Existing approved profiles recover a missing TokenHarbor menu entry automatically; restart Claude Desktop after updating.
 - ChatGPT quota resets clear stale local routing blocks, and quota cards update as each account responds.
@@ -82,7 +85,7 @@ Before any changes, the app lists affected files and asks for consent. Projects,
 | Priorities | Adjust account priorities with compact drawn arrows beside the pause control. Higher priority moves its card upward and ranks usable credentials first. Equal priorities retain automatic quota/reset ordering. |
 | Quota reserves | Drag the thin marker on a per-account quota bar to set the **minimum remaining percentage**. It grows and shows a percentage while held. **70% means stop at 70% remaining**, not spend 70%. The default is **0%**. Each account, provider family and time window has its own saved boundary. |
 | Compact mode | Collapse account lists or pooled quotas. Green, orange and red circles show remaining capacity with **5h / 1w inside the circle**. Counts use **8pcs**. The bottom panel stays anchored and TokenHarbor stays last. |
-| Live activity | Identify active accounts with a full animated border, provider indicators and the recent model. Gemini and Claude can run on different Google accounts simultaneously. |
+| Live activity | Identify responding accounts with a full animated border, provider indicators and the recent model. A confirmed successful response remains highlighted for 60 seconds so short requests remain visible. Gemini and Claude can run on different Google accounts simultaneously. |
 | Privacy | The open/closed eye beside Omni hides account names across cards, details and history using stable numbered aliases. Double-click a hidden name to set a private alias without exposing the real identity. |
 | Settings | Click the **gear beside Omni** to open service visibility, **English / Russian** and **dark / light theme** settings, including from compact mode. Changes persist without restarting. |
 | Window | Remember the last screen position. The drawn pin beside the settings gear keeps the window above other applications; both settings persist. |

@@ -1,4 +1,14 @@
-# Omni 1.4.9 — TokenHarbor model menu and quota recovery
+# Omni 1.5.0 — Account highlights and safer ChatGPT imports
+
+- Fixed missing Gemini highlights when fast responses finish between queue polls. Successful responses remain highlighted for 60 seconds after completion, including long responses.
+- Preserve provider badges and recent model captions after a response completes. Quota waits, failures and background checks do not activate highlights.
+- Reject ChatGPT imports that share a session with local Codex or duplicate a session already connected to Omni, including old copies of renewed tokens. Separate ChatGPT sign-ins remain supported.
+
+Existing revoked CLI sessions require a new sign-in through Omni. This protection does not restore revoked tokens or establish why OpenAI revoked an earlier session.
+
+Includes Windows installers and terminal builds for Windows x64, macOS Apple Silicon / Intel, and Linux x64.
+
+## Previous release: Omni 1.4.9 — TokenHarbor model menu and quota recovery
 
 - Fixed TokenHarbor Claude Haiku 5.5 Free missing from Claude Desktop's Code menu when the key is connected after application setup, including ChatGPT-only profiles.
 - Existing approved Omni profiles automatically restore a missing TokenHarbor menu entry while preserving their selected model. Restart Claude Desktop after updating to reload its model menu.

@@ -2373,6 +2373,10 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         running = {job.get('upstream_model') or
                    getattr(self, 'model_aliases', {}).get(job.get('model'), job.get('model', ''))
                    for job in getattr(self, 'gateway_jobs', []) if job.get('state') == 'running'}
+        waiting = {job.get('upstream_model') or
+                   getattr(self, 'model_aliases', {}).get(job.get('model'), job.get('model', ''))
+                   for job in getattr(self, 'gateway_jobs', []) if job.get('state') == 'waiting'}
+        busy_families = {self.model_family(model) for model in running | waiting}
         enabled = {a['name'] for a in self.items + getattr(self, 'chatgpt_items', []) + getattr(self, 'claude_items', []) + getattr(self, 'grok_items', []) + getattr(self, 'api_items', []) if not a.get('disabled')}
         latest = {}
         for model, event in self.activity_state['latest'].items():
@@ -2380,9 +2384,14 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             family = self.model_family(actual)
             try:
                 age = (datetime.now(timezone.utc) - datetime.fromisoformat(event['at'].replace('Z', '+00:00'))).total_seconds()
+                age -= max(0, float(event.get('latency_ms') or 0)) / 1000
             except (KeyError, ValueError, TypeError, AttributeError):
                 continue
-            if (family and actual in running and not event.get('failed') and 0 <= age < 60
+            # Completed fast requests can disappear between queue polls. Keep
+            # their confirmed account visible, without attributing another
+            # model's running request or quota wait to this account.
+            eligible = actual in running or family not in busy_families
+            if (family and eligible and not event.get('failed') and not event.get('probe') and 0 <= age < 60
                     and (family not in latest or event['at'] > latest[family]['at'])):
                 latest[family] = event
         return {family: event['name'] for family, event in latest.items() if event['name'] in enabled}
@@ -2405,7 +2414,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 latest[name] = event
         for name, stats in state.get('stats', {}).items():
             if stats.get('last_model') and stats.get('last', '') >= latest.get(name, {}).get('at', ''):
-                latest[name] = {'at': stats['last'], 'upstream_model': stats['last_model']}
+                latest[name] = {'at': stats['last'], 'upstream_model': stats['last_model'],
+                                'latency_ms': stats.get('last_latency_ms') or 0}
         return latest
 
     def last_account_model(self, name, now=None):
@@ -2414,6 +2424,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         try:
             timestamp = datetime.fromisoformat(last['at'].replace('Z', '+00:00'))
             age = ((now or datetime.now(timezone.utc)) - timestamp).total_seconds()
+            age -= max(0, float(last.get('latency_ms') or 0)) / 1000
             if not 0 <= age < 60:
                 return ''
         except (KeyError, ValueError, TypeError, AttributeError):
@@ -2527,11 +2538,11 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             card = widgets['card']
             families = tuple(kind for kind in ('gemini', 'claude') if providers.get(kind) == name)
             self.draw_active_badges(widgets, families,
-                running_models.get(families[-1], '') if families else self.last_account_model(name))
+                running_models.get(families[-1], self.last_account_model(name)) if families else self.last_account_model(name))
             self.update_active_border(widgets, name in active)
         for name, widgets in getattr(self, 'chatgpt_widgets', {}).items():
             is_active = providers.get('openai') == name
-            caption = running_models.get('openai', '') if is_active else self.last_account_model(name)
+            caption = running_models.get('openai', self.last_account_model(name)) if is_active else self.last_account_model(name)
             if widgets['model'].cget('text') != caption:
                 widgets['model'].configure(text=caption)
             self.update_active_border(widgets, is_active)

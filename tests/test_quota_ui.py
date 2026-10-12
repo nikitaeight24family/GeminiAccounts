@@ -669,6 +669,18 @@ class QuotaUITests(unittest.TestCase):
                 badge_canvas = app.account_widgets['2']['button']._canvas
                 for family in ('gemini', 'claude'):
                     self.assertTrue(badge_canvas.find_withtag('active_' + family))
+                # A fast response ends before the queue poll sees it running.
+                app.gateway_jobs = []
+                app.recent_account_models = app.latest_models_by_account(app.activity_state)
+                app.animate_active_borders()
+                self.assertTrue(app.account_widgets['2']['card']._canvas.find_withtag('rainbow'))
+                self.assertEqual(app.account_widgets['2']['active_families'], ('gemini', 'claude'))
+                self.assertTrue(app.account_widgets['2']['button']._canvas.find_withtag('last_model'))
+                for event in app.activity_state['latest'].values():
+                    event['at'] = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
+                app.animate_active_borders()
+                self.assertEqual(app.active_account_names(), set())
+                self.assertFalse(app.account_widgets['2']['card']._canvas.find_withtag('rainbow'))
                 self.assertEqual(app.total_quota_bar.get(), 1)
                 self.assertEqual(app.total_weekly_bar.get(), 1)
                 # Exhausted accounts contribute zero; missing quotas stay unknown.

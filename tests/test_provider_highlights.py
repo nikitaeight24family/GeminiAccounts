@@ -23,13 +23,13 @@ class ProviderHighlightTests(unittest.TestCase):
         self.assertEqual(App.last_account_model(view, 'a'), '3.8 Flash High')
         self.assertEqual(App.last_account_model(view, 'unknown'), '')
 
-    def test_idle_waiting_and_stale_status_do_not_highlight_and_models_expire(self):
+    def test_fast_completed_response_highlights_but_waiting_and_stale_status_do_not(self):
         now = datetime.now(timezone.utc)
         view = SimpleNamespace(items=[{'name': 'a'}], model_family=App.model_family,
             activity_state={'latest': {'gemini-3-flash': {'name': 'a', 'model': 'gemini-3-flash', 'at': now.isoformat()}},
                             'stats': {'a': {'last_model': 'gemini-3-flash', 'last': now.isoformat()}}},
             gateway_jobs=[], gateway_jobs_checked=time.monotonic())
-        self.assertEqual(App.active_provider_accounts(view), {})
+        self.assertEqual(App.active_provider_accounts(view), {'gemini': 'a'})
         view.gateway_jobs = [{'model': 'gemini-3-flash', 'state': 'running'}]
         self.assertEqual(App.active_provider_accounts(view), {'gemini': 'a'})
         view.gateway_jobs[0]['state'] = 'waiting'
@@ -39,6 +39,24 @@ class ProviderHighlightTests(unittest.TestCase):
         self.assertEqual(App.active_provider_accounts(view), {})
         self.assertEqual(App.last_account_model(view, 'a', now + timedelta(seconds=59)), '3 Flash')
         self.assertEqual(App.last_account_model(view, 'a', now + timedelta(seconds=60)), '')
+
+    def test_recent_highlight_expires_and_ignores_failed_or_background_requests(self):
+        now = datetime.now(timezone.utc)
+        event = {'name': 'a', 'model': 'gemini-3-flash', 'at': now.isoformat()}
+        view = SimpleNamespace(items=[{'name': 'a'}], model_family=App.model_family,
+            activity_state={'latest': {'gemini-3-flash': event}},
+            gateway_jobs=[], gateway_jobs_checked=time.monotonic())
+        for flag in ('failed', 'probe'):
+            event[flag] = True
+            self.assertEqual(App.active_provider_accounts(view), {})
+            event.pop(flag)
+        event['at'] = (now - timedelta(seconds=61)).isoformat()
+        self.assertEqual(App.active_provider_accounts(view), {})
+        # The usage timestamp is request start, so a long response must still
+        # highlight when it completes rather than already being expired.
+        event['latency_ms'] = 61000
+        self.assertEqual(App.active_provider_accounts(view), {'gemini': 'a'})
+        self.assertEqual(App.last_account_model(view, 'a'), '3 Flash')
 
     def test_openai_subscription_models_do_not_share_google_claude_pool(self):
         for model in ('gpt-6.1-sol', 'o3', 'o4-mini', 'codex-mini-latest'):

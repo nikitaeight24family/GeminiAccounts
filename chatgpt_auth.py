@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import json
+import os
 import urllib.parse
 import uuid
 import time
@@ -60,6 +61,22 @@ def gateway_credential(raw):
               'last_refresh': raw.get('last_refresh') or datetime.now(timezone.utc).isoformat(),
               'expired': expire}
     return result
+
+
+def same_oauth_session(left, right):
+    """Compare local credentials without exposing token material."""
+    left = left.get('tokens', left) if isinstance(left, dict) else {}
+    right = right.get('tokens', right) if isinstance(right, dict) else {}
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return False
+    if left.get('refresh_token') and left['refresh_token'] == right.get('refresh_token'):
+        return True
+    try:
+        first = jwt_claims(left.get('access_token', '')).get('session_id')
+        second = jwt_claims(right.get('access_token', '')).get('session_id')
+    except (AccountError, AttributeError):
+        return False
+    return bool(first and second and first == second)
 
 
 class ChatGPTAuth:
@@ -370,7 +387,7 @@ class ChatGPTAuth:
             raise AccountError('ChatGPT applied the reset, but the gateway cooldown could not be cleared. Refresh the account; do not spend another reset.') from None
         return body.get('windows_reset', 0)
 
-    def import_file(self, source):
+    def import_file(self, source, codex_auth_path=None):
         path = Path(source)
         try:
             if path.suffix.lower() != '.json' or path.stat().st_size > 2_000_000:
@@ -380,6 +397,20 @@ class ChatGPTAuth:
             raise AccountError('Cannot read this auth.json file.') from error
         suffix = hashlib.sha256(credential['account_id'].encode('utf-8')).hexdigest()[:16]
         name = 'codex-import-' + suffix + '.json'
+        local_auth = Path(codex_auth_path) if codex_auth_path is not None else (
+            Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex') / 'auth.json')
+        try:
+            shared = same_oauth_session(credential, json.loads(local_auth.read_text('utf-8-sig')))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            shared = False
+        if shared:
+            raise AccountError('This session is also stored in Codex. Sign in through Omni to create a separate session instead of importing this auth.json.')
+        for account in self.accounts():
+            if account.get('name') != name and account.get('email') and account['email'] != credential['email']:
+                continue
+            existing = self.controller.request('/auth-files/download?' + urllib.parse.urlencode({'name': account['name']}))
+            if same_oauth_session(credential, existing):
+                raise AccountError('This session is already connected. Use the existing entry or sign in through Omni to create a separate session; reimporting can replace renewed tokens with an old copy.')
         payload = json.dumps(credential, ensure_ascii=False).encode('utf-8')
         self.controller.upload_auth_file(name, payload)
         accounts = self.accounts()

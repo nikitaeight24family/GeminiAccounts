@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend import AccountError
 from backend import Controller
-from chatgpt_auth import ChatGPTAuth, gateway_credential
+from chatgpt_auth import ChatGPTAuth, gateway_credential, same_oauth_session
 from isolated_browser import open_isolated
 from quota_queue import QueueServer, quota_wait
 from tests.test_quota_queue import Mock as MockGateway
@@ -27,6 +27,70 @@ def fake_jwt():
 
 
 class ChatGPTAuthTests(unittest.TestCase):
+    def test_shared_codex_session_is_rejected_before_gateway_upload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'import.json'
+            codex = Path(directory) / 'auth.json'
+            raw = {'auth_mode': 'chatgpt', 'tokens': {'id_token': fake_jwt(),
+                'access_token': 'access-test', 'refresh_token': 'shared-refresh', 'account_id': 'account-123'}}
+            source.write_text(json.dumps(raw))
+            codex.write_text(json.dumps(raw))
+            controller = Mock()
+            with self.assertRaisesRegex(AccountError, 'separate session'):
+                ChatGPTAuth(controller).import_file(source, codex_auth_path=codex)
+            controller.upload_auth_file.assert_not_called()
+            controller.request.assert_not_called()
+
+    def test_session_comparison_recognizes_rotation_and_keeps_distinct_logins_separate(self):
+        def token(session):
+            payload = base64.urlsafe_b64encode(json.dumps({'session_id': session}).encode()).decode().rstrip('=')
+            return 'header.' + payload + '.signature'
+        first = {'access_token': token('same-session'), 'refresh_token': 'old-refresh'}
+        rotated = {'tokens': {'access_token': token('same-session'), 'refresh_token': 'new-refresh'}}
+        self.assertTrue(same_oauth_session(first, rotated))
+        self.assertFalse(same_oauth_session(first, {'access_token': token('separate-session'), 'refresh_token': 'separate-refresh'}))
+
+    def test_duplicate_gateway_session_is_rejected_without_replacing_existing_entry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'import.json'
+            raw = {'auth_mode': 'chatgpt', 'tokens': {'id_token': fake_jwt(),
+                'access_token': 'access-test', 'refresh_token': 'shared-refresh', 'account_id': 'account-123'}}
+            source.write_text(json.dumps(raw))
+            controller = Mock()
+            controller.request.side_effect = [
+                {'files': [{'provider': 'codex', 'name': 'codex-browser-login.json', 'email': 'person@example.com'}]},
+                {'refresh_token': 'shared-refresh'}]
+            with self.assertRaisesRegex(AccountError, 'already connected'):
+                ChatGPTAuth(controller).import_file(source, codex_auth_path=Path(directory) / 'missing.json')
+            controller.upload_auth_file.assert_not_called()
+
+    def test_reimport_cannot_overwrite_rotated_tokens_but_separate_login_can_replace_entry(self):
+        import hashlib
+        def access(session):
+            encoded = base64.urlsafe_b64encode(json.dumps({'session_id': session}).encode()).decode().rstrip('=')
+            return 'header.' + encoded + '.signature'
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'import.json'
+            raw = {'auth_mode': 'chatgpt', 'tokens': {'id_token': fake_jwt(),
+                'access_token': access('old-session'), 'refresh_token': 'old-refresh', 'account_id': 'account-123'}}
+            source.write_text(json.dumps(raw))
+            name = 'codex-import-' + hashlib.sha256(b'account-123').hexdigest()[:16] + '.json'
+            connected = {'files': [{'provider': 'codex', 'name': name, 'email': 'person@example.com'}]}
+            controller = Mock()
+            controller.request.side_effect = [connected,
+                {'access_token': access('old-session'), 'refresh_token': 'renewed-refresh'}]
+            importer = ChatGPTAuth(controller)
+            with self.assertRaisesRegex(AccountError, 'old copy'):
+                importer.import_file(source, codex_auth_path=Path(directory) / 'missing.json')
+            controller.upload_auth_file.assert_not_called()
+            raw['tokens']['access_token'] = access('new-session')
+            raw['tokens']['refresh_token'] = 'new-session-refresh'
+            source.write_text(json.dumps(raw))
+            controller.request.side_effect = [connected,
+                {'access_token': access('old-session'), 'refresh_token': 'renewed-refresh'}, connected]
+            importer.import_file(source, codex_auth_path=Path(directory) / 'missing.json')
+            controller.upload_auth_file.assert_called_once()
+
     def test_converts_nested_codex_auth_without_api_key_or_agent_metadata(self):
         raw = {'auth_mode': 'chatgpt', 'openai_api_key': 'secret-unused',
                'agent_identity': {'private': 'secret-unused'},
@@ -64,15 +128,16 @@ class ChatGPTAuthTests(unittest.TestCase):
                 'id_token': fake_jwt(), 'access_token': 'access-test',
                 'refresh_token': 'refresh-test', 'account_id': 'account-123'}}), 'utf-8')
             controller = Mock()
-            controller.request.return_value = {'files': [{
+            connected = {'files': [{
                 'name': 'codex-import-e7f930c85d25ab68.json',
                 'provider': 'codex', 'email': 'person@example.com', 'disabled': False}]}
             importer = ChatGPTAuth(controller)
             # Use the generated name in the mock response, avoiding a second credential copy.
             import hashlib
-            controller.request.return_value['files'][0]['name'] = (
+            connected['files'][0]['name'] = (
                 'codex-import-' + hashlib.sha256(b'account-123').hexdigest()[:16] + '.json')
-            email, accounts = importer.import_file(path)
+            controller.request.side_effect = [{'files': []}, connected]
+            email, accounts = importer.import_file(path, codex_auth_path=Path(directory) / 'missing.json')
             self.assertEqual(email, 'person@example.com')
             self.assertEqual(len(accounts), 1)
             uploaded_name, payload = controller.upload_auth_file.call_args.args

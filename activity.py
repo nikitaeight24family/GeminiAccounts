@@ -134,6 +134,7 @@ class Activity:
             if timestamp >= stats.get('last', ''):
                 stats['last'] = timestamp
                 stats['last_model'] = upstream_model
+                stats['last_latency_ms'] = latency
             previous = self.state['latest'].get(model)
             attempt = self.state['attempts'].get(trace) if trace else None
             if attempt and attempt.get('model') != model:
@@ -159,7 +160,8 @@ class Activity:
             if failed and trace:
                 self.state['attempts'][trace] = {'name': name, 'code': code, 'model': model}
             else:
-                current = {'name': name, 'at': timestamp, 'model': model, 'upstream_model': upstream_model}
+                current = {'name': name, 'at': timestamp, 'model': model, 'upstream_model': upstream_model,
+                           'latency_ms': latency}
                 if not previous or timestamp >= previous['at']:
                     self.state['latest'][model] = current
                 self.state['attempts'].pop(trace, None)
