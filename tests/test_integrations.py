@@ -225,6 +225,43 @@ class IntegrationTests(unittest.TestCase):
             self.assertFalse(connection.connect('thk_test-key'))
         self.assertFalse(any(path.exists() for path in self.client.paths()['claude_desktop']))
 
+    def test_tokenharbor_added_after_chatgpt_only_fresh_desktop_setup(self):
+        config_path = self.controller.proxy_dir / 'config.yaml'
+        config_path.write_text(yaml.safe_dump({'server': {'host': '127.0.0.1', 'port': 8317}}), encoding='utf-8')
+        self.controller.chatgpt_model_choices = lambda: ['gpt-test']
+        self.controller.accounts = lambda: []
+        self.client.apply(['claude_desktop'])
+        path = self.client.paths()['claude_desktop'][2]
+        before = self.client.read_json(path)
+        self.assertFalse(any(m['labelOverride'].startswith('Gemini') for m in before['inferenceModels']))
+        connection = TokenHarbor(self.controller, self.client)
+        with patch.object(connection, 'verify_key'), patch.object(connection, 'model_listed', return_value=True), \
+             patch.object(connection, 'probe_gateway', return_value=True):
+            self.assertTrue(connection.connect('thk_test-key'))
+        after = self.client.read_json(path)
+        self.assertEqual(after['inferenceModels'][:-1], before['inferenceModels'])
+        self.assertEqual(after['inferenceModels'][-1]['name'], CLIENT_MODEL)
+        self.assertFalse(after['inferenceModels'][-1]['isFamilyDefault'])
+        after['inferenceModels'] = before['inferenceModels']
+        self.client.write_json(path, after)
+        self.assertTrue(self.client.reconcile_desktop_routes())
+        self.assertFalse(self.client.reconcile_desktop_routes())
+        self.assertEqual(sum(m['name'] == CLIENT_MODEL for m in self.client.read_json(path)['inferenceModels']), 1)
+
+    def test_tokenharbor_connected_before_chatgpt_only_desktop_setup(self):
+        config_path = self.controller.proxy_dir / 'config.yaml'
+        config_path.write_text(yaml.safe_dump({'server': {'host': '127.0.0.1', 'port': 8317}}), encoding='utf-8')
+        self.controller.chatgpt_model_choices = lambda: ['gpt-test']
+        self.controller.accounts = lambda: []
+        connection = TokenHarbor(self.controller, self.client)
+        with patch.object(connection, 'verify_key'), patch.object(connection, 'model_listed', return_value=True), \
+             patch.object(connection, 'probe_gateway', return_value=True):
+            self.assertFalse(connection.connect('thk_test-key'))
+        self.client.apply(['claude_desktop'])
+        path = self.client.paths()['claude_desktop'][2]
+        self.assertIn(CLIENT_MODEL, [m['name'] for m in self.client.read_json(path)['inferenceModels']])
+        self.assertIsNotNone(connection.approved_desktop_preset())
+
     def test_tokenharbor_rolls_back_if_gateway_cannot_use_free_route(self):
         config_path = self.controller.proxy_dir / 'config.yaml'
         config_path.write_text(yaml.safe_dump({'server': {'host': '127.0.0.1', 'port': 8317}}), encoding='utf-8')

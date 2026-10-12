@@ -21,7 +21,10 @@ Omni manages **Google Antigravity / Gemini, ChatGPT, Claude, Grok and TokenHarbo
 
 *Screenshots use demo accounts, sample quotas and synthetic calculator measurements. No personal credentials or actual token-capacity claims are shown.*
 
-## Omni 1.4.8 highlights
+## Omni 1.4.9 highlights
+
+- TokenHarbor Haiku 5.5 appears in Claude Desktop's Code menu when its key is added after connecting Claude, including profiles that only use ChatGPT models. Existing approved profiles recover a missing TokenHarbor menu entry automatically; restart Claude Desktop after updating.
+- ChatGPT quota resets clear stale local routing blocks, and quota cards update as each account responds.
 
 - **Rainbow reset icons for every saved credit**, including credits that OpenAI does not currently allow you to redeem. Hover explains availability; disabled buttons remain protected from accidental redemption.
 - **Token capacity calculator** in Routing statistics: persistent estimates by provider, subscription, model and 5h / 1w window, with a percentage input and measurement counts.

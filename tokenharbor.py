@@ -128,6 +128,28 @@ class TokenHarbor:
         path = self.integrations.paths()['claude_desktop'][2]
         return path if str(path.resolve()) in self.integrations.backups() else None
 
+    @staticmethod
+    def desktop_model():
+        return {'name': CLIENT_MODEL, 'labelOverride': DISPLAY_NAME,
+                'anthropicFamilyTier': 'haiku', 'isFamilyDefault': False,
+                'supports1m': True, 'prefer1m': True}
+
+    def sync_desktop_model(self):
+        """Restore a connected TokenHarbor model in an approved Claude profile."""
+        with self.integrations.lock:
+            if not self.connected():
+                return False
+            path = self.approved_desktop_preset()
+            if path is None:
+                return False
+            preset = self.integrations.read_json(path)
+            models = preset.setdefault('inferenceModels', [])
+            if any(model.get('name') == CLIENT_MODEL for model in models):
+                return False
+            models.append(self.desktop_model())
+            self.integrations.write_json(path, preset)
+            return True
+
     def model_listed(self):
         key = (self.controller.proxy_dir / 'client-key.txt').read_text('utf-8-sig').strip()
         request = urllib.request.Request(self.controller.base + '/v1/models',
@@ -179,9 +201,7 @@ class TokenHarbor:
             if preset is not None:
                 models = preset.setdefault('inferenceModels', [])
                 models[:] = [model for model in models if model.get('name') != CLIENT_MODEL]
-                models.append({'name': CLIENT_MODEL, 'labelOverride': DISPLAY_NAME,
-                               'anthropicFamilyTier': 'haiku', 'isFamilyDefault': False,
-                               'supports1m': True, 'prefer1m': True})
+                models.append(self.desktop_model())
             try:
                 self.write_live_config(path, yaml.safe_dump(config, sort_keys=False).encode())
                 # CLIProxyAPI hot-reloads the file; confirm its model menu includes the new route.

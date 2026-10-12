@@ -1,4 +1,13 @@
-# Gemini Accounts 1.3.7 — Flash reasoning levels
+# Omni 1.4.9 — TokenHarbor model menu and quota recovery
+
+- Fixed TokenHarbor Claude Haiku 5.5 Free missing from Claude Desktop's Code menu when the key is connected after application setup, including ChatGPT-only profiles.
+- Existing approved Omni profiles automatically restore a missing TokenHarbor menu entry while preserving their selected model. Restart Claude Desktop after updating to reload its model menu.
+- Fixed stale local ChatGPT quota blocks after a confirmed limit reset and resumed waiting requests when a full reset is detected.
+- Show each account's quota as soon as it responds, without waiting for slower account checks, and retain known subscription names while quota loads.
+
+Includes Windows installers and terminal builds for Windows x64, macOS Apple Silicon / Intel, and Linux x64.
+
+## Previous release notes: Gemini Accounts 1.3.7 — Flash reasoning levels
 
 - Added Antigravity Flash High, Medium and Low as distinct upstream models, including Google's Gemini 3.5 Flash IDs.
 - Claude Code discovers gateway models, Claude Desktop lists the available variants, and Codex receives an extended catalog while preserving its existing model choices.

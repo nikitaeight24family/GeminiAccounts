@@ -77,12 +77,13 @@ class Integrations:
         preset_path = self.paths()['claude_desktop'][2]
         if str(preset_path.resolve()) not in self.backups():
             return False
+        menu_changed = TokenHarbor(self.controller, self).sync_desktop_model()
         preset = self.read_json(preset_path)
         routes = {entry.get('name') for entry in preset.get('inferenceModels', [])
                   if isinstance(entry, dict) and isinstance(entry.get('name'), str)
                   and re.fullmatch(r'claude-(?:sonnet|haiku)-4-5-ga-[a-z0-9-]+', entry['name'])}
         if not routes:
-            return False
+            return menu_changed
         catalog_path = self.controller.proxy_dir / 'cliproxy-models.json'
         catalog = self.read_json(catalog_path)
         models = {entry['id'] for entry in catalog.get('antigravity', [])
@@ -99,7 +100,7 @@ class Integrations:
         live = self.controller.request('/oauth-model-alias').get('oauth-model-alias') or {}
         aliases = {entry.get('alias'): entry.get('name') for entry in live.get('antigravity', [])}
         if all(aliases.get(route) == known[route] for route in routes):
-            return False
+            return menu_changed
         self.configure_desktop_routes([known[route] for route in sorted(routes)], replace=False)
         return True
 
@@ -122,16 +123,19 @@ class Integrations:
         }
 
     def legacy_desktop_preset(self):
-        """Recognize our original localhost preset without adopting unrelated gateways."""
+        """Recognize approved Omni profiles and the original Gemini localhost preset."""
         library = self.local / 'Claude-3p' / 'configLibrary'
         try:
             preset_id = self.read_json(library / '_meta.json').get('appliedId', '')
             if not re.fullmatch(r'[a-fA-F0-9-]{36}', preset_id):
                 return None
-            preset = self.read_json(library / (preset_id + '.json'))
+            path = library / (preset_id + '.json')
+            preset = self.read_json(path)
             models = preset.get('inferenceModels', [])
+            managed = (preset.get('deploymentDisplayName') == 'Omni' and
+                       str(path.resolve()) in self.backups())
             if (preset.get('inferenceGatewayBaseUrl', '').rstrip('/') == 'http://127.0.0.1:8317'
-                    and any(m.get('labelOverride', '').startswith('Gemini') for m in models)):
+                    and (managed or any(m.get('labelOverride', '').startswith('Gemini') for m in models))):
                 return preset_id
         except (OSError, ValueError, TypeError, AttributeError):
             pass
