@@ -39,6 +39,15 @@ class ChatGPTAuthTests(unittest.TestCase):
         second_url = opener.return_value.open.call_args.args[0].full_url
         self.assertTrue(second_url.startswith('http://127.0.0.1:1455/auth/callback?'))
 
+    @patch('chatgpt_auth.urllib.request.build_opener')
+    def test_wrapped_legacy_callback_is_normalized(self, opener):
+        response = Mock(); response.__enter__ = Mock(return_value=response); response.__exit__ = Mock(return_value=False)
+        opener.return_value.open.return_value = response
+        ChatGPTAuth(Mock()).complete_login(
+            r'Blocked URL: \http://localhost:1455/auth/callback?state=s\&code=abc12345', 's')
+        self.assertTrue(opener.return_value.open.call_args.args[0].full_url.startswith(
+            'http://localhost:1455/auth/callback'))
+
     def test_manual_callback_rejects_wrong_origin_or_state(self):
         auth = ChatGPTAuth(Mock())
         with self.assertRaises(AccountError):

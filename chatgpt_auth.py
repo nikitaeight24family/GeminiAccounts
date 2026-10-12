@@ -103,6 +103,10 @@ class ChatGPTAuth:
     def complete_login(self, value, state):
         """Forward a browser callback (or pasted code) to the local OAuth listener."""
         value = str(value or '').strip()
+        # MoreLogin/Codex and browser policy pages commonly wrap the callback
+        # in a label, a leading slash, or escaped ampersands when copied.
+        value = value.removeprefix('Blocked URL:').strip()
+        value = value.lstrip('\\').replace('\\&', '&')
         if not value:
             raise AccountError('Paste the callback address or authorization code.')
         if '://' in value:
