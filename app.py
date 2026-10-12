@@ -109,6 +109,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.chatgpt_collapsed = self.controller.preferences.get('chatgpt-collapsed', True)
         self.google_accounts_collapsed = self.controller.preferences.get('google-accounts-collapsed', False)
         self.chatgpt_items = []
+        self.chatgpt_refresh_pending = False
         self.claude_items = []
         self.grok_items = []
         self.api_items = []
@@ -546,9 +547,26 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                     widget.configure(text=text)
 
     def refresh_chatgpt_accounts(self):
-        if not self.controller.key or self.closed:
+        if not self.controller.key or self.closed or self.chatgpt_refresh_pending:
             return
-        self.work(lambda: ChatGPTAuth(self.controller).accounts_with_quotas(maintain_pool=True), self.set_chatgpt_accounts)
+        self.chatgpt_refresh_pending = True
+        def progress(account):
+            self.mailbox.put((self.publish_chatgpt_quota, account, None, False))
+        def load():
+            try:
+                return ChatGPTAuth(self.controller).accounts_with_quotas(maintain_pool=True, on_quota=progress)
+            finally:
+                self.mailbox.put((self.finish_chatgpt_refresh, None, None, False))
+        self.work(load, self.set_chatgpt_accounts)
+
+    def finish_chatgpt_refresh(self, _result):
+        self.chatgpt_refresh_pending = False
+
+    def publish_chatgpt_quota(self, account):
+        if self.closed:
+            return
+        rows = [item for item in self.chatgpt_items if item['name'] != account['name']]
+        self.set_chatgpt_accounts(rows + [account])
 
     def set_chatgpt_accounts(self, accounts):
         previous = {item['name']: item for item in self.chatgpt_items}
@@ -740,7 +758,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
 
     @staticmethod
     def chatgpt_plan_name(item):
-        plan = (item.get('quota') or {}).get('plan_type') or item.get('plan_type')
+        plan = ((item.get('quota') or {}).get('plan_type') or item.get('plan_type') or
+                (item.get('id_token') or {}).get('plan_type'))
         if not isinstance(plan, str) or not plan.strip():
             return 'Plan unknown'
         plan = plan.strip().lower()

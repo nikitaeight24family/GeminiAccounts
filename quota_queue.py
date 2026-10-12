@@ -343,6 +343,12 @@ class Handler(BaseHTTPRequestHandler):
                 if provider_retry_at > time.time():
                     reset = max(reset or 0, provider_retry_at)
                 if reset:
+                    if self.server.quota_guard:
+                        try:
+                            if self.server.quota_guard.recover_waiting(self.server.aliases.get(model, model)):
+                                continue
+                        except (AccountError, OSError, ValueError):
+                            pass
                     with self.server.lock:
                         was_waiting = self.server.jobs[ident].get('state') == 'waiting'
                         self.server.jobs[ident].update(state='waiting', retry_at=reset)

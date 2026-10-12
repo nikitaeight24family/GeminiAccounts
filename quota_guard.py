@@ -1,6 +1,7 @@
 """Refresh configured ChatGPT reserves before routing generation requests."""
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from chatgpt_auth import ChatGPTAuth
 from quota_limits import sync_quota_limits
@@ -9,6 +10,27 @@ class QuotaGuard:
     def __init__(self, controller):
         self.controller = controller
         self.lock = threading.Lock()
+        self.last_recovery = 0
+
+    def recover_waiting(self, model):
+        """Check provider resets while requests wait on old local cooldowns."""
+        if not model.startswith('gpt-'):
+            return False
+        with self.lock:
+            if time.monotonic() - self.last_recovery < 15:
+                return False
+            self.last_recovery = time.monotonic()
+            auth = ChatGPTAuth(self.controller)
+            recovered = False
+            for account in auth.accounts():
+                blocks = account.get('cooldowns') or []
+                if (account.get('disabled') or not blocks or
+                        any(b.get('reason') not in ('quota', 'credential_quota', 'quota_exhausted', 'usage_limit')
+                            for b in blocks)):
+                    continue
+                auth.quota(account)
+                recovered = recovered or not bool(account.get('cooldowns'))
+            return recovered
 
     def __call__(self, model):
         if not model.startswith('gpt-'):

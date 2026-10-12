@@ -95,6 +95,28 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(response.getheader('Retry-After'), '3')
         self.assertIn(b'error', response.read())
 
+    def test_full_reset_wakes_waiting_gpt_request_without_waiting_for_old_deadline(self):
+        from types import SimpleNamespace
+        blocked = account(model='gpt-test', seconds=3600)
+        blocked['provider'] = 'codex'
+        self.backend.files = [blocked]
+        recovered = []
+        def recover(model):
+            recovered.append(model)
+            self.backend.files[0]['cooldowns'] = []
+            return True
+        self.gate.quota_guard = SimpleNamespace(recover_waiting=recover)
+        # The ordinary reserve check is callable after recovery.
+        class Guard:
+            recover_waiting = staticmethod(recover)
+            def __call__(self, model): pass
+        self.gate.quota_guard = Guard()
+        self.client.request('POST', '/v1/responses', json.dumps({'model': 'gpt-test', 'stream': True}), {'x-api-key': 'client'})
+        response = self.client.getresponse()
+        self.assertIn(b'response.completed', response.read())
+        self.assertEqual(recovered, ['gpt-test'])
+        self.assertEqual(self.backend.calls, 1)
+
     def test_sdk_identity_removed_for_stream_nonstream_and_token_count(self):
         from quota_queue import SDK_IDENTITY
         self.backend.files = []

@@ -7,6 +7,24 @@ from unittest.mock import Mock, patch
 from quota_guard import QuotaGuard
 
 class QuotaGuardTests(unittest.TestCase):
+    def test_wait_recovery_checks_blocked_accounts_without_reserves_and_throttles_polls(self):
+        auth = Mock()
+        blocked = {'name': 'one', 'cooldowns': [{'reason': 'quota', 'http_status': 429}]}
+        auth.accounts.return_value = [blocked, {'name': 'available'},
+            {'name': 'paused', 'disabled': True, 'cooldowns': [{'reason': 'quota'}]},
+            {'name': 'auth-error', 'cooldowns': [{'reason': 'error', 'http_status': 401}]}]
+        def quota(account):
+            account['cooldowns'] = []
+            return {'allowed': True}
+        auth.quota.side_effect = quota
+        with patch('quota_guard.ChatGPTAuth', return_value=auth), patch('quota_guard.time.monotonic', return_value=100):
+            guard = QuotaGuard(SimpleNamespace(preferences={}))
+            self.assertTrue(guard.recover_waiting('gpt-test'))
+            auth.quota.assert_called_once_with(blocked)
+            self.assertFalse(guard.recover_waiting('gpt-test'))
+            self.assertFalse(guard.recover_waiting('gemini-test'))
+            self.assertEqual(auth.accounts.call_count, 1)
+
     def test_each_request_reads_current_reserve_and_refreshes_only_configured_enabled_accounts(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory)/'preferences.json'

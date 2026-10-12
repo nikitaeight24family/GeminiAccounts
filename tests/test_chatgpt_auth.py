@@ -101,7 +101,7 @@ class ChatGPTAuthTests(unittest.TestCase):
         requests = []
         def request(_path, _method, payload):
             requests.append(payload)
-            if _path == '/routing/cooldown/reset':
+            if _path == '/reset-quota':
                 return {'status': 'ok', 'auth_index': payload['auth_index']}
             if payload['url'].endswith('/usage'):
                 return {'status_code': 200, 'body': json.dumps({'rate_limit_reset_credits': {'available_count': 1}})}
@@ -119,6 +119,37 @@ class ChatGPTAuthTests(unittest.TestCase):
         self.assertEqual([request.get('method') for request in requests], ['GET', 'GET', 'POST', None])
         self.assertEqual(set(json.loads(requests[-2]['data'])), {'redeem_request_id'})
         self.assertEqual(requests[-2]['header']['ChatGPT-Account-Id'], 'account-123')
+        controller.request.assert_called_with('/reset-quota', 'POST', {'auth_index': 'index-1'})
+
+    def test_full_provider_reset_clears_old_gateway_block_and_updates_account(self):
+        controller = Mock()
+        controller.request.side_effect = [
+            {'status_code': 200, 'body': json.dumps({'rate_limit': {'allowed': True, 'limit_reached': False,
+                'primary_window': {'used_percent': 0, 'limit_window_seconds': 18000},
+                'secondary_window': {'used_percent': 0, 'limit_window_seconds': 604800}}})},
+            {'status': 'ok', 'auth_index': 'one'},
+            {'files': [{'provider': 'codex', 'auth_index': 'one', 'status': 'active',
+                        'unavailable': False, 'cooldowns': []}]}]
+        account = {'auth_index': 'one', 'unavailable': True, 'cooldowns': [
+            {'reason': 'credential_quota'}, {'reason': 'quota', 'http_status': 429}]}
+        quota = ChatGPTAuth(controller).quota(account)
+        self.assertTrue(quota['allowed'])
+        self.assertEqual(account['cooldowns'], [])
+        self.assertFalse(account['unavailable'])
+        self.assertEqual(controller.request.call_args_list[1].args, ('/reset-quota', 'POST', {'auth_index': 'one'}))
+
+    def test_recovery_does_not_clear_auth_errors_rate_limits_or_partly_used_quota(self):
+        for overrides, blocks in [({'allowed': False}, [{'reason': 'quota'}]),
+                ({'windows': [{'label': '5h', 'remaining': 99}, {'label': '1w', 'remaining': 100}]}, [{'reason': 'quota'}]),
+                ({}, [{'reason': 'quota', 'http_status': 401}]),
+                ({}, [{'reason': 'rate_limit'}])]:
+            with self.subTest(overrides=overrides, blocks=blocks):
+                controller = Mock()
+                quota = {'allowed': True, 'limit_reached': False,
+                         'windows': [{'label': '5h', 'remaining': 100}, {'label': '1w', 'remaining': 100}]}
+                quota.update(overrides)
+                self.assertFalse(ChatGPTAuth(controller).recover_reset_quota({'auth_index': 'one', 'cooldowns': blocks}, quota))
+                controller.request.assert_not_called()
 
     def test_unavailable_reset_is_never_consumed(self):
         controller = Mock()

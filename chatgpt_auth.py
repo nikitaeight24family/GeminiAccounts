@@ -84,17 +84,22 @@ class ChatGPTAuth:
     def cancel_login(self, state):
         return self.controller.request('/oauth-session?' + urllib.parse.urlencode({'state': state}), 'DELETE')
 
-    def accounts_with_quotas(self, maintain_pool=False):
+    def accounts_with_quotas(self, maintain_pool=False, on_quota=None):
         accounts = self.accounts()
         eligible = [account for account in accounts if not account.get('disabled') and account.get('auth_index')]
         def load(account):
             try:
                 quota = self.quota(account)
+                if on_quota:
+                    on_quota({**account, 'quota': quota})
                 if maintain_pool and self.start_full_quota_window(account, quota) == 200:
                     quota = self.quota(account)
                 return quota
             except (AccountError, ValueError, TypeError):
-                return {'windows': [], 'error': 'Quota unavailable'}
+                quota = {'windows': [], 'error': 'Quota unavailable'}
+                if on_quota:
+                    on_quota({**account, 'quota': quota})
+                return quota
         if eligible:
             with ThreadPoolExecutor(max_workers=min(4, len(eligible))) as pool:
                 for account, quota in zip(eligible, pool.map(load, eligible)):
@@ -265,7 +270,32 @@ class ChatGPTAuth:
                 quota['reset_error'] = 'Reset details unavailable'
         from quota_limits import sync_quota_limits
         quota['reserved'] = bool(sync_quota_limits(self.controller, account, self.quota_limit_groups(quota)))
+        self.recover_reset_quota(account, quota)
         return quota
+
+    def recover_reset_quota(self, account, quota):
+        """Reconcile a full provider reset with stale local quota cooldowns."""
+        blocks = account.get('cooldowns') or []
+        windows = {w['label']: w['remaining'] for w in quota.get('windows', [])}
+        if (account.get('disabled') or not account.get('auth_index') or not blocks or
+                account.get('access_issue') in ('login', 'denied', 'verification') or
+                quota.get('allowed') is not True or quota.get('limit_reached') is not False or
+                windows.get('5h') != 100 or windows.get('1w') != 100 or
+                any(b.get('reason') not in ('quota', 'credential_quota', 'quota_exhausted', 'usage_limit')
+                    or b.get('http_status') not in (None, 429) for b in blocks)):
+            return False
+        self.clear_quota_cooldown(account)
+        fresh = next((a for a in self.accounts() if a.get('auth_index') == account['auth_index']), None)
+        if fresh is not None:
+            account.update(fresh)
+        return True
+
+    def clear_quota_cooldown(self, account):
+        # Controller uses /v0/management. The v8 /routing/cooldown/reset alias
+        # is not registered there in the pinned gateway version.
+        cleared = self.controller.request('/reset-quota', 'POST', {'auth_index': account['auth_index']})
+        if cleared.get('status') != 'ok' or cleared.get('auth_index') != account['auth_index']:
+            raise AccountError('Cooldown reset not confirmed.')
 
     @staticmethod
     def quota_limit_groups(quota):
@@ -335,9 +365,7 @@ class ChatGPTAuth:
         if not isinstance(body, dict) or body.get('code') not in ('reset', 'already_redeemed'):
             raise AccountError('ChatGPT did not confirm the reset. Refresh this account.')
         try:
-            cleared = self.controller.request('/routing/cooldown/reset', 'POST', {'auth_index': account['auth_index']})
-            if cleared.get('status') != 'ok' or cleared.get('auth_index') != account['auth_index']:
-                raise AccountError('Cooldown reset not confirmed.')
+            self.clear_quota_cooldown(account)
         except AccountError:
             raise AccountError('ChatGPT applied the reset, but the gateway cooldown could not be cleared. Refresh the account; do not spend another reset.') from None
         return body.get('windows_reset', 0)
