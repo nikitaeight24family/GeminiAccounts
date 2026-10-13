@@ -41,6 +41,11 @@ def account_status(account, now=None):
         return 'Verification required', 'warning', detail
     if any(s in signals for s in ('account_deactivated', 'account_suspended', 'account_banned', 'account_blocked')) or state in ('banned', 'blocked', 'suspended', 'deactivated'):
         return 'Account blocked', 'error', detail or safe_detail(code or raw)
+    # The gateway can briefly mark a fresh OAuth token unavailable during its
+    # first refresh, then accept the next request. One failure is not proof that
+    # the user must sign in again.
+    if str(code) == 'auth_unavailable' and 'invalidated oauth token' in signals and int(account.get('failed') or 0) <= 1:
+        return 'Checking sign-in', 'warning', detail
     if issue == 'login' or str(code) == '401' or any(s in signals for s in ('token_expired', 'invalid_token', 'invalid_grant', 'refresh_token_reused', 'authentication_error')):
         return 'Sign in again', 'error', detail
     if issue == 'denied' or str(code) == '403' or state in ('forbidden', 'denied'):

@@ -41,6 +41,13 @@ class AccountStatusTests(unittest.TestCase):
         for code, label in [(401, 'Sign in again'), (403, 'Access denied'), (429, 'Rate limited')]:
             self.assertEqual(account_status({'status': 'error', 'cooldowns': [{'http_status': code, 'remaining_seconds': 100}]})[0], label)
 
+    def test_single_oauth_invalidation_waits_for_recovery_before_requiring_login(self):
+        account = {'status': 'error', 'failed': 1, 'status_message': json.dumps({'error': {
+            'code': 'auth_unavailable', 'type': 'authentication_error',
+            'message': 'Encountered invalidated oauth token for user, failing request'}})}
+        self.assertEqual(account_status(account)[:2], ('Checking sign-in', 'warning'))
+        self.assertEqual(account_status({**account, 'failed': 2})[:2], ('Sign in again', 'error'))
+
     def test_unknown_states_and_causes_are_preserved(self):
         self.assertEqual(account_status({'status': 'organization_review', 'status_message': 'Contact administrator'}), ('Provider status: organization_review', 'warning', 'Contact administrator'))
         self.assertEqual(account_status({'status': 'error'})[2], 'Provider did not report the cause')

@@ -1,0 +1,44 @@
+{
+  "name": "omni-desktop",
+  "version": "1.5.0",
+  "private": true,
+  "description": "Omni desktop manager",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --demo",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^38.2.0",
+    "electron-builder": "^26.0.12",
+    "jsdom": "^30.1.2"
+  },
+  "build": {
+    "appId": "com.omni.accounts",
+    "productName": "Omni",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/Omni-Backend.exe",
+        "to": "Omni-Backend.exe"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "../app.ico"
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}

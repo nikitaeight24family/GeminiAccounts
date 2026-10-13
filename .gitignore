@@ -17,3 +17,9 @@ quota-starts.json
 /native/windows/bin/
 /native/windows/obj/
 /native/macos/.build/
+/electron/node_modules/
+/electron/dist/
+/electron/dist-polish/
+/electron/polish-build.json
+/work/
+/renderer.js

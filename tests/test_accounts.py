@@ -56,6 +56,7 @@ class AccountsTests(unittest.TestCase):
         c.accounts.return_value = []
         ui = SimpleNamespace(busy=False, hide_account_names=False, selected='a', items=[{'name': 'a', 'email': 'a@example.com'}],
                              controller=c, quota_cache={'a': {}}, notice=Mock(), loaded=Mock())
+        ui.remove_google_account = lambda name: App.remove_google_account(ui, name)
         ui.work = lambda fn, done, **kw: done(fn())
         with patch('app.messagebox.askyesno', return_value=False):
             App.remove_selected_account(ui)

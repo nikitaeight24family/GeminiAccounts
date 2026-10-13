@@ -136,8 +136,8 @@ class ClaudeAuth(ChatGPTAuth):
             if now - state['full_since'] < 180:
                 return None
             models = c.models(account)
-            preferred = tuple(sorted(m for m in models if m.startswith('claude-haiku-')))
-            model = next((model for model in preferred if model in models), None)
+            from model_policy import select_model
+            model = select_model(models, family='claude', cheap=True)
             if not model:
                 return None
             state.update(armed=False, attempt_at=now, status='pending', model=model)

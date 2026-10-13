@@ -54,20 +54,21 @@ class ProviderSupport:
             accounts, error = result
             if accounts is not None:
                 self.grok_items = accounts
+                self.observe_account_statuses('grok', accounts)
                 self.grok_panel.render()
             elif error:
                 self.notice.configure(text=self.redact_private_text(error), text_color='#ffbd93')
         self.work(load, done)
 
     def sign_in_grok(self):
-        if self.busy or self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login:
+        if self.busy or self.pending_grok_login:
             return
         self.work(lambda: GrokAuth(self.controller).begin_login(), self.grok_login_started, mutation=True)
 
     def grok_login_started(self, result):
         state = result['state']
         self.pending_grok_login = (state, time.monotonic(), min(1800, max(60, result.get('expires_in', 900))))
-        self.set_provider_login_buttons(False)
+        self.set_provider_login_buttons(True)
         window = self.grok_login_window = ctk.CTkToplevel(self)
         window.title('Grok sign-in')
         window.geometry('460x240')
@@ -134,11 +135,22 @@ class ProviderSupport:
         self.work(lambda: GrokAuth(self.controller).cancel_login(state), lambda _: None)
 
     def set_provider_login_buttons(self, enabled):
-        for button in (self.add_button, self.add_chatgpt_button, self.add_claude_button, self.add_grok_button):
-            button.configure(state='normal' if enabled else 'disabled')
+        if not enabled:
+            for button in (self.add_button, self.add_chatgpt_button, self.add_claude_button, self.add_grok_button):
+                button.configure(state='disabled')
+            return
+        for button, pending in ((self.add_button, self.pending_login),
+                                (self.add_chatgpt_button, None),
+                                (self.add_claude_button, self.pending_claude_login),
+                                (self.add_grok_button, self.pending_grok_login)):
+            button.configure(state='disabled' if pending else 'normal')
 
     def provider_login_menu(self, service):
-        if self.busy or any((self.pending_login, self.pending_chatgpt_login, self.pending_claude_login, self.pending_grok_login)):
+        pending_by_service = {'Gemini': self.pending_login,
+                              'OpenAI': None,
+                              'Claude': self.pending_claude_login,
+                              'Grok': self.pending_grok_login}
+        if self.busy or pending_by_service.get(service):
             return
         window = ctk.CTkToplevel(self)
         window.title(service)
@@ -149,7 +161,7 @@ class ProviderSupport:
         self.label(window, 'Choose how to connect', 12)
         actions = {
             'Gemini': [('Sign in with Google', self.add_account),
-                       ('MoreLogin / another browser', lambda: self.add_account(manual_browser=True))],
+                       ('MoreLogin / another browser', self.add_account)],
             'OpenAI': [('Sign in with ChatGPT', self.sign_in_chatgpt), ('Import auth.json', self.import_chatgpt_file)],
             'Claude': [('Sign in with Claude', self.sign_in_claude)],
             'Grok': [('Sign in with Grok', self.sign_in_grok)],
@@ -243,6 +255,8 @@ class ProviderSupport:
             self._api_refreshing = False
             if accounts is not None:
                 self.api_items = accounts
+                for provider in ('gemini', 'openai', 'claude', 'grok', 'tokenharbor'):
+                    self.observe_account_statuses('api-' + provider, [a for a in accounts if a.get('provider') == provider])
                 self.refresh_api_accounts(use_cache=True)
         self.work(load, done)
 
@@ -255,6 +269,9 @@ class ProviderSupport:
                 self.api_items = [dict(metadata.get(a['name'], {}), **a) for a in self.api_manager().accounts()]
             except (OSError, ValueError, AccountError):
                 self.api_items = []
+            for provider in ('gemini', 'openai', 'claude', 'grok'):
+                self.observe_account_statuses('api-' + provider,
+                    [account for account in self.api_items if account.get('provider') == provider])
             self.refresh_api_live_accounts()
         visible = [a for a in self.api_items if self.provider_visible(a['provider'])]
         count_signature = tuple(self.provider_api_count(p) for p in ('gemini','openai','claude','grok','tokenharbor'))

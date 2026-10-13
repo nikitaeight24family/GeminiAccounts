@@ -51,6 +51,7 @@ class Integrations:
         if not model.startswith('gemini-'):
             raise ValueError('Expected a Gemini model')
         suffix = model.removeprefix('gemini-').replace('.', '-')
+        # Preserve existing client route IDs; only their discovered upstreams vary.
         tier = 'haiku' if model == 'gemini-3-flash' else 'sonnet'
         return f'claude-{tier}-4-5-ga-{suffix}'
 
@@ -58,9 +59,11 @@ class Integrations:
         payload = self.controller.request('/oauth-model-alias').get('oauth-model-alias') or {}
         entries = [dict(entry) for entry in payload.get('antigravity', [])]
         desired = {self.claude_desktop_route(model): model for model in models}
-        if 'gemini-3-flash' in models:
-            # Claude Desktop probes this fixed Haiku ID before accepting a model switch.
-            desired['claude-haiku-4-5'] = 'gemini-3-flash'
+        from model_policy import select_model
+        fast = select_model(models, cheap=True)
+        if fast:
+            # Claude Desktop probes this protocol compatibility route.
+            desired['claude-haiku-4-5'] = fast
         updated = [entry for entry in entries if entry.get('alias') not in desired and
                    (not replace or not entry.get('alias', '').startswith(
                        ('claude-sonnet-4-5-ga-', 'claude-haiku-4-5-ga-')))]
@@ -84,16 +87,13 @@ class Integrations:
                   and re.fullmatch(r'claude-(?:sonnet|haiku)-4-5-ga-[a-z0-9-]+', entry['name'])}
         if not routes:
             return menu_changed
-        catalog_path = self.controller.proxy_dir / 'cliproxy-models.json'
-        catalog = self.read_json(catalog_path)
-        models = {entry['id'] for entry in catalog.get('antigravity', [])
-                  if isinstance(entry, dict) and isinstance(entry.get('id'), str)
-                  and entry['id'].startswith('gemini-')}
-        models.add(self.controller.selected_family_models()['gemini'])
+        from model_policy import select_model
+        models = {m for m in self.connection_models() if m.startswith('gemini-')}
         known = {self.claude_desktop_route(model): model for model in models}
-        if self.claude_desktop_route('gemini-3-flash') in routes:
+        fast = select_model(models, cheap=True)
+        if fast:
             routes.add('claude-haiku-4-5')
-            known['claude-haiku-4-5'] = 'gemini-3-flash'
+            known['claude-haiku-4-5'] = fast
         unresolved = routes - known.keys()
         if unresolved:
             raise AccountError('Connected Claude models are missing from the gateway catalog. Reconnect Claude Desktop from the application.')
@@ -177,22 +177,7 @@ class Integrations:
             return False
         path = self.paths()['claude_desktop'][2]
         preset = self.read_json(path)
-        models = preset.setdefault('inferenceModels', [])
-        flash = {'name': self.claude_desktop_route('gemini-3-flash'), 'labelOverride': 'Gemini · 3 Flash',
-                 'anthropicFamilyTier': 'haiku', 'isFamilyDefault': True,
-                 'supports1m': True, 'prefer1m': True}
-        indices = [i for i, m in enumerate(models)
-                   if (m.get('anthropicFamilyTier') == 'haiku' and m.get('name') != TOKENHARBOR_MODEL)
-                   or m.get('name') in ('claude-haiku-4-5', 'gemini-3-flash')]
-        if len(indices) == 1 and models[indices[0]] == flash:
-            return False
-        models[:] = [m for i, m in enumerate(models) if i not in indices]
-        models.insert(indices[0] if indices else len(models), flash)
-        self.configure_desktop_routes(['gemini-3-flash'], replace=False)
-        with self.lock:
-            self.remember([path])
-            self.write_json(path, preset)
-        return True
+        return self.sync_model_menu('claude_desktop', preset, self.connection_models())
 
     def backups(self):
         if not self.backup_path.exists():
@@ -268,22 +253,38 @@ class Integrations:
             self.controller.request('/oauth-model-alias', 'PATCH',
                                     {'provider': 'antigravity', 'aliases': direct})
 
+    def connection_models(self):
+        """Read the serving catalog, including OAuth and API-key providers."""
+        import urllib.request
+        from model_policy import canonical_models
+        key = (self.controller.proxy_dir / 'client-key.txt').read_text('utf-8-sig').strip()
+        request = urllib.request.Request('http://127.0.0.1:8317/v1/models', headers={'Authorization': 'Bearer ' + key})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=5) as response:
+            rows = json.load(response)['data']
+        if not isinstance(rows, list) or any(not isinstance(m, dict) or not isinstance(m.get('id'), str) for m in rows):
+            raise AccountError('The gateway model catalog is invalid.')
+        return canonical_models({m['id'] for m in rows}, self.controller.model_aliases())
+
     def configure_claude_cli(self, key):
         path = self.paths()['claude_cli'][0]
         settings = self.read_json(path)
-        families = self.controller.selected_family_models()
-        gemini = client_model_id('claude-sonnet-4-5', families['gemini'])
-        claude = client_model_id('claude-selected', families['claude'])
-        settings.setdefault('env', {}).update({
-            'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317',
-            'ANTHROPIC_AUTH_TOKEN': key, 'ANTHROPIC_API_KEY': '',
-            'ANTHROPIC_MODEL': gemini,
-            'ANTHROPIC_DEFAULT_SONNET_MODEL': gemini,
-            'ANTHROPIC_DEFAULT_HAIKU_MODEL': client_model_id('gemini-3-flash', 'gemini-3-flash'),
-            'ANTHROPIC_DEFAULT_OPUS_MODEL': claude if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking',
-            'CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY': '1',
-            'API_TIMEOUT_MS': '604800000', 'CLAUDE_ENABLE_STREAM_WATCHDOG': '0',
-        })
+        from model_policy import select_model
+        models = self.connection_models()
+        if not models:
+            raise AccountError('No models are currently available from the gateway.')
+        env = settings.setdefault('env', {})
+        env.update({'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317',
+                    'ANTHROPIC_AUTH_TOKEN': key, 'ANTHROPIC_API_KEY': '',
+                    'CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY': '1',
+                    'API_TIMEOUT_MS': '604800000', 'CLAUDE_ENABLE_STREAM_WATCHDOG': '0'})
+        # availableModels is a restriction shared with Desktop's Code sessions,
+        # not a discovery catalog. Canonical IDs would disable desktop routes.
+        settings.pop('availableModels', None)
+        for field in ('ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'):
+            from model_context import strip_context_suffix
+            preferred = strip_context_suffix(env.get(field, ''))
+            env[field] = select_model(models, preferred=preferred, cheap='HAIKU' in field) or select_model(models)
         self.write_json(path, settings)
 
     def provider_toml(self, key):
@@ -291,9 +292,9 @@ class Integrations:
             '[model_providers.gemini_accounts]', 'name = "Omni"',
             'base_url = "http://127.0.0.1:8317/v1"', 'wire_api = "responses"',
             'experimental_bearer_token = ' + json.dumps(key),
-            # Keep ChatGPT identity available to Codex browser/desktop services.
-            # Model requests still use the explicit local gateway bearer above.
-            'requires_openai_auth = true',
+            # Omni authenticates with its loopback bearer, independently of
+            # the optional ChatGPT desktop identity. Never force a new login.
+            'requires_openai_auth = false',
             'stream_idle_timeout_ms = 604800000', 'request_max_retries = 2',
             'supports_websockets = false', '',
         ])
@@ -309,15 +310,13 @@ class Integrations:
         root, tables = (text[:split.start()], text[split.start():]) if split else (text, '')
         previous_catalog = config.get('model_catalog_json')
         root = re.sub(r'^\s*(model|model_provider|model_catalog_json)\s*=.*\n?', '', root, flags=re.M)
-        model = 'gemini-selected' if self.controller.preferences.get('gemini-model') else self.controller.preferences.get('pro-model') or self.controller.model_aliases().get('claude-sonnet-4-5', 'gemini-3.1-pro-low')
-        try:
-            chatgpt_models = self.controller.chatgpt_model_choices()
-            if not self.controller.accounts() and chatgpt_models:
-                model = chatgpt_models[0]
-        except (AccountError, OSError, KeyError, ValueError):
-            pass
+        from model_policy import select_model
+        models = self.connection_models()
+        model = select_model(models, preferred=config.get('model'))
+        if not model:
+            raise AccountError('No models are currently available from the gateway.')
         defaults = 'model = ' + json.dumps(model) + '\nmodel_provider = "gemini_accounts"\n'
-        if self.write_codex_catalog(catalog_path, previous_catalog):
+        if self.write_codex_catalog(catalog_path, previous_catalog, live_models=models):
             defaults += 'model_catalog_json = ' + json.dumps(str(catalog_path.resolve())) + '\n'
         updated = defaults + root + '\n' + tables.rstrip() + '\n\n' + BEGIN + '\n' + self.provider_toml(key) + END + '\n'
         tomllib.loads(updated)
@@ -325,30 +324,45 @@ class Integrations:
         atomic_write(path, updated.encode())
         atomic_write(profile, (defaults + '\n' + self.provider_toml(key)).encode())
 
-    def write_codex_catalog(self, target, previous_catalog=None):
+    def write_codex_catalog(self, target, previous_catalog=None, live_models=None):
         """Extend Codex's local catalog while keeping its existing model rows."""
         cache = self.home / '.codex' / 'models_cache.json'
-        source = Path(previous_catalog) if previous_catalog and Path(previous_catalog) != target else cache
+        source = target if live_models is not None and target.exists() else Path(previous_catalog) if previous_catalog and Path(previous_catalog) != target else cache
         if not source.exists() and target.exists():
             source = target
         if not source.exists():
             return False
         catalog = self.read_json(source)
         models = catalog.get('models')
-        if not isinstance(models, list) or not models:
+        if not isinstance(models, list):
             return False
-        try:
-            available = self.controller.family_model_choices()
-            choices = available['gemini'] + available['claude']
-        except (AccountError, OSError, KeyError, ValueError):
-            choices = self.gemini_model_choices()
-        try:
-            choices += self.controller.chatgpt_model_choices()
-        except (AccountError, OSError, KeyError, ValueError):
-            pass
+        if not models:
+            # A confirmed empty catalog can later become populated again.
+            seed = self.read_json(cache).get('models', []) if cache.exists() else []
+            seed = seed or catalog.get('_omni_template', [])
+            if not seed:
+                return False
+            models.append(copy.deepcopy(seed[0]))
+        if live_models is None:
+            try:
+                available = self.controller.family_model_choices()
+                choices = available['gemini'] + available['claude']
+            except (AccountError, OSError, KeyError, ValueError):
+                choices = self.gemini_model_choices()
+            try:
+                choices += self.controller.chatgpt_model_choices()
+            except (AccountError, OSError, KeyError, ValueError):
+                pass
+        if live_models is not None:
+            choices = sorted(live_models)
+            # This file is Omni's provider menu, not Codex's native cache.
+            template = copy.deepcopy(models[0])
+            catalog.setdefault('_omni_template', [copy.deepcopy(template)])
+            models[:] = [m for m in models if m.get('slug') in live_models]
+        else:
+            template = models[0]
         from model_names import model_name, reasoning_level
         existing = {entry.get('slug') for entry in models}
-        template = models[0]
         for model in choices:
             if model in existing:
                 continue
@@ -369,66 +383,91 @@ class Integrations:
                 entry['default_reasoning_level'] = effort
                 entry['supported_reasoning_levels'] = [{'effort': effort, 'description': effort.title() + ' reasoning'}]
             models.append(entry)
-        self.write_json(target, catalog)
+        if not target.exists() or self.read_json(target) != catalog:
+            self.write_json(target, catalog)
+        return True
+
+    def sync_model_menu(self, client, doc, models):
+        """Reconcile menus and retired defaults against the confirmed live catalog."""
+        from model_names import model_name
+        from model_policy import select_model, text_models
+        from model_context import strip_context_suffix
+        models = text_models(models)
+        if client == 'codex':
+            path, profile, target = self.paths()[client]
+            before = {p: p.read_bytes() if p.exists() else None for p in (path, profile, target)}
+            if not self.write_codex_catalog(target, doc.get('model_catalog_json'), live_models=models):
+                raise AccountError('Codex model catalog template is not available yet.')
+            for p in (path, profile):
+                if not p.exists():
+                    continue
+                text = p.read_text('utf-8-sig')
+                config = tomllib.loads(text)
+                if config.get('model_provider') != 'gemini_accounts':
+                    continue
+                split = re.search(r'^\s*\[', text, re.M)
+                root, tables = (text[:split.start()], text[split.start():]) if split else (text, '')
+                selected = config.get('model')
+                replacement = select_model(models, family=(selected or '').split('-')[0]) or select_model(models)
+                if selected not in models and replacement:
+                    root = re.sub(r'^\s*model\s*=.*\n?', '', root, flags=re.M)
+                    root = 'model = ' + json.dumps(replacement) + '\n' + root
+                root = re.sub(r'^\s*model_catalog_json\s*=.*\n?', '', root, flags=re.M)
+                text = 'model_catalog_json = ' + json.dumps(str(target.resolve())) + '\n' + root + tables
+                tomllib.loads(text)
+                if p.read_text('utf-8-sig') != text:
+                    atomic_write(p, text.encode())
+            return any((p.read_bytes() if p.exists() else None) != data for p, data in before.items())
+        path = self.paths()[client][2 if client == 'claude_desktop' else 0]
+        updated = copy.deepcopy(doc)
+        if client == 'claude_cli':
+            env = updated.setdefault('env', {})
+            env['CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'] = '1'
+            updated.pop('availableModels', None)
+            for key in ('ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'):
+                old = strip_context_suffix(env.get(key, ''))
+                if old in models:
+                    continue
+                family = 'gemini' if old.startswith('gemini-') or '-ga-' in old else 'claude' if old.startswith('claude-') else None
+                candidates = {m for m in models if not family or m.startswith(family + '-')}
+                replacement = select_model(candidates, cheap='HAIKU' in key) or select_model(candidates) or select_model(models)
+                if replacement:
+                    env[key] = replacement
+                else:
+                    env.pop(key, None)
+        else:
+            gemini = sorted(m for m in models if m.startswith('gemini-') and m != 'gemini-selected')
+            self.configure_desktop_routes(gemini)
+            desired = {self.claude_desktop_route(m) if m in gemini else m: m for m in models}
+            existing = {m['name']: m for m in doc.get('inferenceModels', []) if isinstance(m, dict) and 'name' in m}
+            updated['inferenceModels'] = [existing.get(route) or {
+                'name': route, 'labelOverride': model_name(model, {}),
+                'anthropicFamilyTier': 'opus' if 'opus' in model else 'haiku' if 'flash' in model or 'haiku' in model else 'sonnet',
+                'isFamilyDefault': False, 'supports1m': extended_context(model), 'prefer1m': extended_context(model)
+            } for route, model in sorted(desired.items())]
+            for tier in ('sonnet', 'haiku', 'opus'):
+                rows = [m for m in updated['inferenceModels'] if m.get('anthropicFamilyTier') == tier]
+                if rows and not any(m.get('isFamilyDefault') for m in rows):
+                    selected = select_model({desired[m['name']] for m in rows}, cheap=tier=='haiku')
+                    selected = selected or select_model({desired[m['name']] for m in rows})
+                    next(m for m in rows if desired[m['name']] == selected)['isFamilyDefault'] = True
+        if updated == doc:
+            return False
+        self.write_json(path, updated)
         return True
 
     def configure_claude_desktop(self, key):
         desktop, meta_path, preset = self.paths()['claude_desktop']
-        family_models = self.controller.selected_family_models()
-        from model_names import model_name
-        preferred_claude = family_models['claude'] if self.controller.preferences.get('claude-model') else 'claude-opus-4-6-thinking'
-        models = [(self.claude_desktop_route(family_models['gemini']),
-                   'Gemini · ' + model_name(family_models['gemini'], {}), 'sonnet', True),
-                  (preferred_claude, 'Claude · ' + model_name(preferred_claude, {}), 'opus', True),
-                  (self.claude_desktop_route('gemini-3-flash'), 'Gemini · 3 Flash', 'haiku', True)]
-        try:
-            choices = self.controller.family_model_choices()
-        except (AccountError, OSError, KeyError, ValueError):
-            choices = {'gemini': [], 'claude': []}
-        seen = {item[0] for item in models}
-        for model in choices['gemini']:
-            if model == family_models['gemini']:
-                continue
-            route = self.claude_desktop_route(model)
-            if route not in seen:
-                tier = 'haiku' if 'flash' in model or 'lite' in model else 'sonnet'
-                models.append((route, 'Gemini · ' + model_name(model, {}), tier, False))
-                seen.add(route)
-        for model in choices['claude']:
-            if model == preferred_claude or model in seen:
-                continue
-            tier = 'opus' if '-opus-' in model else 'haiku' if '-haiku-' in model else 'sonnet'
-            models.append((model, 'Claude · ' + model_name(model, {}), tier, False))
-            seen.add(model)
-        try:
-            chatgpt_models = self.controller.chatgpt_model_choices()
-        except (AccountError, OSError, KeyError, ValueError):
-            chatgpt_models = []
-        for model in chatgpt_models:
-            if model not in seen:
-                models.append((model, 'ChatGPT · ' + model, 'sonnet', False))
-                seen.add(model)
-        if chatgpt_models and not self.controller.accounts():
-            models = [(name, label, tier, name == chatgpt_models[0])
-                      for name, label, tier, _ in models if name in chatgpt_models]
-        if TokenHarbor(self.controller, self).connected():
-            models.append((TOKENHARBOR_MODEL, TOKENHARBOR_LABEL, 'haiku', False))
-        routed = list(dict.fromkeys([family_models['gemini'], 'gemini-3-flash'] + [model for model in choices['gemini']
-                  if self.claude_desktop_route(model) in seen]))
-        route_targets = {self.claude_desktop_route(model): model for model in routed}
-        self.configure_desktop_routes(routed)
-        self.write_json(preset, {
-            'deploymentDisplayName': 'Omni', 'inferenceCredentialKind': 'static',
-            'modelDiscoveryEnabled': False, 'inferenceGatewayAuthScheme': 'bearer',
-            'inferenceProvider': 'gateway', 'inferenceGatewayApiKey': key,
-            'inferenceGatewayBaseUrl': 'http://127.0.0.1:8317',
-            'claudeAiImport': {'bannerBehavior': 'detect', 'exportEnabled': True, 'enabled': True},
-            'inferenceModels': [
-                {'name': name, 'labelOverride': label, 'anthropicFamilyTier': tier, 'isFamilyDefault': default,
-                 'supports1m': extended_context(route_targets.get(name, name)),
-                 'prefer1m': extended_context(route_targets.get(name, name))}
-                for name, label, tier, default in models],
-        })
+        models = self.connection_models()
+        if not models:
+            raise AccountError('No models are currently available from the gateway.')
+        doc = self.read_json(preset)
+        doc.update({'deploymentDisplayName': 'Omni', 'inferenceCredentialKind': 'static',
+                    'modelDiscoveryEnabled': False, 'inferenceGatewayAuthScheme': 'bearer',
+                    'inferenceProvider': 'gateway', 'inferenceGatewayApiKey': key,
+                    'inferenceGatewayBaseUrl': 'http://127.0.0.1:8317'})
+        self.write_json(preset, doc)
+        self.sync_model_menu('claude_desktop', doc, models)
         meta = self.read_json(meta_path)
         entries = meta.setdefault('entries', [])
         preset_id = preset.stem
@@ -460,30 +499,64 @@ class Integrations:
 
     @staticmethod
     def restart_desktop(clients):
-        """Called only after separate, explicit consent to interrupt running clients."""
+        """Restart an identified client with its original launch arguments and graceful close."""
         if os.name != 'nt':
             raise AccountError('Restart desktop clients manually on this platform.')
         env = os.environ.copy()
         env['GEMINI_ACCOUNTS_RESTART_CLIENTS'] = json.dumps(clients)
         script = r'''
+$ErrorActionPreference = 'Stop'
 $targets = ConvertFrom-Json $env:GEMINI_ACCOUNTS_RESTART_CLIENTS
-$processes = Get-CimInstance Win32_Process
-if ('claude_desktop' -in $targets) {
-    $matches = @($processes | Where-Object {$_.Name -eq 'claude.exe' -and $_.ExecutablePath -like '*\AnthropicClaude\*'})
-    $exe = $matches | Select-Object -First 1 -ExpandProperty ExecutablePath
-    $matches | ForEach-Object {Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue}
-    if ($exe) {Start-Sleep -Milliseconds 500; Start-Process -FilePath $exe}
-}
-if ('codex' -in $targets) {
-    $matches = @($processes | Where-Object {$_.Name -in @('ChatGPT.exe','Codex.exe') -and ($_.ExecutablePath -like '*\OpenAI.Codex_*\app\*' -or $_.ExecutablePath -like '*\OpenAI\Codex\app\*')})
-    if ($matches.Count) {
-        $exe = $matches | Select-Object -First 1 -ExpandProperty ExecutablePath
-        $matches | ForEach-Object {Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue}
-        Start-Sleep -Milliseconds 500
-        $app = Get-StartApps | Where-Object {$_.AppID -like 'OpenAI.Codex*'} | Select-Object -First 1
-        if ($app) {Start-Process explorer.exe -ArgumentList ('shell:AppsFolder\' + $app.AppID)} else {Start-Process -FilePath $exe}
+$processes = @(Get-CimInstance Win32_Process)
+foreach ($target in $targets) {
+    $candidates = @($processes | Where-Object {
+        if ($target -eq 'claude_desktop') {
+            $_.Name -eq 'claude.exe' -and $_.ExecutablePath -like '*\AnthropicClaude\*'
+        } elseif ($target -eq 'codex') {
+            $_.Name -in @('ChatGPT.exe','Codex.exe') -and ($_.ExecutablePath -like '*\OpenAI.Codex_*\app\*' -or $_.ExecutablePath -like '*\OpenAI\Codex\app\*')
+        }
+    } | Where-Object { $_.CommandLine -notmatch '(?:^|\s)--type=' })
+    if ($candidates.Count -ne 1) { throw "Cannot identify one running main process for $target" }
+    $main = $candidates[0]
+    $exe = $main.ExecutablePath
+    # Preserve the running executable and profile switches; never select a Store entry.
+    $command = $main.CommandLine.Trim()
+    if ($command.StartsWith('"' + $exe + '"')) {
+        $arguments = $command.Substring($exe.Length + 2).Trim()
+    } elseif ($command.StartsWith($exe, [StringComparison]::OrdinalIgnoreCase)) {
+        $arguments = $command.Substring($exe.Length).Trim()
+    } else { throw "Cannot preserve launch arguments for $target" }
+    $launch = @{FilePath=$exe; WorkingDirectory=(Split-Path -LiteralPath $exe); PassThru=$true}
+    if ($arguments) { $launch.ArgumentList = $arguments }
+    $process = Get-Process -Id $main.ProcessId
+    $closed = $process.CloseMainWindow()
+    if (-not $process.WaitForExit($(if ($closed) { 15000 } else { 1000 }))) {
+        if ($target -ne 'claude_desktop') {
+            # Restore a window hidden by close-to-tray before reporting failure.
+            Start-Process @launch | Out-Null
+            throw "Application did not exit; its existing session was preserved: $target"
+        }
+        # Claude's close button hides to tray. Only stop this identified instance
+        # and its Electron children, never another client or a Claude CLI task.
+        $children = @(Get-CimInstance Win32_Process | Where-Object {
+            $_.ParentProcessId -eq $main.ProcessId -and $_.ExecutablePath -eq $exe
+        })
+        $current = Get-Process -Id $main.ProcessId -ErrorAction SilentlyContinue
+        if ($current -and $current.StartTime -eq $process.StartTime) {
+            Stop-Process -InputObject $current -Force
+            $current.WaitForExit(5000) | Out-Null
+        }
+        foreach ($child in $children) {
+            $live = Get-CimInstance Win32_Process -Filter "ProcessId=$($child.ProcessId)"
+            if ($live -and $live.CreationDate -eq $child.CreationDate -and $live.ExecutablePath -eq $exe) {
+                Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
+    $started = Start-Process @launch
+    Start-Sleep -Milliseconds 1000
+    if ($started.HasExited) { throw "Application launch could not be verified: $target" }
 }
 '''
         subprocess.run(['powershell.exe', '-NoProfile', '-Command', script], env=env,
-                       creationflags=subprocess.CREATE_NO_WINDOW, check=True, timeout=30)
+                       creationflags=subprocess.CREATE_NO_WINDOW, check=True, timeout=30 * max(1, len(clients)))

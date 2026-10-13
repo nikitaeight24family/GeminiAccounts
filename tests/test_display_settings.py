@@ -111,11 +111,46 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.change_account_priority(app.chatgpt_items[1], 'openai', 1)
                     self.assertEqual(app.account_layout[0][0], 'second')
                     self.assertEqual(app._chatgpt_order[1], ('b', 'a'))
-                    self.assertIs(app.account_list.pack_slaves()[0], google_card)
+                    self.assertIs(app.google_accounts_content.pack_slaves()[0], google_card)
                     self.assertIs(app.chatgpt_accounts.pack_slaves()[1], gpt_card)
                     self.assertIs(app.account_widgets['second']['card'], google_card)
+                    app.items[0]['unavailable'] = True
+                    app.chatgpt_items[0]['status'] = 'error'
+                    app.draw_account_list()
+                    app.draw_chatgpt_accounts()
+                    self.assertEqual(app.account_layout[0][0], 'first')
+                    self.assertEqual(app._chatgpt_order[1], ('a', 'b'))
                     app.change_account_priority(app.items[0], 'google', 2)
                     self.assertEqual(app.account_layout[0][0], 'first')
+                finally:
+                    app.closed = True
+                    app.destroy()
+
+    def test_google_card_remove_button_removes_the_selected_credential(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch('app.Controller', lambda: Controller(proxy_dir=root / 'proxy', data_dir=root / 'data')), \
+                    patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                    patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                    patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                    patch.object(App, 'check_for_updates'), patch.object(App, 'refresh_chatgpt_accounts'):
+                app = App()
+                try:
+                    account = {'name': 'google-test', 'email': 'google-test@example.com',
+                               'disabled': False, 'unavailable': False}
+                    app.items = [account]
+                    app.draw_account_list()
+                    remove = app.account_widgets['google-test']['remove']
+                    self.assertTrue(remove.winfo_exists())
+                    with patch('app.messagebox.askyesno', return_value=True) as confirm, \
+                            patch.object(app.controller, 'remove_account') as remove_credential, \
+                            patch.object(app.controller, 'accounts', return_value=[]), \
+                            patch.object(app, 'loaded') as loaded, \
+                            patch.object(app, 'work', side_effect=lambda task, done, mutation=False: done(task())):
+                        remove.invoke()
+                    confirm.assert_called_once()
+                    remove_credential.assert_called_once_with('google-test')
+                    loaded.assert_called_once_with([])
                 finally:
                     app.closed = True
                     app.destroy()
@@ -202,7 +237,7 @@ class DisplaySettingsTests(unittest.TestCase):
                     self.assertTrue(app.pool_summary_groups['google']['compact'].winfo_manager())
                     compact = app.pool_summary_groups['google']['compact']
                     self.assertIs(compact.master, app.pool_summary_groups['google']['header'])
-                    self.assertIn('1pcs', app.google_accounts_header.cget('text'))
+                    self.assertIn('Antigravity · 1pcs', app.google_accounts_header.cget('text'))
                     dots = app.pool_summary_groups['google']['compact'].dot_widgets
                     first_image = dots[0].cget('image')
                     app.update_total_quota()
@@ -230,6 +265,7 @@ class DisplaySettingsTests(unittest.TestCase):
                     google_row = app.account_widgets['google']
                     self.assertNotIn('●', google_row['button'].cget('text'))
                     self.assertIs(google_row['button'].cget('image'), app.provider_icons['antigravity'])
+                    self.assertEqual(google_row['button'].cget('compound'), 'left')
                     self.assertIs(google_row['plan'].master, google_row['status'].master)
                     self.assertIs(app.google_accounts_header.cget('image'), app.provider_icons['antigravity'])
                     self.assertGreaterEqual(google_row['plan'].winfo_rooty(),
@@ -295,11 +331,14 @@ class DisplaySettingsTests(unittest.TestCase):
                     app.toggle_google_accounts()
                     app.update()
                     self.assertEqual(app.service.winfo_rooty(), footer_y)
+                    self.assertTrue(app.account_list.winfo_manager())
                     self.assertTrue(app.sidebar_spacer.winfo_manager())
+                    self.assertFalse(app.google_accounts_content.winfo_manager())
                     self.assertTrue(app.google_compact.winfo_manager())
                     app.toggle_google_accounts()
                     app.update()
-                    self.assertFalse(app.sidebar_spacer.winfo_manager())
+                    self.assertTrue(app.sidebar_spacer.winfo_manager())
+                    self.assertTrue(app.google_accounts_content.winfo_manager())
                     self.assertFalse(app.google_compact.winfo_manager())
                     app.rename_entry.delete(0, 'end')
                     app.rename_entry.insert(0, 'Unsaved name')

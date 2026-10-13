@@ -136,6 +136,21 @@ class ChatGPTAuth:
             raise AccountError('The local ChatGPT sign-in listener is not responding. Start a new sign-in.') from None
         return {'accepted': True}
 
+    @staticmethod
+    def callback_state(value):
+        """Return the OAuth state embedded in a pasted callback URL, if present."""
+        value = str(value or '').strip().removeprefix('Blocked URL:').strip()
+        value = value.lstrip('\\').replace('\\&', '&')
+        if '://' not in value:
+            return None
+        try:
+            parts = urllib.parse.urlsplit(value)
+            query = urllib.parse.parse_qs(parts.query, keep_blank_values=True)
+            states = query.get('state', [])
+            return states[0] if len(states) == 1 and states[0] else None
+        except (TypeError, ValueError):
+            return None
+
     def cancel_login(self, state):
         return self.controller.request('/oauth-session?' + urllib.parse.urlencode({'state': state}), 'DELETE')
 
@@ -232,6 +247,12 @@ class ChatGPTAuth:
         return True
 
     def start_full_quota_window(self, account, quota, now=None):
+        # Free OAuth credentials must never receive synthetic generation
+        # requests.  They are monitored through the read-only usage endpoint;
+        # probing them with "Hi" can look like automated abuse and may cause
+        # the provider to revoke otherwise valid sessions.
+        if is_free_account(account):
+            return None
         from quota_limits import blocked_families
         if 'openai' in blocked_families(self.controller.preferences, account['name'], self.quota_limit_groups(quota)):
             return None
@@ -275,8 +296,8 @@ class ChatGPTAuth:
             if now - state['full_since'] < 180:
                 return None
             models = c.models(account)
-            preferred = ('gpt-5.6-luna', 'gpt-6-luna')
-            model = next((model for model in preferred if model in models), None)
+            from model_policy import select_model
+            model = select_model(models, family='gpt', cheap=True)
             if not model:
                 return None
             state.update(armed=False, attempt_at=now, probe_sent_at=now, status='pending', model=model)
@@ -317,7 +338,7 @@ class ChatGPTAuth:
             used = window.get('used_percent')
             if not isinstance(used, (int, float)) or isinstance(used, bool):
                 continue
-            label = '5h' if seconds == 18000 else '1w' if seconds == 604800 else (
+            label = '5h' if seconds == 18000 else '1w' if seconds == 604800 else '1mo' if isinstance(seconds, int) and 28 * 86400 <= seconds <= 31 * 86400 else (
                 f'{seconds // 3600}h' if isinstance(seconds, int) and seconds >= 3600 else name)
             windows.append({'label': label, 'remaining': max(0, min(100, 100 - used)),
                             'reset_at': window.get('reset_at')})

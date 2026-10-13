@@ -598,6 +598,8 @@ class Controller:
             return []
         now = time.time() if now is None else now
         results = []
+        from model_policy import select_model, canonical_models
+        available = canonical_models(set(quotas.get('models', {})) & set(self.models(account)), self.model_aliases())
         for group in quotas.get('groups', []):
             kind = group.get('kind')
             from quota_limits import blocked_families
@@ -605,10 +607,12 @@ class Controller:
                 continue
             if kind not in ('gemini', 'claude'):
                 continue
-            # Flash answers do not start the Gemini quota window. Use the
-            # verified low-tier Pro only; never try a series of fallback models.
-            model = 'gemini-3.1-pro-low' if kind == 'gemini' else 'gpt-oss-120b-medium'
-            if model not in quotas.get('models', {}):
+            candidates = {m for m in available if m.startswith('gemini-')} if kind == 'gemini' else {
+                m for m in available if m.startswith(('claude-', 'gpt-oss-'))}
+            # Prefer a low-effort model in the quota group; Lite can be unmetered.
+            low_effort = {m for m in candidates if m.endswith('-low') and 'lite' not in m}
+            model = select_model(low_effort) or select_model(candidates, cheap=True)
+            if not model:
                 continue
             buckets = {b.get('window'): b for b in group.get('buckets', [])}
             remaining = buckets.get('5h', {}).get('remaining')
@@ -617,6 +621,9 @@ class Controller:
             key = account['name'] + ':' + kind
             with self.quota_start_lock:
                 state = self.quota_starts.setdefault(key, {'armed': True})
+                if state.get('model') != model and (state.get('status') in (404, 410) or state.get('window_started') is False):
+                    # A retired model's failures must not suppress its replacement.
+                    state.update(armed=True, failures=0, attempt_at=0)
                 if (kind == 'gemini' and state.get('model') == 'gemini-3-flash' and
                         state.get('status') == 200 and not state.get('unmetered_flash_migrated')):
                     state.update(armed=True, failures=0, attempt_at=0, unmetered_flash_migrated=True)

@@ -78,8 +78,9 @@ class ClaudePanel(ctk.CTkFrame):
             return
         if not self.winfo_manager():
             before = app.google_accounts_header if app.google_accounts_header.winfo_manager() else app.sidebar_spacer
-            self.pack(fill='x', padx=12, pady=(0, 3), before=before)
-        accounts = sorted(self.accounts, key=lambda a: (-app.account_priority(a), a.get('email') or a['name']))
+            self.pack(fill='x', padx=1, pady=(0, 3), before=before)
+        accounts = sorted(self.accounts, key=lambda a: (app.account_empty_quota(a), app.account_problem_rank(a),
+                         -app.account_priority(a), a.get('email') or a['name']))
         self.header.configure(text=('▸' if self.collapsed else '▾')+f'  {self.title} · {len(accounts)+app.provider_api_count(self.provider)}pcs')
         app.show_quota_dots(self.compact, self.collapsed, after=self.header)
         values = self.pooled_values()
@@ -176,6 +177,7 @@ class ClaudePanel(ctk.CTkFrame):
         elif not self.body._parent_frame.winfo_manager():
             self.body.configure(height=min(230, 120*len(accounts)))
             self.body.pack(fill='x')
+        app.place_quota_rest_stop(self.body, accounts, self.rows, self.collapsed)
         self.animate()
 
     def refresh(self):
@@ -220,6 +222,7 @@ class ClaudeSupport:
         if not self.controller.key or self.closed: return
         def done(accounts):
             self.claude_items = accounts
+            self.observe_account_statuses('claude', accounts)
             for account in accounts:
                 quota = account.get('quota') or {}
                 if not quota.get('error'):
@@ -231,24 +234,19 @@ class ClaudeSupport:
         self.work(lambda: ClaudeAuth(self.controller).accounts_with_quotas(maintain_pool=True), done)
 
     def sign_in_claude(self):
-        if self.busy or self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login:
+        if self.busy or self.pending_claude_login:
             return
         self.work(lambda: ClaudeAuth(self.controller).begin_login(), self.claude_login_started, mutation=True)
 
     def claude_login_started(self, result):
         url, state = result
         self.pending_claude_login = (state, time.monotonic())
-        self.set_provider_login_buttons(False)
-        self.add_button.configure(state='disabled')
-        self.add_claude_button.configure(state='disabled')
-        self.add_chatgpt_button.configure(state='disabled')
+        self.set_provider_login_buttons(True)
         try:
             open_isolated(url)
         except AccountError as error:
             self.pending_claude_login = None
-            self.add_button.configure(state='normal')
-            self.add_claude_button.configure(state='normal')
-            self.add_chatgpt_button.configure(state='normal')
+            self.set_provider_login_buttons(True)
             self.notice.configure(text=str(error), text_color='#ffbd93')
             self.work(lambda: ClaudeAuth(self.controller).cancel_login(state), lambda _: None)
             return
@@ -304,9 +302,6 @@ class ClaudeSupport:
     def finish_claude_login(self, message, success):
         self.pending_claude_login = None
         self.set_provider_login_buttons(True)
-        self.add_button.configure(state='normal')
-        self.add_claude_button.configure(state='normal')
-        self.add_chatgpt_button.configure(state='normal')
         if hasattr(self, 'claude_login_window') and self.claude_login_window.winfo_exists():
             self.claude_login_window.destroy()
         self.notice.configure(text=message, text_color=GREEN if success else '#ffbd93')

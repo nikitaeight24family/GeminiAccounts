@@ -6,7 +6,7 @@ the backend process and does not block a platform UI thread.
 
 | Platform | Toolkit | Build / run |
 | --- | --- | --- |
-| Windows | WPF (.NET 8) | `dotnet build native/windows/Omni.csproj -c Release` |
+| Windows | Electron / Chromium | `npm install --prefix electron; npm run pack --prefix electron` |
 | macOS | SwiftUI (macOS 13+) | `cd native/macos && swift build -c release` |
 | Linux | GTK4 / PyGObject | `python3 native/linux/omni.py` |
 
@@ -15,9 +15,10 @@ clients expect `Omni-Backend.exe` (Windows) or `Omni-Backend` (macOS/Linux) besi
 the executable. Package the headless backend with PyInstaller; it never creates
 a graphical window.
 
-Windows renders one retained WPF visual tree. The settings button switches
+Windows renders one retained DOM tree inside Electron/Chromium. The settings button switches
 existing screens inside the current window; it never changes window geometry.
-The cards remain alive during percentage updates. macOS uses identity-preserving
+Account cards stay alive while quota values change; only the changed card is patched.
+macOS uses identity-preserving
 SwiftUI views and Linux updates existing GTK controls.
 
 These clients are migration work in progress. They are not wired into the

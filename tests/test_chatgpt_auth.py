@@ -321,10 +321,13 @@ class ChatGPTAuthTests(unittest.TestCase):
             auth.begin_login()
 
     def test_each_browser_signin_gets_a_separate_private_profile(self):
-        with patch('isolated_browser.find_browser', return_value=(Path('msedge.exe'), 'edge')):
-            with patch('isolated_browser.subprocess.Popen') as popen:
-                open_isolated('https://auth.openai.com/oauth/authorize?state=one')
-                open_isolated('https://auth.openai.com/oauth/authorize?state=two')
+        real_mkdtemp = tempfile.mkdtemp
+        with tempfile.TemporaryDirectory() as directory:
+            with patch('isolated_browser.find_browser', return_value=(Path('msedge.exe'), 'edge')):
+                with patch('isolated_browser.tempfile.mkdtemp', side_effect=lambda **kwargs: real_mkdtemp(dir=directory, **kwargs)):
+                    with patch('isolated_browser.subprocess.Popen') as popen:
+                        open_isolated('https://auth.openai.com/oauth/authorize?state=one')
+                        open_isolated('https://auth.openai.com/oauth/authorize?state=two')
         first = popen.call_args_list[0].args[0]
         second = popen.call_args_list[1].args[0]
         self.assertIn('--inprivate', first)
@@ -375,6 +378,15 @@ class ChatGPTAuthTests(unittest.TestCase):
             auth.start_full_quota_window(other, quota, now=2000)
             self.assertIsNone(auth.start_full_quota_window(other, quota, now=2180))
             self.assertEqual(controller.request.call_count, 1)
+
+    def test_chatgpt_probe_never_generates_on_free_account(self):
+        controller = Controller(data_dir=tempfile.mkdtemp())
+        controller.request = Mock()
+        auth = ChatGPTAuth(controller)
+        account = {'name': 'free', 'auth_index': 'free', 'plan_type': 'free'}
+        quota = {'windows': [{'label': '5h', 'remaining': 100}, {'label': '1w', 'remaining': 100}]}
+        self.assertIsNone(auth.start_full_quota_window(account, quota, now=1000))
+        controller.request.assert_not_called()
 
     def test_chatgpt_probe_real_usage_cancels_grace_and_weekly_block_skips_probe(self):
         with tempfile.TemporaryDirectory() as directory:

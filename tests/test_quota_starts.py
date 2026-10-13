@@ -20,6 +20,7 @@ class QuotaStartTests(unittest.TestCase):
         self.c.quotas = lambda account: {'groups': [{'kind': k, 'buckets': [{'window': '5h', 'remaining': .999}]} for k in ('gemini', 'claude')]}
         self.data = {'groups': [{'kind': kind, 'buckets': [
             {'window': '5h', 'remaining': 1}, {'window': 'weekly', 'remaining': 1}]} for kind in ('gemini', 'claude')]}
+        self.c.models = lambda account: list(self.data['models'])
         self.data['models'] = {'gemini-3.1-pro-low': {}, 'gpt-oss-120b-medium': {}}
     def tearDown(self): self.temp.cleanup()
     def test_http_success_without_quota_consumption_is_not_window_start(self):
@@ -51,7 +52,7 @@ class QuotaStartTests(unittest.TestCase):
             self.assertEqual(json.loads(call[2]['data'])['request']['contents'][0]['parts'][0]['text'], 'Hi')
             self.assertIn(json.loads(call[2]['data'])['model'], ('gemini-3.1-pro-low', 'gpt-oss-120b-medium'))
         self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=1100), [])
-        restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request; restarted.quotas = self.c.quotas
+        restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request; restarted.quotas = self.c.quotas; restarted.models = self.c.models
         self.assertEqual(restarted.start_full_quota_windows(self.account, self.data, now=1200), [])
         self.assertEqual(len(self.calls), 2)
     def test_only_fresh_full_quota_and_available_week(self):
@@ -98,7 +99,7 @@ class QuotaStartTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
     def test_partial_quota_cancels_grace_and_restart_keeps_deadline(self):
         self.c.start_full_quota_windows(self.account, self.data, now=1000)
-        restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request; restarted.quotas = self.c.quotas
+        restarted = Controller(data_dir=self.temp.name); restarted.request = self.c.request; restarted.quotas = self.c.quotas; restarted.models = self.c.models
         self.assertEqual(restarted.start_full_quota_windows(self.account, self.data, now=1179), [])
         for group in self.data['groups']: group['buckets'][0]['remaining'] = .99
         self.assertEqual(restarted.start_full_quota_windows(self.account, self.data, now=1180), [])

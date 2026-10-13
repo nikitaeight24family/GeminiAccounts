@@ -4,7 +4,7 @@ import tempfile
 import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import App
@@ -13,6 +13,75 @@ from harbor_activity import key_id
 
 
 class QuotaUITests(unittest.TestCase):
+    def test_openai_accounts_share_scroll_area_with_other_agents(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                app.chatgpt_collapsed = False
+                app.chatgpt_free_collapsed = False
+                accounts = [{'name': f'free-{index}', 'email': f'free-{index}@example.com',
+                             'plan_type': 'free', 'quota': {'windows': [
+                                 {'label': '1w', 'remaining': 100}]}}
+                            for index in range(13)]
+                app.set_chatgpt_accounts(accounts)
+                app.update_idletasks()
+
+                self.assertIs(app.chatgpt_free_accounts.master, app.account_list)
+                self.assertEqual(len(app.chatgpt_widgets), 13)
+                self.assertLess(app.account_list._parent_canvas.yview()[1], 1.0)
+                self.assertTrue(app.account_list._scrollbar.winfo_manager())
+                self.assertIs(app.google_accounts_header.master, app.account_list)
+                self.assertIs(app.google_accounts_content.master, app.account_list)
+                self.assertLessEqual(abs(app.chatgpt_free_header.winfo_rootx() -
+                                         app.google_accounts_header.winfo_rootx()), 2)
+                self.assertTrue(app.sidebar_footer.winfo_manager())
+            finally:
+                app.closed = True
+                app.destroy()
+
+    def test_new_openai_login_loads_only_new_quota_and_preserves_existing_card(self):
+        with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), \
+                patch.object(App, 'fetch_quota'), patch.object(App, 'fetch_models'), \
+                patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'), \
+                patch.object(App, 'check_for_updates'):
+            app = App()
+            try:
+                app.chatgpt_collapsed = False
+                app.controller.key = 'test'
+                existing = {'name': 'existing', 'email': 'existing@example.com', 'auth_index': 0,
+                            'success': 12, 'quota': {'windows': [
+                                {'label': '5h', 'remaining': 64, 'reset_at': 1792000000}]}}
+                app.set_chatgpt_accounts([existing])
+                old_card = app.chatgpt_widgets['existing']['card']
+                old_quota = app.chatgpt_widgets['existing']['windows']['5h'][2]
+                old_quota_value = old_quota.get()
+                update_row = Mock(wraps=app.update_chatgpt_row)
+                app.update_chatgpt_row = update_row
+
+                # The discovery request may return updated metadata for prior
+                # accounts; adding one login must leave their displayed state alone.
+                returned_existing = {**existing, 'success': 99, 'disabled': True,
+                                     'quota': {'windows': []}}
+                new_account = {'name': 'new', 'email': 'new@example.com', 'auth_index': 1}
+                with patch('app.ChatGPTAuth.accounts', return_value=[returned_existing, new_account]), \
+                        patch.object(app, 'fetch_chatgpt_account_quota') as fetch_quota, \
+                        patch.object(app, 'work', side_effect=lambda load, done, mutation=False: done(load())):
+                    app.refresh_new_chatgpt_accounts()
+
+                self.assertIs(old_card, app.chatgpt_widgets['existing']['card'])
+                self.assertIs(old_quota, app.chatgpt_widgets['existing']['windows']['5h'][2])
+                self.assertEqual(old_quota.get(), old_quota_value)
+                self.assertEqual(app.chatgpt_items[0]['success'], 12)
+                self.assertFalse(app.chatgpt_items[0].get('disabled', False))
+                fetch_quota.assert_called_once_with(new_account)
+                self.assertEqual([call.args[0]['name'] for call in update_row.call_args_list], ['new'])
+            finally:
+                app.closed = True
+                app.destroy()
+
     def test_background_ping_does_not_replace_the_last_client_model(self):
         state = {'events': [{'name': 'one', 'at': '2026-10-12T00:00:00Z', 'model': 'gpt-client'},
                             {'name': 'one', 'at': '2026-10-12T00:01:00Z', 'model': 'gpt-probe', 'probe': True}]}
@@ -504,14 +573,15 @@ class QuotaUITests(unittest.TestCase):
                 app.closed = True
                 app.destroy()
 
-    def test_depleted_weekly_accounts_are_below_a_divider(self):
+    def test_exhausted_accounts_are_below_a_divider_but_verification_stays_visible(self):
         import customtkinter as ctk
         with patch.object(App, 'connection_settings'), patch.object(App, 'refresh'), patch.object(App, 'fetch_quota'), \
                 patch.object(App, 'fetch_models'), patch.object(App, 'start_activity'), patch.object(App, 'queue_policy'):
             app = App()
             try:
                 now = datetime.now(timezone.utc)
-                values = {'ready': (.01, 4), 'dead_late': (.009, 96), 'dead_early': (0, 48),
+                app.controller.preferences['account-priorities'] = {}
+                values = {'ready': (.01, 4), 'dead_late': (0, 96), 'dead_early': (0, 48),
                           'verify': (0, 24)}
                 for name, (remaining, hours) in values.items():
                     app.quota_cache[name] = {'data': {'groups': [{'kind': 'gemini', 'buckets': [
@@ -526,7 +596,7 @@ class QuotaUITests(unittest.TestCase):
                                  ['verify', 'ready', 'dead_early', 'dead_late'])
                 self.assertTrue(any(index == 2 and widget.cget('height') == 1
                                     for index, widget, _ in app.account_group_widgets))
-                self.assertTrue(any(widget.cget('text') == 'Weekly quota below 1% · 2'
+                self.assertTrue(any(widget.cget('text') == 'Quota empty · rest stop · 2'
                                     for _, widget, _ in app.account_group_widgets
                                     if isinstance(widget, ctk.CTkLabel)))
             finally:
@@ -853,10 +923,11 @@ class QuotaUITests(unittest.TestCase):
                 self.assertEqual(app.account_list.winfo_children(), sidebar_children)
                 self.assertEqual(app.detail._parent_canvas.yview(), detail_scroll)
                 self.assertEqual(app.account_list._parent_canvas.yview(), sidebar_scroll)
-                self.assertEqual(app.detail_quota_widgets[('gemini', 'weekly')][1].get(), .7)
+                self.assertEqual(app.detail_quota_widgets[('gemini', 'weekly')][1].get(), 0)
+                self.assertEqual(app.detail_quota_widgets[('gemini', 'weekly')][0].cget('text'), 'No data')
                 self.assertEqual(len(app.detail_quota_widgets), 4)
                 self.assertEqual(app.model_widgets, {})
-                self.assertEqual(app.account_widgets['1']['quotas'][('claude', '5h')][1].get(), .25)
+                self.assertEqual(app.account_widgets['1']['quotas'][('claude', '5h')][1].get(), 0)
                 # Newly arriving model catalogs only replace their own section.
                 app.controller.models = lambda a: ['claude-sonnet-4-5']
                 fetch_models(app, '0')

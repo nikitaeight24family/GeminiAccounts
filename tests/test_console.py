@@ -39,7 +39,10 @@ class ConsoleTests(unittest.TestCase):
         path.parent.mkdir(parents=True)
         original = b'{"env":{"OTHER":"original"}}\r\n'
         path.write_bytes(original)
-        with patch('builtins.input', return_value='yes'), contextlib.redirect_stdout(io.StringIO()):
+        with patch('builtins.input', return_value='yes'), \
+             patch.object(self.terminal.integrations, 'connection_models',
+                           return_value={'gemini-3-flash', 'claude-sonnet-4-6'}), \
+             contextlib.redirect_stdout(io.StringIO()):
             self.assertTrue(self.terminal.configure(['claude_cli', 'codex']))
             self.assertNotEqual(path.read_bytes(), original)
             self.assertTrue(self.terminal.restore())

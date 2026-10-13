@@ -75,6 +75,7 @@ class ModelSelectionTests(unittest.TestCase):
     def test_family_codex_setup_uses_live_gemini_selection(self):
         self.controller.set_family_models('gemini-pro-agent', 'claude-opus-4-6-thinking')
         client = Integrations(self.controller, Path(self.temp.name) / 'home', Path(self.temp.name) / 'local')
+        client.connection_models = lambda: {'gemini-selected'}
         (self.controller.proxy_dir / 'client-key.txt').write_text('test-key')
         client.apply(['codex'])
         import tomllib
@@ -107,6 +108,7 @@ class ModelSelectionTests(unittest.TestCase):
     def test_new_codex_setup_uses_the_selected_model(self):
         self.controller.set_model_choices('gemini-pro-agent', 'gemini-3.8-flash-high')
         client = Integrations(self.controller, Path(self.temp.name) / 'home', Path(self.temp.name) / 'local')
+        client.connection_models = lambda: {'gemini-pro-agent'}
         (self.controller.proxy_dir / 'client-key.txt').write_text('test-key')
         client.apply(['codex'])
         import tomllib

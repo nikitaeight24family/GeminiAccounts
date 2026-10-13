@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 import yaml
 from backend import AccountError
+from account_status import account_status
 from tokenharbor import TokenHarbor
 
 SERVICES = {
@@ -156,7 +157,8 @@ class APIAccounts:
                         if field in metadata:
                             row[field] = metadata[field]
                 rows.append(row)
-        return sorted(rows,key=lambda a:(-a['priority'],a['email']))
+        return sorted(rows,key=lambda a:(0 if account_status(a)[1] in ('error','warning') else 1,
+                                         -a['priority'],a['email']))
 
     def remove(self, name):
         self.change(name, remove=True)

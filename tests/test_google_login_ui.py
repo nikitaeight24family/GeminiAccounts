@@ -27,8 +27,8 @@ class GoogleLoginUITests(unittest.TestCase):
         self.app.destroy()
         self.stack.close()
 
-    def start(self, manual=True):
-        self.app.login_started(('https://accounts.google.com/o/oauth2/auth?state=current', 'current'), manual_browser=manual)
+    def start(self):
+        self.app.login_started(('https://accounts.google.com/o/oauth2/auth?state=current', 'current'))
         self.app.update()
 
     def test_manual_profile_link_and_single_submission_wait_for_confirmation(self):
@@ -60,8 +60,10 @@ class GoogleLoginUITests(unittest.TestCase):
         self.assertEqual(self.app.google_callback_button.cget('state'), 'normal')
         self.assertFalse(self.app.google_callback_busy)
 
-    def test_default_browser_and_completed_callback_finish_existing_flow(self):
-        self.start(manual=False)
+    def test_browser_opens_only_after_explicit_click_and_callback_finishes_flow(self):
+        self.start()
+        self.browser.assert_not_called()
+        self.app.google_open_browser_button.invoke()
         self.browser.assert_called_once_with(self.app.login_url)
         self.app.controller.complete_google_login = Mock(return_value={'status': 'ok', 'completed': True})
         self.app.google_callback_entry.insert(0, 'callback')

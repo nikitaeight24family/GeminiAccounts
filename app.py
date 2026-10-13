@@ -36,9 +36,11 @@ from chatgpt_routing import is_free_account
 from integrations import Integrations
 from tokenharbor import TokenHarbor
 from chatgpt_auth import ChatGPTAuth
+from chatgpt_oauth_pending import PendingChatGPTLogins
 from claude_ui import ClaudeSupport, ClaudePanel
 from provider_ui import ProviderSupport, GrokPanel
 from model_names import model_name
+from telegram_notifications import TelegramBot, TelegramError
 
 BG = '#10141d'
 PANEL = '#191f2b'
@@ -70,6 +72,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.minsize(990, 680)
         self.configure(fg_color=BG)
         self.controller = Controller()
+        self.telegram_bot = TelegramBot(self.controller.data_dir / 'telegram-bot-token.bin')
+        self._telegram_status_initialized = set()
+        self.chatgpt_pending_store = PendingChatGPTLogins(self.controller.data_dir / 'chatgpt-oauth-pending.json')
         self.ui_style = UIStyle(self, self.controller.preferences)
         self.configure(fg_color=BG)
         self.visible_services = self.controller.preferences.get('visible-services', {})
@@ -92,6 +97,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.busy = False
         self.pending_login = None
         self.pending_chatgpt_login = None
+        self.chatgpt_login_polling = set()
+        self._activate_chatgpt_login(self.chatgpt_pending_store.all()[0]['state'] if self.chatgpt_pending_store.all() else None)
         self.pending_claude_login = None
         self.pending_grok_login = None
         self.model_route_error = None
@@ -110,6 +117,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.chatgpt_free_collapsed = self.controller.preferences.get('chatgpt-free-collapsed', True)
         self.google_accounts_collapsed = self.controller.preferences.get('google-accounts-collapsed', False)
         self.chatgpt_items = []
+        self.chatgpt_rendered_items = {}
+        self.chatgpt_quota_pending = set()
         self.chatgpt_refresh_pending = False
         self.claude_items = []
         self.grok_items = []
@@ -170,23 +179,27 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.privacy_toggle.pack(side='left', padx=(5, 0))
         self.sidebar_footer = ctk.CTkFrame(self.sidebar, fg_color='transparent')
         self.sidebar_footer.pack(side='bottom', fill='x')
-        self.chatgpt_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
-        self.chatgpt_free_accounts = ctk.CTkFrame(self.sidebar, fg_color='transparent')
+        self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
+        self.account_list.pack(fill='both', expand=True, padx=2)
+        self.account_list._scrollbar.grid(padx=0, pady=0)
+        self.account_list._parent_canvas.grid_configure(padx=0, pady=0)
+        self.chatgpt_accounts = ctk.CTkFrame(self.account_list, fg_color='transparent')
+        self.chatgpt_free_accounts = ctk.CTkFrame(self.account_list, fg_color='transparent')
+        # Zero-height anchor keeps the two OpenAI groups above Gemini inside
+        # the same scrollable canvas without changing their incremental layout.
+        self.sidebar_spacer = ctk.CTkFrame(self.account_list, height=0, fg_color='transparent')
+        self.sidebar_spacer.pack(fill='x')
         self.tokenharbor_accounts = ctk.CTkFrame(self.sidebar_footer, fg_color='transparent')
-        self.draw_chatgpt_accounts()
-        self.google_accounts_header = self.button(self.sidebar, '', self.toggle_google_accounts)
+        self.google_accounts_header = self.button(self.account_list, '', self.toggle_google_accounts)
         self.google_accounts_header.configure(image=self.provider_icons['antigravity'], compound='left', height=27, anchor='w',
                                               font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
-        self.google_accounts_header.pack(fill='x', padx=13, pady=(0, 2))
+        self.google_accounts_header.pack(fill='x', padx=1, pady=(0, 2))
         self.google_compact = self.make_quota_dots(self.google_accounts_header, ('G 5h', 'G 1w', 'C 5h', 'C 1w'))
-        self.account_list = ctk.CTkScrollableFrame(self.sidebar, fg_color='transparent')
-        self.account_list.pack(fill='both', expand=True, padx=12)
-        if self.google_accounts_collapsed:
-            self.account_list.pack_forget()
-        self.account_list._scrollbar.grid_remove()
+        self.google_accounts_content = ctk.CTkFrame(self.account_list, fg_color='transparent')
+        self.google_accounts_content.pack(fill='x', padx=0)
+        self.draw_chatgpt_accounts()
         self.service = ctk.CTkLabel(self.sidebar_footer, text='Connecting…', text_color=MUTED, font=('Segoe UI', 10), height=14)
         self.service.pack(anchor='w', padx=18)
-        self.sidebar_spacer = ctk.CTkFrame(self.sidebar, height=0, fg_color='transparent')
         self.pool_summary_groups = {}
         google_summary = self.create_pool_summary('google', 'Google Gemini')
         self.total_quota_frame = ctk.CTkFrame(google_summary, fg_color='transparent')
@@ -345,6 +358,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.after(33, self.animate_border_colors)
         self.after(200, self.poll_gateway_jobs)
         self.after(30000, self.check_for_updates)
+        if self.pending_chatgpt_login:
+            self.after(700, self.resume_chatgpt_login)
         if self.controller.preferences.get('details-collapsed'):
             self.restore_details_job = self.after(180, self.toggle_details)
 
@@ -450,11 +465,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             done, result, error, mutation = self.mailbox.get()
             if mutation:
                 self.busy = False
-                login_pending = self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login
-                self.add_button.configure(state='disabled' if login_pending else 'normal')
-                self.add_chatgpt_button.configure(state='disabled' if login_pending else 'normal')
-                self.add_claude_button.configure(state='disabled' if login_pending else 'normal')
-                self.add_grok_button.configure(state='disabled' if login_pending else 'normal')
+                self.set_provider_login_buttons(True)
                 self.pool_button.configure(state='normal')
             if error:
                 self.notice.configure(text=self.redact_private_text(error), text_color='#ffbd93')
@@ -486,6 +497,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             self.controller.save()
             self.after(500, self.connection_settings)
         self.items = items
+        if 'gemini' not in self._telegram_status_initialized:
+            self._telegram_google_bootstrap = {account.get('name') for account in items if account.get('name')}
+        self.observe_account_statuses('gemini', items)
         self.service.configure(text='●  Connected', text_color=GREEN)
         if self.model_route_error:
             self.notice.configure(text=self.model_route_error, text_color='#ffbd93')
@@ -570,6 +584,69 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         rows = [item for item in self.chatgpt_items if item['name'] != account['name']]
         self.set_chatgpt_accounts(rows + [account])
 
+    def refresh_new_chatgpt_accounts(self):
+        """Discover newly connected accounts without rechecking the whole pool."""
+        if not self.controller.key or self.closed:
+            return
+        def load():
+            return ChatGPTAuth(self.controller).accounts()
+        def done(accounts):
+            if self.closed:
+                return
+            previous = {item['name']: item for item in self.chatgpt_items}
+            additions = []
+            merged = []
+            for fresh in accounts:
+                old = previous.get(fresh['name'])
+                if old is None:
+                    item = dict(fresh)
+                    additions.append(item)
+                else:
+                    # This is a discovery pass after login, not a refresh of
+                    # the existing pool. Keep existing card data byte-for-byte
+                    # so adding one account cannot churn the other rows.
+                    item = dict(old)
+                merged.append(item)
+            self.set_chatgpt_accounts(merged)
+            for item in additions:
+                self.fetch_chatgpt_account_quota(item)
+        self.work(load, done)
+
+    def fetch_chatgpt_account_quota(self, account):
+        name = account['name'] if isinstance(account, dict) else account
+        if name in getattr(self, 'chatgpt_quota_pending', set()):
+            return
+        current = next((item for item in self.chatgpt_items if item['name'] == name), None)
+        account = dict(account if isinstance(account, dict) else current or {})
+        if not account or not account.get('auth_index'):
+            return
+        self.chatgpt_quota_pending = getattr(self, 'chatgpt_quota_pending', set())
+        self.chatgpt_quota_pending.add(name)
+        def load():
+            try:
+                return ChatGPTAuth(self.controller).quota(account), None
+            except (AccountError, ValueError, TypeError) as error:
+                return None, str(error)
+        def done(result):
+            self.chatgpt_quota_pending.discard(name)
+            quota, error = result
+            rows = []
+            for item in self.chatgpt_items:
+                updated = dict(item)
+                if item['name'] == name:
+                    if quota is not None:
+                        updated['quota'] = quota
+                        if quota.get('plan_type'):
+                            updated['plan_type'] = quota['plan_type']
+                    elif error:
+                        updated['quota'] = {'windows': [], 'error': error}
+                rows.append(updated)
+            if quota and not error:
+                self.observe_token_capacity(name, 'OpenAI', quota.get('plan_type') or account.get('plan_type') or 'unknown',
+                                            ChatGPTAuth.quota_limit_groups(quota))
+            self.set_chatgpt_accounts(rows)
+        self.work(load, done)
+
     def set_chatgpt_accounts(self, accounts):
         previous = {item['name']: item for item in self.chatgpt_items}
         merged = []
@@ -588,8 +665,15 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             if not item.get('plan_type') and old.get('plan_type'):
                 item['plan_type'] = old['plan_type']
             merged.append(item)
+        rendered = getattr(self, 'chatgpt_rendered_items', {})
+        widgets = getattr(self, 'chatgpt_widgets', {})
+        changed_names = {item['name'] for item in merged
+                         if item['name'] not in previous or item['name'] not in widgets
+                         or rendered.get(item['name']) != item}
+        self.chatgpt_rendered_items = {item['name']: copy.deepcopy(item) for item in merged}
         self.chatgpt_items = merged
-        self.draw_chatgpt_accounts()
+        self.observe_account_statuses('openai', merged)
+        self.draw_chatgpt_accounts(changed_names=changed_names)
         self.update_openai_pool_quota()
         self.update_mode_label()
 
@@ -655,8 +739,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             lines.append(f'{label}: {text}')
         self.capacity_result.configure(text='\n'.join(lines))
 
-    def draw_chatgpt_accounts(self):
-        rows = sorted(self.chatgpt_items, key=lambda item: (-self.account_priority(item),
+    def draw_chatgpt_accounts(self, changed_names=None):
+        rows = sorted(self.chatgpt_items, key=lambda item: (self.account_empty_quota(item), self.account_problem_rank(item),
+                      -self.account_priority(item),
                       item.get('email') or item.get('name') or ''))
         free_rows = [item for item in rows if is_free_account(item)]
         paid_rows = [item for item in rows if not is_free_account(item)]
@@ -678,7 +763,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         anchor = self.google_accounts_header if getattr(self, 'google_accounts_header', None) and self.google_accounts_header.winfo_manager() else self.sidebar_spacer
         def section(frame, header_name, compact_name, title, count, collapsed, command):
             if not frame.winfo_manager():
-                options = {'fill': 'x', 'padx': 12, 'pady': (0, 3)}
+                options = {'fill': 'x', 'padx': 0, 'pady': (0, 3)}
                 if anchor.winfo_manager():
                     options['before'] = anchor
                 frame.pack(**options)
@@ -772,22 +857,70 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 reset_button.bind('<Button-1>', hide_reset_tip, add='+')
                 card.bind('<Destroy>', lambda event, tip=reset_details, owned=card:
                           tip.destroy() if event.widget is owned and tip.winfo_exists() else None, add='+')
-            self.update_chatgpt_row(item)
+            if changed_names is None or name in changed_names or name not in widgets:
+                self.update_chatgpt_row(item)
         order = tuple(item['name'] for item in paid_rows)
         free_order = tuple(item['name'] for item in free_rows)
         # Keep the legacy first two tuple positions stable for diagnostics and
         # existing integrations; append the free-section state after them.
         state = (self.chatgpt_collapsed, order, self.chatgpt_free_collapsed, free_order)
-        if getattr(self, '_chatgpt_order', None) != state:
-            for row in widgets.values():
-                row['card'].pack_forget()
-            if not self.chatgpt_collapsed:
-                for name in order:
-                    widgets[name]['card'].pack(fill='x', padx=1, pady=(0, 2))
-            if not self.chatgpt_free_collapsed:
-                for name in free_order:
-                    widgets[name]['card'].pack(fill='x', padx=1, pady=(0, 2))
+        old_state = getattr(self, '_chatgpt_order', None)
+        if old_state != state:
+            def ordered_subsequence(old, new):
+                iterator = iter(new)
+                return all(any(candidate == name for candidate in iterator) for name in old)
+
+            incremental = (old_state is not None and old_state[0] == state[0] and old_state[2] == state[2]
+                           and ordered_subsequence(old_state[1], order)
+                           and ordered_subsequence(old_state[3], free_order))
+            if incremental:
+                for old_order, new_order, collapsed in ((old_state[1], order, self.chatgpt_collapsed),
+                                                        (old_state[3], free_order, self.chatgpt_free_collapsed)):
+                    if collapsed:
+                        continue
+                    old_names = set(old_order)
+                    for index, name in enumerate(new_order):
+                        if name in old_names:
+                            continue
+                        next_card = next((widgets[next_name]['card'] for next_name in new_order[index + 1:]
+                                          if next_name in old_names and widgets[next_name]['card'].winfo_manager()), None)
+                        options = {'fill': 'x', 'padx': 1, 'pady': (0, 2)}
+                        if next_card is not None:
+                            options['before'] = next_card
+                        widgets[name]['card'].pack(**options)
+            else:
+                for row in widgets.values():
+                    row['card'].pack_forget()
+                if not self.chatgpt_collapsed:
+                    for name in order:
+                        widgets[name]['card'].pack(fill='x', padx=1, pady=(0, 2))
+                if not self.chatgpt_free_collapsed:
+                    for name in free_order:
+                        widgets[name]['card'].pack(fill='x', padx=1, pady=(0, 2))
             self._chatgpt_order = state
+        self.place_quota_rest_stop(self.chatgpt_accounts, paid_rows, widgets, self.chatgpt_collapsed)
+        self.place_quota_rest_stop(self.chatgpt_free_accounts, free_rows, widgets, self.chatgpt_free_collapsed)
+
+    def place_quota_rest_stop(self, parent, accounts, rows, collapsed=False):
+        separator = getattr(parent, 'quota_rest_separator', None)
+        empty = [a for a in accounts if self.account_empty_quota(a)]
+        if separator is None and empty:
+            separator = ctk.CTkFrame(parent, fg_color='transparent', height=22)
+            ctk.CTkFrame(separator, height=1, fg_color='#43516a').pack(fill='x', pady=(3, 2))
+            ctk.CTkLabel(separator, text='Quota empty · rest stop', height=16,
+                         font=('Segoe UI', 10), text_color=MUTED).pack(anchor='w', padx=4)
+            parent.quota_rest_separator = separator
+        if separator is None:
+            return
+        if not empty or collapsed:
+            separator.pack_forget()
+            return
+        target = rows[empty[0]['name']]['card']
+        if target.winfo_manager():
+            packed = parent.pack_slaves()
+            index = packed.index(target)
+            if index == 0 or packed[index - 1] is not separator:
+                separator.pack(fill='x', before=target, padx=1)
 
     @staticmethod
     def chatgpt_plan_name(item):
@@ -970,24 +1103,55 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             self.controller.save()
             self.set_chatgpt_accounts(accounts)
             account = next((item for item in accounts if item.get('email') == email), {'name': email, 'email': email})
+            self.fetch_chatgpt_account_quota(account)
             self.notice.configure(text='ChatGPT account connected: ' + self.display_name(account, 'OpenAI') + '. Choose an available GPT model in your connected application.',
                                   text_color=GREEN)
-            self.refresh_chatgpt_accounts()
+            self.refresh_new_chatgpt_accounts()
         self.work(lambda: ChatGPTAuth(self.controller).import_file(path), done, mutation=True)
 
     def sign_in_chatgpt(self):
-        if self.busy or self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login:
+        if self.busy:
             return
         self.work(lambda: ChatGPTAuth(self.controller).begin_login(), self.chatgpt_login_started, mutation=True)
 
+    def _activate_chatgpt_login(self, state):
+        record = self.chatgpt_pending_store.get(state) if state else None
+        if not record:
+            self.pending_chatgpt_login = None
+            self.chatgpt_login_url = None
+            return
+        age = max(0, time.time() - record['created_at'])
+        self.pending_chatgpt_login = (state, time.monotonic() - age)
+        self.chatgpt_login_url = record['url']
+
+    def resume_chatgpt_login(self):
+        records = self.chatgpt_pending_store.all()
+        self.set_provider_login_buttons(True)
+        if not records or self.closed:
+            self._activate_chatgpt_login(None)
+            return
+        self._activate_chatgpt_login(records[0]['state'])
+        self._show_chatgpt_login_window()
+        self.chatgpt_callback_status.configure(
+            text=f'{len(records)} ChatGPT sign-in attempt(s) are still active. Old callback links are accepted until they expire.',
+            text_color=ACCENT)
+        self.poll_chatgpt_login()
+
     def chatgpt_login_started(self, result):
         url, state = result
-        self.chatgpt_login_url = url
-        self.pending_chatgpt_login = (state, time.monotonic())
-        self.add_button.configure(state='disabled')
-        self.add_chatgpt_button.configure(state='disabled')
+        self.chatgpt_pending_store.add(state, url)
+        self._activate_chatgpt_login(state)
+        # A previous accepted/failed login may have left the one-use callback
+        # guard set while the gateway was waiting for OAuth confirmation.
+        self.chatgpt_callback_busy = False
+        self.set_provider_login_buttons(True)
         self.notice.configure(text='Copy the sign-in link or open it manually in your browser. The account will appear here automatically.',
                               text_color=ACCENT)
+        self._show_chatgpt_login_window()
+
+    def _show_chatgpt_login_window(self):
+        if hasattr(self, 'chatgpt_login_window') and self.chatgpt_login_window.winfo_exists():
+            self.chatgpt_login_window.destroy()
         self.chatgpt_login_window = ctk.CTkToplevel(self)
         self.chatgpt_login_window.title('ChatGPT sign-in')
         self.chatgpt_login_window.geometry('500x370')
@@ -1038,7 +1202,13 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         if not value:
             self.chatgpt_callback_status.configure(text='Paste the callback address or authorization code.', text_color='#ffbd93')
             return
-        state = self.pending_chatgpt_login[0]
+        callback_state = ChatGPTAuth.callback_state(value)
+        state = callback_state or self.pending_chatgpt_login[0]
+        if not callback_state and not self.chatgpt_pending_store.get(state):
+            self.chatgpt_callback_status.configure(
+                text='This callback does not match a saved active sign-in, or that sign-in has expired.',
+                text_color='#ffbd93')
+            return
         self.chatgpt_callback_busy = True
         self.chatgpt_callback_button.configure(state='disabled')
         self.chatgpt_callback_status.configure(text='Completing sign-in…', text_color=MUTED)
@@ -1048,16 +1218,20 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             except AccountError as error:
                 return None, str(error)
         def done(result):
-            if not self.pending_chatgpt_login or self.pending_chatgpt_login[0] != state:
-                return
             answer, error = result
             if error:
                 self.chatgpt_callback_busy = False
                 self.chatgpt_callback_status.configure(text=error, text_color='#ffbd93')
                 self.chatgpt_callback_button.configure(state='normal')
             else:
+                if not self.chatgpt_pending_store.get(state):
+                    # The gateway is authoritative for older attempts created
+                    # before Omni began persisting pending states.
+                    self.chatgpt_pending_store.add(state, '')
+                    self._activate_chatgpt_login(state)
                 self.chatgpt_callback_entry.delete(0, 'end')
                 self.chatgpt_callback_status.configure(text='Code accepted. Waiting for ChatGPT confirmation…', text_color=GREEN)
+                self.after(1800, self.poll_chatgpt_login)
         self.work(submit, done)
 
     def chatgpt_callback_paste_key(self, event):
@@ -1076,26 +1250,42 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.chatgpt_callback_entry.delete(0, 'end')
         self.chatgpt_callback_entry.insert(0, value)
         self.chatgpt_callback_entry.focus_set()
+        self.chatgpt_callback_status.configure(text='Callback pasted. Click Complete sign-in.', text_color=TEXT)
 
     def poll_chatgpt_login(self):
-        if not self.pending_chatgpt_login or self.closed:
+        if self.closed:
             return
-        state, started = self.pending_chatgpt_login
-        if time.monotonic() - started > 900:
-            self.finish_chatgpt_login('ChatGPT sign-in timed out. Try adding the account again.', False)
+        records = self.chatgpt_pending_store.all()
+        if not records:
+            had_pending = bool(self.pending_chatgpt_login)
+            self._activate_chatgpt_login(None)
+            if had_pending:
+                self.chatgpt_callback_busy = False
+                if hasattr(self, 'chatgpt_login_window') and self.chatgpt_login_window.winfo_exists():
+                    self.chatgpt_login_window.destroy()
+                self.set_provider_login_buttons(True)
+                self.notice.configure(text='The saved ChatGPT sign-in link expired. Start a new sign-in.',
+                                      text_color='#ffbd93')
             return
+        record = next((row for row in records if row['state'] not in self.chatgpt_login_polling), None)
+        if not record:
+            self.after(1800, self.poll_chatgpt_login)
+            return
+        state = record['state']
+        self.chatgpt_login_polling.add(state)
         def poll():
             try:
                 return ChatGPTAuth(self.controller).login_status(state)
             except AccountError:
                 return {'status': 'wait'}
         def done(result):
-            if not self.pending_chatgpt_login or self.pending_chatgpt_login[0] != state:
+            self.chatgpt_login_polling.discard(state)
+            if not self.chatgpt_pending_store.get(state):
                 return
             if result.get('status') == 'ok':
-                self.finish_chatgpt_login('ChatGPT account added. Reconnect applications to show its GPT models.', True)
+                self.finish_chatgpt_login('ChatGPT account added. Reconnect applications to show its GPT models.', True, state)
             elif result.get('status') == 'error':
-                self.finish_chatgpt_login('ChatGPT sign-in did not finish. Try again.', False)
+                self.finish_chatgpt_login('ChatGPT sign-in did not finish. Try again.', False, state)
             else:
                 self.after(1800, self.poll_chatgpt_login)
         self.work(poll, done)
@@ -1104,21 +1294,32 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         if not self.pending_chatgpt_login:
             return
         state = self.pending_chatgpt_login[0]
-        self.finish_chatgpt_login('ChatGPT sign-in cancelled.', False)
+        self.finish_chatgpt_login('ChatGPT sign-in cancelled.', False, state)
         self.work(lambda: ChatGPTAuth(self.controller).cancel_login(state), lambda _: None)
 
-    def finish_chatgpt_login(self, message, success):
-        self.pending_chatgpt_login = None
-        self.add_button.configure(state='normal')
-        self.add_chatgpt_button.configure(state='normal')
-        if hasattr(self, 'chatgpt_login_window') and self.chatgpt_login_window.winfo_exists():
+    def finish_chatgpt_login(self, message, success, state=None):
+        state = state or (self.pending_chatgpt_login[0] if self.pending_chatgpt_login else None)
+        if state:
+            self.chatgpt_pending_store.remove(state)
+        self.chatgpt_callback_busy = False
+        remaining = self.chatgpt_pending_store.all()
+        self._activate_chatgpt_login(remaining[0]['state'] if remaining else None)
+        self.set_provider_login_buttons(True)
+        if remaining and hasattr(self, 'chatgpt_login_window') and self.chatgpt_login_window.winfo_exists():
+            self.chatgpt_login_window.destroy()
+            self._show_chatgpt_login_window()
+            outcome = self.ui_style.text('ChatGPT account added.' if success else 'This ChatGPT sign-in did not finish.')
+            pending = self.ui_style.text('Active sign-in attempts remaining: ')
+            self.chatgpt_callback_status.configure(text=f'{outcome} {pending}{len(remaining)}', text_color=ACCENT)
+            self.after(1800, self.poll_chatgpt_login)
+        elif hasattr(self, 'chatgpt_login_window') and self.chatgpt_login_window.winfo_exists():
             self.chatgpt_login_window.destroy()
         self.notice.configure(text=message, text_color=GREEN if success else '#ffbd93')
         if success:
             self.chatgpt_collapsed = False
             self.controller.preferences['chatgpt-collapsed'] = False
             self.controller.save()
-            self.refresh_chatgpt_accounts()
+            self.refresh_new_chatgpt_accounts()
 
     def provider_visible(self, provider):
         return self.visible_services.get(provider, True)
@@ -1131,19 +1332,17 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             return
         if self.google_visible():
             if not self.google_accounts_header.winfo_manager():
-                self.google_accounts_header.pack(fill='x', padx=13, pady=(0, 2), **({'before': self.sidebar_spacer} if self.sidebar_spacer.winfo_manager() else {}))
-            if not self.google_accounts_collapsed and not self.account_list._parent_frame.winfo_manager():
-                self.account_list.pack(fill='both', expand=True, padx=12, after=self.google_accounts_header)
+                self.google_accounts_header.pack(fill='x', padx=1, pady=(0, 2), after=self.sidebar_spacer)
+            if not self.google_accounts_collapsed:
+                if not self.google_accounts_content.winfo_manager():
+                    self.google_accounts_content.pack(fill='x', after=self.google_accounts_header)
+            else:
+                self.google_accounts_content.pack_forget()
         else:
             self.google_accounts_header.pack_forget()
-            self.account_list.pack_forget()
+            self.google_accounts_content.pack_forget()
         self.show_quota_dots(self.google_compact, self.google_visible() and self.google_accounts_collapsed,
                              after=self.google_accounts_header)
-        if self.google_accounts_collapsed or not self.google_visible():
-            if not self.sidebar_spacer.winfo_manager():
-                self.sidebar_spacer.pack(fill='both', expand=True)
-        else:
-            self.sidebar_spacer.pack_forget()
         for provider, group in getattr(self, 'pool_summary_groups', {}).items():
             visible = self.provider_visible('gemini') if provider == 'google' else self.provider_visible('claude' if provider=='claude-native' else provider)
             if visible and not group['frame'].winfo_manager():
@@ -1180,6 +1379,146 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.language_control = ctk.CTkSegmentedButton(self.display_settings, values=['English', 'Русский'], command=self.set_language)
         self.language_control.set('Русский' if self.ui_style.language == 'ru' else 'English')
         self.language_control.pack(anchor='w', pady=(0, 14))
+        self.label(self.display_settings, 'Telegram notifications', 16, bold=True)
+        self.telegram_enabled = tk.BooleanVar(master=self, value=bool(self.controller.preferences.get('telegram-alerts-enabled', False)))
+        self.telegram_enabled_control = ctk.CTkCheckBox(self.display_settings, text='Notify me when an account fails',
+            variable=self.telegram_enabled, command=self.save_telegram_preferences)
+        self.telegram_enabled_control.pack(anchor='w', pady=(0, 7))
+        self.telegram_token_entry = ctk.CTkEntry(self.display_settings, width=340, placeholder_text='Telegram bot token', show='•')
+        self.telegram_token_entry.pack(anchor='w', pady=(0, 6))
+        token_saved = self.telegram_bot.token_saved()
+        self.telegram_token_state = self.label(self.display_settings,
+            'Bot token saved securely' if token_saved else 'Bot token not set', 11, MUTED)
+        self.telegram_chat_entry = ctk.CTkEntry(self.display_settings, width=340, placeholder_text='Telegram chat ID')
+        self.telegram_chat_entry.insert(0, str(self.controller.preferences.get('telegram-chat-id', '')))
+        self.telegram_chat_entry.pack(anchor='w', pady=(0, 7))
+        self.telegram_chat_entry.bind('<FocusOut>', lambda event: self.save_telegram_preferences())
+        self.telegram_chat_entry.bind('<Return>', lambda event: self.save_telegram_preferences())
+        telegram_actions = ctk.CTkFrame(self.display_settings, fg_color='transparent')
+        telegram_actions.pack(anchor='w', pady=(0, 4))
+        self.button(telegram_actions, 'Save bot token', self.save_telegram_token).pack(side='left', padx=(0, 6))
+        self.button(telegram_actions, 'Find chat', self.find_telegram_chat).pack(side='left', padx=(0, 6))
+        self.button(telegram_actions, 'Send test', self.test_telegram).pack(side='left')
+        self.telegram_status_label = self.label(self.display_settings,
+            'Send /start to your bot, then select Find chat.', 11, MUTED)
+
+    def save_telegram_preferences(self):
+        self.controller.preferences['telegram-alerts-enabled'] = bool(self.telegram_enabled.get())
+        self.controller.preferences['telegram-chat-id'] = self.telegram_chat_entry.get().strip()
+        self.controller.save()
+
+    def save_telegram_token(self):
+        token = self.telegram_token_entry.get().strip()
+        if not token:
+            self.telegram_status_label.configure(text='Enter the bot token first.', text_color='#f7ca70')
+            return
+        try:
+            self.telegram_bot.save_token(token)
+        except TelegramError as error:
+            self.telegram_status_label.configure(text=str(error), text_color='#ffbd93')
+            return
+        self.telegram_token_entry.delete(0, 'end')
+        self.telegram_token_state.configure(text='Bot token saved securely', text_color=GREEN)
+        self.save_telegram_preferences()
+        self.telegram_status_label.configure(text='Bot token saved.', text_color=GREEN)
+
+    def find_telegram_chat(self):
+        self.save_telegram_preferences()
+        def done(chat_id):
+            self.telegram_chat_entry.delete(0, 'end')
+            self.telegram_chat_entry.insert(0, str(chat_id))
+            self.save_telegram_preferences()
+            self.telegram_status_label.configure(text='Chat found and saved.', text_color=GREEN)
+        self.telegram_status_label.configure(text='Looking for a recent message to the bot…', text_color=ACCENT)
+        def find():
+            try:
+                return self.telegram_bot.discover_chat_id(), None
+            except TelegramError as error:
+                return None, str(error)
+        def complete(result):
+            chat_id, error = result
+            if error:
+                self.telegram_status_label.configure(text=error, text_color='#ffbd93')
+            else:
+                done(chat_id)
+        self.work(find, complete)
+
+    def test_telegram(self):
+        self.save_telegram_preferences()
+        chat_id = self.telegram_chat_entry.get().strip()
+        def send():
+            self.telegram_bot.send_message(chat_id, 'Omni: Telegram notifications are connected.')
+        def done(_):
+            self.telegram_status_label.configure(text='Test message sent.', text_color=GREEN)
+        self.telegram_status_label.configure(text='Sending test message…', text_color=ACCENT)
+        def guarded():
+            try:
+                return send(), None
+            except TelegramError as error:
+                return None, str(error)
+        def complete(result):
+            _, error = result
+            if error:
+                self.telegram_status_label.configure(text=error, text_color='#ffbd93')
+            else:
+                done(None)
+        self.work(guarded, complete)
+
+    def observe_account_statuses(self, provider, accounts, suppress=False):
+        """Notify once when a known healthy account first enters a hard-error state."""
+        if self.closed:
+            return
+        key = 'telegram-account-statuses'
+        states = self.controller.preferences.setdefault(key, {})
+        is_initial = provider not in self._telegram_status_initialized
+        self._telegram_status_initialized.add(provider)
+        changed = False
+        for account in accounts:
+            name = account.get('name')
+            if not name:
+                continue
+            status, severity, detail = account_status(account)
+            state_key = provider + ':' + name
+            previous = states.get(state_key)
+            if provider == 'gemini' and 'quota' not in account and previous == 'error' and severity != 'error':
+                continue
+            problem = severity == 'error' or status in ('Verification required', 'Temporarily unavailable', 'Access denied')
+            next_state = 'error' if problem else severity
+            states[state_key] = next_state
+            changed = changed or previous != next_state
+            if problem and previous != 'error' and not is_initial and not suppress:
+                self.send_telegram_account_alert(provider, account, status, detail)
+        if changed and states != getattr(self, '_telegram_saved_statuses', None):
+            self._telegram_saved_statuses = copy.deepcopy(states)
+            self.controller.save()
+
+    def send_telegram_account_alert(self, provider, account, status, detail=''):
+        if (not self.controller.preferences.get('telegram-alerts-enabled')
+                or not self.controller.preferences.get('telegram-chat-id')
+                or not self.telegram_bot.token_saved()):
+            return
+        service = provider.removeprefix('api-')
+        providers = {'gemini': 'Antigravity', 'openai': 'OpenAI', 'claude': 'Claude', 'grok': 'Grok'}
+        title = providers.get(service, service.upper() if service == 'api' else service)
+        name = self.display_name(account, title)
+        from ui_locale import translate
+        language = self.controller.preferences.get('language', 'en')
+        caption = translate(status, language)
+        text = f'⚠️ Omni: {title} · {name} — {caption}.'
+        if detail:
+            text += '\n' + safe_detail(detail)[:500]
+        chat_id = str(self.controller.preferences.get('telegram-chat-id', '')).strip()
+        def send():
+            for attempt in range(3):
+                try:
+                    self.telegram_bot.send_message(chat_id, text)
+                    return
+                except TelegramError:
+                    if attempt < 2:
+                        time.sleep(3)
+            self.mailbox.put((lambda _: self.telegram_status_label.configure(
+                text='Could not send Telegram notification. Check bot settings.', text_color='#ffbd93'), None, None, False))
+        threading.Thread(target=send, daemon=True).start()
 
     def set_service_visibility(self, provider):
         self.visible_services[provider] = bool(self.service_variables[provider].get())
@@ -1343,6 +1682,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 self.stats_strategy.configure(text=error, text_color='#ffbd93')
             else:
                 self.items = accounts
+                self.observe_account_statuses('gemini', accounts)
                 self.activity_state = state
                 self.recent_account_models = self.latest_models_by_account(state)
                 self.activity_strategy = strategy
@@ -1544,7 +1884,11 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             f'  TokenHarbor · {len(keys)+self.provider_api_count("tokenharbor")}pcs', self.toggle_tokenharbor_accounts)
         header.configure(height=28, anchor='w', font=('Segoe UI', 11, 'bold'), fg_color='#303b50')
         header.pack(fill='x', padx=1, pady=(2, 3))
+        self.tokenharbor_header = header
         self.install_service_add_button(header, 'tokenharbor')
+        self.tokenharbor_compact = self.make_quota_dots(header, ('',))
+        self.set_quota_dots(self.tokenharbor_compact, [None])
+        self.show_quota_dots(self.tokenharbor_compact, self.tokenharbor_collapsed, after=header)
         if self.tokenharbor_collapsed:
             return
         self.tokenharbor_last = ctk.CTkLabel(frame, text='', height=17,
@@ -1622,16 +1966,13 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.google_accounts_collapsed = not self.google_accounts_collapsed
         self.controller.preferences['google-accounts-collapsed'] = self.google_accounts_collapsed
         self.controller.save()
-        if self.google_accounts_collapsed or not self.google_visible():
-            self.account_list.pack_forget()
-        else:
-            self.account_list.pack(fill='both', expand=True, padx=12, after=self.google_accounts_header)
+        self.apply_service_visibility()
         self.draw_account_list()
         self.refresh_api_accounts(use_cache=True)
 
     def draw_account_list(self):
         self.google_accounts_header.configure(text=('▸' if self.google_accounts_collapsed else '▾') +
-                                             f'  Google Gemini · {len(self.items)+self.provider_api_count("gemini")}pcs')
+                                             f'  Antigravity · {len(self.items)+self.provider_api_count("gemini")}pcs')
         self.google_accounts_header.configure(font=('Segoe UI', 10, 'bold'))
         self.apply_service_visibility()
         self.draw_tokenharbor_accounts()
@@ -1640,28 +1981,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         manual_order = any(self.account_priority(a) for a in accounts)
         names = [a['name'] for a in accounts]
         layout = [(a['name'], (a.get('access_issue') == 'verification',
-            self.account_weekly_depleted(a['name']), self.quota_layout(a['name']), manual_order)) for a in accounts]
-        pending_count = sum(a.get('access_issue') == 'verification' for a in accounts)
-        depleted_count = sum(a.get('access_issue') != 'verification' and
-                             self.account_weekly_depleted(a['name']) for a in accounts)
-        ready_count = len(accounts) - pending_count - depleted_count
-        if manual_order:
-            pending_count = depleted_count = 0
-            ready_count = len(accounts)
-        if len(names) < 11:
-            self.account_list._scrollbar.grid_remove()
-        else:
-            self.account_list._scrollbar.grid()
-        if getattr(self, 'account_layout', None) != layout and dict(getattr(self, 'account_layout', [])) == dict(layout):
-            for widget in self.account_list.winfo_children():
-                widget.pack_forget()
-            for index, account in enumerate(accounts):
-                for header_index, widget, options in self.account_group_widgets:
-                    if header_index == index:
-                        widget.pack(**options)
-                self.account_widgets[account['name']]['card'].pack(fill='x', pady=(0, 1), padx=1)
-            self.account_widgets = {name: self.account_widgets[name] for name in names}
-            self.account_layout = layout
+            self.account_weekly_depleted(a['name']), self.quota_layout(a['name']), manual_order, self.account_empty_quota(a))) for a in accounts]
+        empty_count = sum(self.account_empty_quota(a) for a in accounts)
+        ready_count = len(accounts) - empty_count
         if getattr(self, 'account_layout', None) == layout:
             for account in accounts:
                 self.update_account_row(account)
@@ -1677,21 +1999,15 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.account_group_widgets = []
         self.account_layout = layout
         for index, account in enumerate(accounts):
-            section = None
-            if pending_count and index == 0:
-                section = ('Verification required', pending_count, '#f7ca70', False)
-            elif pending_count and ready_count and index == pending_count:
-                section = ('Ready accounts', ready_count, MUTED, True)
-            elif depleted_count and index == pending_count + ready_count:
-                section = ('Weekly quota below 1%', depleted_count, '#f7ca70', True)
+            section = ('Quota empty · rest stop', empty_count, '#ff8d8d', True) if empty_count and index == ready_count else None
             if section:
                 title, count, color, divider = section
                 if divider:
-                    separator = ctk.CTkFrame(self.account_list, height=1, fg_color='#43516a')
+                    separator = ctk.CTkFrame(self.google_accounts_content, height=1, fg_color='#43516a')
                     options = {'fill': 'x', 'padx': 5, 'pady': (6, 3)}
                     separator.pack(**options)
                     self.account_group_widgets.append((index, separator, options))
-                header = ctk.CTkLabel(self.account_list, text=f'{title} · {count}', height=19, anchor='w',
+                header = ctk.CTkLabel(self.google_accounts_content, text=f'{title} · {count}', height=19, anchor='w',
                     font=('Segoe UI', 11, 'bold'), text_color=color)
                 options = {'fill': 'x', 'padx': 6, 'pady': (0, 3)}
                 header.pack(**options)
@@ -1701,12 +2017,12 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 self.account_widgets[name]['card'].pack(fill='x', pady=(0, 1), padx=1)
                 self.update_account_row(account)
                 continue
-            card = ctk.CTkFrame(self.account_list, fg_color='#202938', corner_radius=10,
+            card = ctk.CTkFrame(self.google_accounts_content, fg_color='#202938', corner_radius=10,
                 border_width=1, border_color=ACCENT if not self.details_collapsed and name == self.selected else '#344155')
             card.pack(fill='x', pady=(0, 1), padx=1)
             status = self.sidebar_account_status(account)
             heading_row = ctk.CTkFrame(card, fg_color='transparent')
-            heading_row.pack(fill='x', pady=(7, 0), padx=7)
+            heading_row.pack(fill='x', pady=(6, 0), padx=7)
             heading_row.grid_columnconfigure(0, weight=1)
             controls = ctk.CTkFrame(heading_row, fg_color='transparent', width=1, height=19)
             controls.grid(row=0, column=1, sticky='e')
@@ -1715,11 +2031,16 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 hover=not self.details_collapsed,
                 hover_color='#334158', text_color=TEXT, font=('Segoe UI', 12, 'bold'), command=lambda a=account: self.select(a))
             button.configure(width=1)
-            button.configure(image=self.provider_icons['antigravity'], compound='left')
+            button.configure(image=self.provider_icons['antigravity'], compound='left', border_spacing=4)
             button.grid(row=0, column=0, sticky='ew')
             self.bind_account_rename(button, name, 'Google')
             pause = self.account_pause_button(controls, name, 'google')
             pause.pack(side='right')
+            remove = self.button(controls, '×', lambda n=name: self.remove_google_account(n))
+            remove.configure(width=15, height=18, corner_radius=2, font=('Segoe UI', 11),
+                             fg_color='transparent', text_color=MUTED, hover_color='#52313a')
+            self.attach_tooltip(remove, 'Remove account')
+            remove.pack(side='right', padx=(2, 0))
             status_row = ctk.CTkFrame(card, fg_color='transparent')
             status_row.pack(fill='x', padx=8, pady=0)
             priority = self.make_priority_counter(controls, account, 'google')
@@ -1747,7 +2068,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 verification_frame.pack(fill='x', padx=5, pady=(0, 3))
             quota_frame = ctk.CTkFrame(card, fg_color='transparent')
             quota_frame.pack(fill='x', padx=7, pady=(0, 7))
-            widgets = {'card': card, 'button': button, 'pause': pause, 'plan': plan, 'status': state, 'priority': priority, 'quota_icons': {}, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
+            widgets = {'card': card, 'button': button, 'pause': pause, 'remove': remove, 'plan': plan, 'status': state, 'priority': priority, 'quota_icons': {}, 'quotas': {}, 'quota_frame': quota_frame, 'countdown': countdown, 'verification_frame': verification_frame,
                        'active_families': (), 'quota_rows': {}}
             self.account_widgets[account['name']] = widgets
             button.bind('<Configure>', lambda event, row=widgets: self.draw_active_badges(row, row.get('active_families', ()), row.get('badge_model', '')), add='+')
@@ -1841,11 +2162,46 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                 and math.isfinite(weekly) and 0 <= weekly < .01)
 
     def account_sort_key(self, account):
+        problem = self.account_problem_rank(account)
         priority = -self.account_priority(account)
+        empty = self.account_empty_quota(account)
+        if empty:
+            return (1, problem, priority, 2, self.account_reset_order(account['name']), 1)
         if account.get('access_issue') == 'verification':
-            return (priority, 0, 0)
-        return (priority, 2 if self.account_weekly_depleted(account['name']) else 1,
-                self.account_reset_order(account['name']))
+            return (0, problem, priority, 0, 0, 0)
+        return (0, problem, priority, 2 if self.account_weekly_depleted(account['name']) else 1,
+                self.account_reset_order(account['name']), 1)
+
+    def account_empty_quota(self, account):
+        """Unknown quota stays usable; a depleted window blocks its provider family."""
+        if account.get('access_issue') == 'verification':
+            return False
+        name = account.get('name')
+        quota = account.get('quota') or {}
+        windows = quota.get('windows') or []
+        values = [window.get('remaining') for window in windows
+                  if isinstance(window, dict) and isinstance(window.get('remaining'), (int, float))
+                  and not isinstance(window.get('remaining'), bool) and math.isfinite(window['remaining'])]
+        if values:
+            return any(value <= 0 for value in values)
+        groups = self.quota_cache.get(name, {}).get('data', {}).get('groups', []) if name else []
+        known = []
+        for group in groups:
+            remaining = [b.get('remaining') for b in group.get('buckets', [])
+                         if isinstance(b.get('remaining'), (int, float)) and not isinstance(b.get('remaining'), bool)
+                         and math.isfinite(b['remaining'])]
+            if remaining:
+                known.append(any(value <= 0 for value in remaining))
+        return bool(known) and all(known)
+
+    def account_problem_rank(self, account):
+        """Keep accounts requiring attention above healthy and paused accounts."""
+        if account_status(account)[1] in ('error', 'warning'):
+            return 0
+        name = account.get('name')
+        if name and self.quota_cache.get(name, {}).get('error'):
+            return 0
+        return 1
 
     def account_priority(self, account):
         return self.controller.preferences.get('account-priorities', {}).get(account['name'], 0)
@@ -2033,6 +2389,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
     def show_quota_dots(frame, visible, after):
         if visible and not frame.winfo_manager():
             frame.place(relx=1, rely=.5, x=-28 if hasattr(after, 'service_add') else -5, anchor='e')
+            frame.lift()
         elif not visible:
             frame.place_forget()
 
@@ -2068,19 +2425,25 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                         google[key].append(bucket.get('remaining'))
         if hasattr(self, 'google_compact'):
             self.set_quota_dots(self.google_compact, [average(v) for v in google.values()])
-        openai = []
-        for label in ('5h', '1w'):
-            values = []
-            for account in self.chatgpt_items:
-                quota = account.get('quota') or {}
-                if account.get('disabled') or quota.get('error'):
-                    continue
-                for window in quota.get('windows', []):
-                    if window.get('label') == label and isinstance(window.get('remaining'), (int, float)):
-                        values.append(window['remaining'] / 100)
-            openai.append(average(values))
+        def openai_values(accounts):
+            values_by_window = []
+            for label in ('5h', '1w'):
+                values = []
+                for account in accounts:
+                    quota = account.get('quota') or {}
+                    if account.get('disabled') or quota.get('error'):
+                        continue
+                    for window in quota.get('windows', []):
+                        if window.get('label') == label and isinstance(window.get('remaining'), (int, float)):
+                            values.append(window['remaining'] / 100)
+                values_by_window.append(average(values))
+            return values_by_window
+        openai = openai_values([account for account in self.chatgpt_items if not is_free_account(account)])
+        free_openai = openai_values([account for account in self.chatgpt_items if is_free_account(account)])
         if hasattr(self, 'chatgpt_compact'):
             self.set_quota_dots(self.chatgpt_compact, openai)
+        if hasattr(self, 'chatgpt_free_compact'):
+            self.set_quota_dots(self.chatgpt_free_compact, free_openai)
         for provider, group in getattr(self, 'pool_summary_groups', {}).items():
             values = [getattr(self, 'total_remaining', None), getattr(self, 'total_weekly_remaining', None)] if provider == 'google' else openai
             if provider=='claude-native':
@@ -2658,10 +3021,49 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             if widgets['model'].cget('text') != caption:
                 widgets['model'].configure(text=caption)
             self.update_active_border(widgets, is_active)
+        google_names = {item['name'] for item in self.items}
+        google_names.update(item['name'] for item in self.api_items if item.get('provider') == 'gemini')
+        self.set_agent_header_active(getattr(self, 'google_accounts_header', None), bool(active & google_names))
+        paid_names = {item['name'] for item in self.chatgpt_items if not is_free_account(item)}
+        free_names = {item['name'] for item in self.chatgpt_items if is_free_account(item)}
+        paid_names.update(item['name'] for item in self.api_items if item.get('provider') == 'openai')
+        self.set_agent_header_active(getattr(self, 'chatgpt_header', None), bool(active & paid_names))
+        self.set_agent_header_active(getattr(self, 'chatgpt_free_header', None), bool(active & free_names))
+        claude_names = {item['name'] for item in self.claude_items}
+        claude_names.update(item['name'] for item in self.api_items if item.get('provider') == 'claude')
+        grok_names = {item['name'] for item in self.grok_items}
+        grok_names.update(item['name'] for item in self.api_items if item.get('provider') == 'grok')
+        self.set_agent_header_active(self.claude_panel.header, bool(active & claude_names))
+        self.set_agent_header_active(self.grok_panel.header, bool(active & grok_names))
+        harbor_event = self.harbor_activity.state.get('latest') or {}
+        try:
+            harbor_age = time.time() - datetime.fromisoformat(harbor_event['at'].replace('Z', '+00:00')).timestamp()
+            harbor_active = not harbor_event.get('failed') and 0 <= harbor_age < 60
+        except (KeyError, ValueError, TypeError):
+            harbor_active = False
+        self.set_agent_header_active(getattr(self, 'tokenharbor_header', None), bool(harbor_active))
+        if hasattr(self, 'tokenharbor_compact'):
+            value = None if not harbor_event else 0 if harbor_event.get('failed') else 1
+            self.set_quota_dots(self.tokenharbor_compact, [value])
         self.claude_panel.animate()
         self.grok_panel.animate()
         self.animate_api_accounts()
         self.after(500, self.animate_active_borders)
+
+    @staticmethod
+    def set_agent_header_active(header, active):
+        if header is None or not header.winfo_exists() or getattr(header, 'active_account_highlight', None) == active:
+            return
+        header.active_account_highlight = active
+        widgets = getattr(header, 'active_border_widgets', None)
+        if widgets is None:
+            widgets = {'card': header}
+            header.active_border_widgets = widgets
+        widgets['active_highlight'] = active
+        if not active:
+            header._canvas.delete('rainbow')
+            widgets.pop('rainbow_size', None)
+            widgets.pop('rainbow_segments', None)
 
     def animate_border_colors(self):
         if self.closed:
@@ -2671,6 +3073,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         rows += list(getattr(self, 'api_rows', {}).values())
         for panel in ('claude_panel', 'grok_panel'):
             rows += list(getattr(getattr(self, panel, None), 'rows', {}).values())
+        headers = [getattr(self, field, None) for field in ('google_accounts_header', 'chatgpt_header', 'chatgpt_free_header', 'tokenharbor_header')]
+        headers += [getattr(getattr(self, panel, None), 'header', None) for panel in ('claude_panel', 'grok_panel')]
+        rows += [header.active_border_widgets for header in headers if header is not None and hasattr(header, 'active_border_widgets')]
         phase = (time.monotonic() / 8) % 1
         for widgets in rows:
             if widgets.get('active_highlight') and widgets['card'].winfo_ismapped():
@@ -2879,9 +3284,12 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.update_detail_quota()
 
     def remove_selected_account(self):
+        self.remove_google_account(self.selected)
+
+    def remove_google_account(self, name):
         if self.busy:
             return
-        account = next((a for a in self.items if a['name'] == self.selected), None)
+        account = next((a for a in self.items if a['name'] == name), None)
         if not account:
             return
         name = account['name']
@@ -3000,6 +3408,16 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
             self.quota_cache[name] = {'data': data if data is not None else old.get('data', {}),
                 'at': datetime.now().astimezone() if data is not None else old.get('at'),
                 'checked': time.monotonic(), 'error': error}
+            google_account = next((item for item in self.items if item['name'] == name), None)
+            if google_account:
+                status_account = dict(google_account)
+                quota_data = dict(data or old.get('data') or {})
+                if error and re.search(r'\bHTTP\s+(401|403)\b', error, re.I):
+                    quota_data['error'] = error
+                status_account['quota'] = quota_data
+                bootstrap = name in getattr(self, '_telegram_google_bootstrap', set())
+                getattr(self, '_telegram_google_bootstrap', set()).discard(name)
+                self.observe_account_statuses('gemini', [status_account], suppress=bootstrap)
             if data is not None and not error and not data.get('summary_error'):
                 self.observe_token_capacity(name, 'Google', self.google_plan_name(account), data.get('groups', []))
             if any(a['name'] == name for a in self.items):
@@ -3429,17 +3847,15 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         except OSError:
             self.notice.configure(text='Could not save the account label.', text_color='#ffbd93')
 
-    def add_account(self, manual_browser=False):
-        if self.busy or self.pending_login or self.pending_chatgpt_login or self.pending_claude_login or self.pending_grok_login:
+    def add_account(self):
+        if self.busy or self.pending_login:
             return
-        self.work(self.controller.begin_login,
-                  lambda result: self.login_started(result, manual_browser=manual_browser), mutation=True)
+        self.work(self.controller.begin_login, self.login_started, mutation=True)
 
-    def login_started(self, result, manual_browser=False):
+    def login_started(self, result):
         self.login_url, state = result
         self.pending_login = (state, time.monotonic())
-        self.add_button.configure(state='disabled')
-        self.add_chatgpt_button.configure(state='disabled')
+        self.set_provider_login_buttons(True)
         self.notice.configure(text='Choose your Google account in the browser and complete sign-in. It will appear here automatically.', text_color=ACCENT)
         self.login_window = ctk.CTkToplevel(self)
         self.login_window.title('Add account')
@@ -3451,7 +3867,8 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         ctk.CTkLabel(self.login_window, text='Copy the link into MoreLogin or another browser.\nComplete Google sign-in on this computer.', font=('Segoe UI', 12), text_color=MUTED).pack(pady=(0, 8))
         link_controls = ctk.CTkFrame(self.login_window, fg_color='transparent', height=1)
         link_controls.pack(pady=(0, 10))
-        self.button(link_controls, 'Open browser', lambda: webbrowser.open(self.login_url)).pack(side='left', padx=(0, 6))
+        self.google_open_browser_button = self.button(link_controls, 'Open browser', lambda: webbrowser.open(self.login_url))
+        self.google_open_browser_button.pack(side='left', padx=(0, 6))
         self.google_copy_link_button = self.button(link_controls, 'Copy sign-in link', self.copy_google_login_link)
         self.google_copy_link_button.pack(side='left')
         ctk.CTkLabel(self.login_window, text='If localhost is blocked, paste the full callback address here.',
@@ -3473,8 +3890,6 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
                                                   font=('Segoe UI', 11), wraplength=440)
         self.google_callback_status.pack(fill='x', padx=20)
         self.google_callback_busy = False
-        if not manual_browser:
-            webbrowser.open(self.login_url)
         self.after(1800, self.poll_login)
 
     def copy_google_login_link(self):
@@ -3563,8 +3978,7 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
     def finish_login(self, message, success):
         self.pending_login = None
         self.login_url = None
-        self.add_button.configure(state='normal')
-        self.add_chatgpt_button.configure(state='normal')
+        self.set_provider_login_buttons(True)
         if hasattr(self, 'login_window') and self.login_window.winfo_exists():
             self.login_window.destroy()
         self.notice.configure(text=message, text_color=GREEN if success else '#ffbd93')

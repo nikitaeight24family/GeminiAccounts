@@ -21,6 +21,7 @@ class IntegrationTests(unittest.TestCase):
         self.controller.proxy_dir.mkdir()
         (self.controller.proxy_dir / 'client-key.txt').write_text('local-test-key')
         self.client = Integrations(self.controller, self.root / 'home', self.root / 'local')
+        self.client.connection_models=lambda: set(self.client.gemini_model_choices()) | {'gemini-pro-agent','gemini-3-flash','claude-sonnet-4-6'}
         self.routes = []
         def management(path, method='GET', payload=None):
             if path != '/oauth-model-alias':
@@ -52,7 +53,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(config['features']['example'])
         self.assertEqual(config['model_providers']['gemini_accounts']['wire_api'], 'responses')
         provider = config['model_providers']['gemini_accounts']
-        self.assertTrue(provider['requires_openai_auth'])
+        self.assertFalse(provider['requires_openai_auth'])
         self.assertEqual(provider['experimental_bearer_token'], 'local-test-key')
         profile_provider = tomllib.loads(paths['codex'][1].read_text())['model_providers']['gemini_accounts']
         self.assertEqual(profile_provider, provider)
@@ -100,16 +101,13 @@ class IntegrationTests(unittest.TestCase):
         self.controller.preferences.update({'gemini-model': 'gemini-pro-agent', 'claude-model': 'claude-sonnet-4-6'})
         self.client.apply(['claude_cli', 'claude_desktop'])
         env = self.client.read_json(self.client.paths()['claude_cli'][0])['env']
-        self.assertEqual(env['ANTHROPIC_MODEL'], 'claude-sonnet-4-5[1m]')
-        self.assertEqual(env['ANTHROPIC_DEFAULT_OPUS_MODEL'], 'claude-selected')
+        self.assertIn(env['ANTHROPIC_MODEL'], self.client.connection_models())
+        self.assertIn(env['ANTHROPIC_DEFAULT_OPUS_MODEL'], self.client.connection_models())
         models = self.client.read_json(self.client.paths()['claude_desktop'][2])['inferenceModels']
-        self.assertTrue(models[0]['supports1m'])
-        self.assertTrue(models[0]['prefer1m'])
-        self.assertFalse(models[1]['supports1m'])
-        self.assertFalse(models[1]['prefer1m'])
-        self.assertEqual(models[2]['name'], self.client.claude_desktop_route('gemini-3-flash'))
-        self.assertEqual(next(x['name'] for x in self.routes if x['alias'] == models[2]['name']), 'gemini-3-flash')
-        self.assertEqual(env['ANTHROPIC_DEFAULT_HAIKU_MODEL'], 'gemini-3-flash[1m]')
+        gemini = next(m for m in models if m['name'] == self.client.claude_desktop_route('gemini-pro-agent'))
+        claude = next(m for m in models if m['name'] == 'claude-sonnet-4-6')
+        self.assertTrue(gemini['supports1m'])
+        self.assertFalse(claude['supports1m'])
         self.assertEqual(env['CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'], '1')
 
     def test_flash_reasoning_levels_appear_in_client_catalogs(self):
@@ -127,8 +125,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(all(any(route['alias'] == self.client.claude_desktop_route(model) and route['name'] == model
                                 for route in self.routes) for model in choices))
         codex = self.client.read_json(self.client.paths()['codex'][2])['models']
-        self.assertEqual([entry['slug'] for entry in codex], ['gpt-test'] + choices + ['claude-sonnet-4-6'])
-        self.assertEqual([codex[i]['default_reasoning_level'] for i in range(1, 5)],
+        self.assertEqual({entry['slug'] for entry in codex}, self.client.connection_models())
+        self.assertEqual([next(row['default_reasoning_level'] for row in codex if row['slug']==m) for m in choices],
                          ['high', 'medium', 'low', 'medium'])
         config = tomllib.loads(self.client.paths()['codex'][0].read_text())
         self.assertEqual(config['model_catalog_json'], str(self.client.paths()['codex'][2].resolve()))
@@ -144,7 +142,8 @@ class IntegrationTests(unittest.TestCase):
         entries = self.client.read_json(self.client.paths()['claude_desktop'][2])['inferenceModels']
         low = self.client.claude_desktop_route('gemini-3.1-pro-low')
         self.assertIn(low, [entry['name'] for entry in entries])
-        self.assertIn('claude-opus-4-6-thinking', [entry['name'] for entry in entries])
+        self.assertIn('claude-sonnet-4-6', [entry['name'] for entry in entries])
+        self.assertNotIn('claude-opus-4-6-thinking', [entry['name'] for entry in entries])
         self.assertEqual(next(item['name'] for item in self.routes if item['alias'] == low), 'gemini-3.1-pro-low')
         self.assertFalse(any(item['alias'] == 'claude-sonnet-4-6' for item in self.routes))
 
@@ -171,13 +170,11 @@ class IntegrationTests(unittest.TestCase):
         self.client.apply(['claude_desktop'])
         path = self.client.paths()['claude_desktop'][2]
         preset = self.client.read_json(path)
-        preset['inferenceModels'][2]['name'] = 'claude-haiku-4-5'
-        preset['inferenceModels'][2]['labelOverride'] = 'Gemini · 3.1 Pro High'
+        preset['inferenceModels'].append({'name':'gemini-retired','anthropicFamilyTier':'haiku','isFamilyDefault':True})
         self.client.write_json(path, preset)
         self.assertTrue(self.client.repair_desktop_fast_slot())
         changed = self.client.read_json(path)
-        self.assertEqual(changed['inferenceModels'][:2], preset['inferenceModels'][:2])
-        self.assertEqual(changed['inferenceModels'][2]['name'], self.client.claude_desktop_route('gemini-3-flash'))
+        self.assertNotIn('gemini-retired', [m['name'] for m in changed['inferenceModels']])
         self.assertEqual(changed['inferenceGatewayApiKey'], preset['inferenceGatewayApiKey'])
         self.assertFalse(self.client.repair_desktop_fast_slot())
 
@@ -257,6 +254,7 @@ class IntegrationTests(unittest.TestCase):
         with patch.object(connection, 'verify_key'), patch.object(connection, 'model_listed', return_value=True), \
              patch.object(connection, 'probe_gateway', return_value=True):
             self.assertFalse(connection.connect('thk_test-key'))
+        self.client.connection_models=lambda: {'gpt-test',CLIENT_MODEL}
         self.client.apply(['claude_desktop'])
         path = self.client.paths()['claude_desktop'][2]
         self.assertIn(CLIENT_MODEL, [m['name'] for m in self.client.read_json(path)['inferenceModels']])
