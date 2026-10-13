@@ -21,7 +21,12 @@ Omni manages **Google Antigravity / Gemini, ChatGPT, Claude, Grok and TokenHarbo
 
 *Screenshots use demo accounts, sample quotas and synthetic calculator measurements. No personal credentials or actual token-capacity claims are shown.*
 
-## Omni 1.5.0 highlights
+## Omni 1.6.0 highlights
+
+- New Electron desktop interface with separate account-manager windows, incremental account updates and smooth scrolling that does not redraw cards while you scroll.
+- Collapsed account groups show the model currently being used; account status, quota windows, and application connections refresh automatically.
+- Electron Windows installer and portable app are built alongside the compatible legacy installer.
+
 
 - Successful Gemini and other provider responses remain highlighted for 60 seconds after completion, including fast requests missed between queue polls and long responses. Quota waits, failures and background probes do not activate the highlight.
 - ChatGPT imports reject sessions shared with local Codex and duplicate sessions already connected to Omni, preventing old token copies from replacing renewed credentials. Use a separate ChatGPT sign-in for each application.

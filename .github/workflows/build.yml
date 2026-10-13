@@ -13,10 +13,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix electron
+      - run: npm test --prefix electron
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests
       - run: ./build-release.ps1
         shell: pwsh
+      - run: python -m PyInstaller --noconfirm --onefile --name Omni-Backend --distpath dist --workpath build/electron-backend --specpath build native_bridge.py
+      - run: npm run dist --prefix electron -- --win nsis portable
+      - name: Assemble Omni desktop release assets
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem electron/dist -Filter '* Setup *.exe' | Select-Object -First 1
+          $portable = Get-ChildItem electron/dist -Filter 'Omni *.exe' | Where-Object Name -NotLike '*Setup*' | Select-Object -First 1
+          if (-not $installer -or -not $portable) { throw 'Electron installer or portable build is missing' }
+          Copy-Item $installer.FullName dist/Omni-Setup.exe -Force
+          Copy-Item $portable.FullName dist/Omni-Portable.exe -Force
+          $assets = Get-ChildItem dist -File | Where-Object Extension -In @('.exe', '.zip', '.gz') | Sort-Object Name
+          $lines = foreach ($asset in $assets) { $hash = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); "$hash  $($asset.Name)" }
+          [IO.File]::WriteAllLines((Join-Path (Resolve-Path dist) 'SHA256SUMS.txt'), $lines, [Text.UTF8Encoding]::new($false))
       - run: python tests/portable_smoke.py dist/GeminiAccounts-CLI.exe
       - uses: actions/upload-artifact@v4
         with:

@@ -90,7 +90,7 @@ def install(payload, root, shortcuts=True, automatic=False):
         changed = True
     if changed:
         atomic_write(config_path, yaml.safe_dump(config, sort_keys=False).encode())
-    atomic_write(manager / 'installation.json', json.dumps({'version': '1.5.0'}).encode())
+    atomic_write(manager / 'installation.json', json.dumps({'version': '1.6.0'}).encode())
     if shortcuts:
         create_shortcut(manager / 'GeminiAccounts.exe')
     return manager / 'GeminiAccounts.exe'

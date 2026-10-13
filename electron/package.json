@@ -1,12 +1,13 @@
 {
   "name": "omni-desktop",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "description": "Omni desktop manager",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --demo",
+    "test": "node --test tests/managers.test.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
   },
@@ -37,6 +38,7 @@
       "icon": "../app.ico"
     },
     "nsis": {
+      "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
     }
