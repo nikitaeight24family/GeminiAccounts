@@ -38,6 +38,7 @@ function authUrlShape(value) {
 
 let windowRef;
 const managerWindows = new Set();
+let connectionsWindowRef;
 const autoLoginWindows = new Map();
 const recoveryAttempts = new Map();
 let recoveryBusy=false;
@@ -72,7 +73,7 @@ async function repairExpiredAccounts(){
 }
 const accountProviders = new Set(['gemini','openai','claude','grok','tokenharbor']);
 function broadcast(channel, message) {
-  for (const win of [windowRef, ...managerWindows]) if (win && !win.isDestroyed()) win.webContents.send(channel, message);
+  for (const win of [windowRef, connectionsWindowRef, ...managerWindows]) if (win && !win.isDestroyed()) win.webContents.send(channel, message);
 }
 let bridge;
 let quitting=false, bridgeRestarts=0, bridgeRetryTimer;
@@ -184,6 +185,22 @@ function openAccountManager(provider, mode = '') {
   win.on('closed',()=>managerWindows.delete(win));
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   win.webContents.on('will-navigate',event=>event.preventDefault());
+  return true;
+}
+
+function openConnectionsWindow() {
+  if (connectionsWindowRef && !connectionsWindowRef.isDestroyed()) {
+    connectionsWindowRef.show(); connectionsWindowRef.focus(); return true;
+  }
+  connectionsWindowRef = new BrowserWindow({width:980,height:780,minWidth:720,minHeight:560,
+    title:'Omni · Connections', backgroundColor:'#10141d',show:false,autoHideMenuBar:true,
+    webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,sandbox:true,nodeIntegration:false}});
+  connectionsWindowRef.loadFile(path.join(__dirname,'renderer','index.html'));
+  connectionsWindowRef.once('ready-to-show',()=>connectionsWindowRef.show());
+  connectionsWindowRef.webContents.once('did-finish-load',()=>connectionsWindowRef.webContents.executeJavaScript("document.body.classList.add('connections-window');document.getElementById('connections').click();").catch(()=>{}));
+  connectionsWindowRef.on('closed',()=>{connectionsWindowRef=null;});
+  connectionsWindowRef.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+  connectionsWindowRef.webContents.on('will-navigate',event=>event.preventDefault());
   return true;
 }
 
@@ -320,9 +337,10 @@ ipcMain.handle('chatgpt-auto-login', beginChatGPTAutoLogin);
 app.whenReady().then(()=>{if(!demo){const timer=setInterval(repairExpiredAccounts,60000);timer.unref();setTimeout(repairExpiredAccounts,15000);}});
 ipcMain.handle('chatgpt-auto-login-cancel',(_,state)=>cancelChatGPTAutoLogin(state));
 ipcMain.handle('open-account-manager',(_,provider,mode)=>openAccountManager(provider,mode));
+ipcMain.handle('open-connections-window',()=>openConnectionsWindow());
 ipcMain.handle('open-external', (_, url) => {const target=new URL(url);if(target.protocol!=='https:'||!['github.com','accounts.google.com','auth.openai.com','claude.ai','grok.com','x.ai','accounts.x.ai','auth.x.ai'].includes(target.hostname))throw new Error('Unsupported link');return shell.openExternal(target.href);});
 ipcMain.handle('window-pin',()=>{windowRef.setAlwaysOnTop(!windowRef.isAlwaysOnTop());saveWindow();return windowRef.isAlwaysOnTop();});
-ipcMain.handle('window-panel',(_,expanded)=>{const [x,y]=windowRef.getPosition();const [,height]=windowRef.getSize();windowRef.setBounds({x,y,width:expanded?1120:280,height});return expanded;});
+ipcMain.handle('window-panel',(event,expanded)=>{const target=BrowserWindow.fromWebContents(event.sender)||windowRef;const [x,y]=target.getPosition();const [,height]=target.getSize();if(target===windowRef)target.setBounds({x,y,width:expanded?1120:280,height});return expanded;});
 ipcMain.handle('import-auth',async(event)=>{const owner=BrowserWindow.fromWebContents(event.sender)||windowRef;const result=await dialog.showOpenDialog(owner,{title:'Import ChatGPT auth.json',properties:['openFile'],filters:[{name:'JSON',extensions:['json']}]});if(result.canceled)return {cancelled:true};return send('import',{path:result.filePaths[0]});});
 ipcMain.handle('clipboard-copy',(_,text)=>require('electron').clipboard.writeText(String(text)));
 ipcMain.handle('clipboard-paste',()=>require('electron').clipboard.readText());

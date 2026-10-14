@@ -161,6 +161,7 @@ class NativeBridge:
         usage_tokens = max(0, int(live.get('tokens', 0) or 0))
         return {'id': name, 'provider': provider,
                 'label': prefs.get('api-account-labels' if account.get('api') else 'labels', {}).get(name) or account.get('email') or name,
+                'customLabel': prefs.get('api-account-labels' if account.get('api') else 'labels', {}).get(name) or '',
                 'plan': quota.get('subscription') or quota.get('plan_type') or account.get('plan_type') or account.get('subscription') or 'Plan unknown',
                 'privateLabel': private_label,
                 'uptime': duration,
@@ -499,6 +500,15 @@ class NativeBridge:
                 return {}
             priorities = prefs.setdefault('account-priorities', {})
             priorities[name] = max(0, min(999, priorities.get(name, 0)+int(command['delta'])))
+            # The UI preference must also reach the gateway immediately.  The
+            # periodic quota ranking may refine this order later, but a manual
+            # change must affect the very next routed request.
+            try:
+                self.controller.request('/auth-files/fields', 'PATCH', {'name': name, 'priority': priorities[name]})
+                account['priority'] = priorities[name]
+            except (AccountError, OSError, ValueError, TypeError):
+                # Keep the local preference; the next refresh retries the sync.
+                pass
             self.publish(account, provider)
         elif action == 'floor':
             value = int(command['value'])

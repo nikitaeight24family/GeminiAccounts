@@ -233,6 +233,12 @@ class QueueTests(unittest.TestCase):
     def test_other_model_does_not_wait(self):
         response = self.post(model='claude')
         self.assertNotIn(PING, response.read()); self.assertEqual(self.backend.calls, 1)
+
+    def test_codex_auto_review_is_rejected_before_upstream(self):
+        response = self.post(model='codex-auto-review')
+        self.assertEqual(response.status, 404)
+        self.assertIn(b'model_disabled', response.read())
+        self.assertEqual(self.backend.calls, 0)
     def test_empty_completion_retries_without_exposing_empty_message(self):
         self.backend.files = []
         self.backend.empty_attempts = 2
@@ -271,7 +277,29 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(request['system'], 'Original instructions')
     def test_invalid_client_key_never_waits(self):
         response = self.post(key='wrong'); self.assertEqual(response.status, 401)
-        response.read(); self.assertEqual(self.backend.calls, 0)
+
+    def test_gpt_delayed_headers_do_not_send_premature_200_stream(self):
+        self.backend.files = []
+        self.backend.header_delay = .15
+        self.gate.heartbeat_seconds = .04
+        self.client.request('POST', '/v1/responses', json.dumps({'model': 'gpt-test', 'stream': True}), {'x-api-key': 'client'})
+        response = self.client.getresponse()
+        data = response.read()
+        self.assertEqual(response.status, 200)
+        self.assertNotIn(b': keep-alive\n\n', data)
+        self.assertIn(b'event: response.completed', data)
+        self.assertEqual(self.backend.calls, 1)
+
+    def test_gpt_server_error_502_retries_when_stream_not_started(self):
+        self.backend.files = []
+        self.backend.status = 502
+        self.gate.retry_delay = 0
+        self.client.request('POST', '/v1/responses', json.dumps({'model': 'gpt-test', 'stream': True}), {'x-api-key': 'client'})
+        response = self.client.getresponse()
+        self.assertEqual(response.status, 502)
+        response.read()
+        # Should attempt up to 3 retries (1 initial + 3 retries = 4 calls)
+        self.assertGreaterEqual(self.backend.calls, 4)
     def test_valid_bearer_with_stale_api_key_is_accepted(self):
         self.backend.files = []
         self.client.request('POST', '/v1/messages', json.dumps({'model': 'alias', 'stream': True}),

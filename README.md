@@ -2,19 +2,19 @@
 <h1 align="center">Omni</h1>
 <p align="center">AI accounts, quotas, models and app connections in one place.</p>
 <p align="center">
-  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1"><img src="https://img.shields.io/github/v/release/nikitaeight24family/Omni?label=release&color=739aff" alt="Release 1.6.1"></a>
+  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.2"><img src="https://img.shields.io/github/v/release/nikitaeight24family/Omni?label=release&color=739aff" alt="Release 1.6.2"></a>
   <a href="https://github.com/nikitaeight24family/Omni/actions/workflows/build.yml"><img src="https://github.com/nikitaeight24family/Omni/actions/workflows/build.yml/badge.svg" alt="Build and tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-66d7b0" alt="MIT license"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/nikitaeight24family/Omni/releases/download/v1.6.1/Omni-Setup.exe"><b>Download Omni 1.6.1 for Windows</b></a> ·
-  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1">Release files</a> ·
+  <a href="https://github.com/nikitaeight24family/Omni/releases/download/v1.6.2/Omni-Setup.exe"><b>Download Omni 1.6.2 for Windows</b></a> ·
+  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.2">Release files</a> ·
   <a href="CLI.md">CLI guide</a>
 </p>
 
 Omni connects Google Antigravity/Gemini, ChatGPT, Claude, Grok and TokenHarbor accounts, displays quotas and routes requests through a local gateway. Codex, Claude Code, Claude Desktop and the CLI receive the current model catalog from the connected accounts.
 
-Version **1.6.1** is the Electron desktop build for Windows. The Python application and CLI remain in the repository for macOS, Linux, Windows CLI use and compatibility with older installations.
+Version **1.6.2** is the Electron desktop build for Windows. The Python application and CLI remain in the repository for macOS, Linux, Windows CLI use and compatibility with older installations.
 
 ## Omni windows
 
@@ -32,12 +32,14 @@ The separate automatic sign-in window shows one row per account and connected ar
 
 Screenshots use demonstration data. Real passwords, 2FA secrets, tokens and request history are never included in the repository.
 
-## What's new in 1.6.1
+## What's new in 1.6.2
 
-- Separate Electron automatic sign-in window for ChatGPT.
-- The automatic sign-in table includes only identities with saved automatic sign-in data.
-- One row per account with separate Free, EDU and K12 area badges.
-- Encrypted sign-in data can be viewed, edited or deleted from the manager.
+- Fixed premature HTTP 200 stream start in the gateway queue that caused "model at capacity" and reconnect loops in Codex.
+- Added automatic gateway retries on HTTP 502/503/504 for GPT models, gracefully failing over to available accounts.
+- Balanced ChatGPT account pool priorities to prioritize high-capacity rolling 5h quota accounts over depleted credentials.
+- Fixed account plan extraction from ID tokens and corrected URL query parameter encoding for accounts with plus signs.
+- Separate dedicated Connections window in Electron desktop manager.
+- Rejection of internal approval review models from client discovery catalog.
 - Bulk paste and drag-and-drop for multiple `.txt` files.
 - Problem accounts are excluded from the global account count.
 - Selected workspaces are remembered and quota availability is verified after sign-in.

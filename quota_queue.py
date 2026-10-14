@@ -18,6 +18,7 @@ from gateway_diagnostics import Diagnostics
 from request_texts import RequestTextStore
 from provider_errors import failure_reason, provider_error_metadata
 from chatgpt_routing import accounts_for_model
+from model_policy import is_disabled_model
 
 PING = b'event: ping\ndata: {"type":"ping"}\n\n'
 HOP = {'connection', 'transfer-encoding', 'content-length', 'keep-alive',
@@ -144,7 +145,7 @@ class QueueServer(ThreadingHTTPServer):
         conn = http.client.HTTPConnection(*self.upstream, timeout=5)
         try:
             for account in accounts:
-                plan = str(account.get('plan_type') or '').strip().lower()
+                plan = str(account.get('plan_type') or (account.get('id_token') or {}).get('plan_type') or (account.get('quota') or {}).get('plan_type') or '').strip().lower()
                 if account.get('provider', account.get('type')) != 'codex' or not plan.startswith('free'):
                     continue
                 query = '/v0/management/auth-files/models?' + urllib.parse.urlencode({'name': account.get('name', '')})
@@ -252,9 +253,7 @@ class Handler(BaseHTTPRequestHandler):
                     return value
                 except queue.Empty:
                     self.trace('upstream_pending', pending_seconds=round(time.monotonic() - pending_since, 3))
-                    if stream:
-                        if not self.response_started:
-                            self.start_stream(True)
+                    if stream and self.response_started:
                         self.chunk(self.keepalive)
         except Exception:
             cancelled.set()
@@ -354,6 +353,12 @@ class Handler(BaseHTTPRequestHandler):
                 model = normalized
                 request['model'] = model
                 body = json.dumps(request, ensure_ascii=False).encode()
+            if is_disabled_model(model):
+                self.trace('model_disabled', model=model, requested_model=requested_model)
+                self.json_reply(404, {'error': {'type': 'invalid_request_error',
+                    'code': 'model_disabled',
+                    'message': 'This internal Codex review model is disabled in Omni.'}})
+                return
         except (ValueError, KeyError, TypeError):
             self.forward(body)
             return
@@ -424,11 +429,20 @@ class Handler(BaseHTTPRequestHandler):
                 started = self.response_started
                 self.trace('upstream_headers', attempt=attempt, status=response.status)
                 try:
-                    if response.status in (429, 403, 503):
+                    if response.status in (429, 403, 502, 503, 504):
                         error = response.read()
                         self.trace('provider_rejected', status=response.status, reason=failure_reason(response.status, error) or 'Provider rejected request', **provider_error_metadata(error))
                         routed_model = self.server.aliases.get(model, model)
-                        if 'tokenharbor' in routed_model or (response.status != 429 and routed_model.startswith('gpt-')):
+                        if 'tokenharbor' in routed_model:
+                            self.deliver(response, error, started, stream)
+                            return
+                        if routed_model.startswith('gpt-') and response.status in (502, 503, 504) and not started and attempt <= 3:
+                            self.trace('provider_retry_scheduled', attempt=attempt, status=response.status)
+                            delay = getattr(self.server, 'retry_delay', min(0.4 * attempt, 1.5))
+                            if delay > 0:
+                                time.sleep(delay)
+                            continue
+                        if response.status != 429 and routed_model.startswith('gpt-'):
                             self.deliver(response, error, started, stream)
                             return
                         try:

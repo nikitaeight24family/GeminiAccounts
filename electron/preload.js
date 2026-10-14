@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('omni', {
   chatgptAutoLogin: credentials => ipcRenderer.invoke('chatgpt-auto-login', credentials),
   chatgptAutoLoginCancel: state => ipcRenderer.invoke('chatgpt-auto-login-cancel', state),
   accountManager: (provider, mode) => ipcRenderer.invoke('open-account-manager', provider, mode),
+  connectionsWindow: () => ipcRenderer.invoke('open-connections-window'),
   open: url => ipcRenderer.invoke('open-external', url),
   pin: () => ipcRenderer.invoke('window-pin'),
   panel: expanded => ipcRenderer.invoke('window-panel', expanded),

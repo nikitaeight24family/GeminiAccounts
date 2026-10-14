@@ -2,8 +2,19 @@
 import re
 
 
+# Codex Auto Review is an internal approval reviewer, not a user-selectable
+# inference model.  Keeping it out of Omni's catalog prevents the gateway from
+# routing review traffic through the account pool.
+DISABLED_MODELS = frozenset({'codex-auto-review'})
+
+
+def is_disabled_model(model):
+    return isinstance(model, str) and model.strip().lower() in DISABLED_MODELS
+
+
 def text_models(models):
     return {m for m in models if isinstance(m, str) and m and
+            not is_disabled_model(m) and
             not any(word in m.lower() for word in ('image', 'embedding', 'audio', 'video'))}
 
 

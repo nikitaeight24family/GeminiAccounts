@@ -362,27 +362,44 @@ class Integrations:
         else:
             template = models[0]
         from model_names import model_name, reasoning_level
+        from model_policy import is_disabled_model
+        cache_models = {m['slug']: copy.deepcopy(m)
+                        for m in self.read_json(cache).get('models', [])
+                        if isinstance(m, dict) and isinstance(m.get('slug'), str)}
+        for slug in list(cache_models.keys()):
+            if is_disabled_model(slug):
+                cache_models.pop(slug, None)
+
+        for i, m in enumerate(models):
+            slug = m.get('slug')
+            if slug in cache_models:
+                models[i] = copy.deepcopy(cache_models[slug])
+
         existing = {entry.get('slug') for entry in models}
         for model in choices:
-            if model in existing:
+            if model in existing or is_disabled_model(model):
                 continue
-            entry = copy.deepcopy(template)
-            family = 'Gemini ' if model.startswith('gemini-') else 'ChatGPT ' if model.startswith('gpt-') else 'Claude '
-            entry.update(slug=model, display_name=family + model_name(model, {}),
-                         description='Antigravity via Omni', priority=50,
-                         model_messages={}, base_instructions='You are a helpful coding assistant.',
-                         context_window=1048576 if model.startswith('gemini-') else 200000,
-                         max_context_window=1048576 if model.startswith('gemini-') else 200000,
-                         additional_speed_tiers=[], service_tiers=[], availability_nux=None,
-                         upgrade=None)
-            if model.startswith('gpt-'):
-                entry['default_reasoning_level'] = template.get('default_reasoning_level', 'medium')
-                entry['supported_reasoning_levels'] = copy.deepcopy(template.get('supported_reasoning_levels', []))
+            if model in cache_models:
+                entry = copy.deepcopy(cache_models[model])
             else:
-                effort = reasoning_level(model)
-                entry['default_reasoning_level'] = effort
-                entry['supported_reasoning_levels'] = [{'effort': effort, 'description': effort.title() + ' reasoning'}]
+                entry = copy.deepcopy(template)
+                family = 'Gemini ' if model.startswith('gemini-') else 'ChatGPT ' if model.startswith('gpt-') else 'Claude '
+                entry.update(slug=model, display_name=family + model_name(model, {}),
+                             description='Antigravity via Omni', priority=50,
+                             model_messages={}, base_instructions='You are a helpful coding assistant.',
+                             context_window=1048576 if model.startswith('gemini-') else 200000,
+                             max_context_window=1048576 if model.startswith('gemini-') else 200000,
+                             additional_speed_tiers=[], service_tiers=[], availability_nux=None,
+                             upgrade=None)
+                if model.startswith('gpt-'):
+                    entry['default_reasoning_level'] = template.get('default_reasoning_level', 'medium')
+                    entry['supported_reasoning_levels'] = copy.deepcopy(template.get('supported_reasoning_levels', []))
+                else:
+                    effort = reasoning_level(model)
+                    entry['default_reasoning_level'] = effort
+                    entry['supported_reasoning_levels'] = [{'effort': effort, 'description': effort.title() + ' reasoning'}]
             models.append(entry)
+        models.sort(key=lambda m: m.get('priority', 50))
         if not target.exists() or self.read_json(target) != catalog:
             self.write_json(target, catalog)
         return True
@@ -438,7 +455,14 @@ class Integrations:
         else:
             gemini = sorted(m for m in models if m.startswith('gemini-') and m != 'gemini-selected')
             self.configure_desktop_routes(gemini)
-            desired = {self.claude_desktop_route(m) if m in gemini else m: m for m in models}
+            # Claude Desktop validates every inferenceModels entry as an
+            # Anthropic route.  The shared gateway catalog also contains
+            # Codex/OpenAI and internal routes; those belong in Codex or the
+            # gateway, never in Claude's picker.  Keep only Gemini routes
+            # (translated to Anthropic-shaped aliases) and real claude-* IDs.
+            claude_models = {m for m in models if m.startswith(('gemini-', 'claude-'))}
+            desired = {self.claude_desktop_route(m) if m in gemini else m: m
+                       for m in claude_models}
             existing = {m['name']: m for m in doc.get('inferenceModels', []) if isinstance(m, dict) and 'name' in m}
             updated['inferenceModels'] = [existing.get(route) or {
                 'name': route, 'labelOverride': model_name(model, {}),

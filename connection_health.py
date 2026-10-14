@@ -307,8 +307,21 @@ class ConnectionHealth:
             return self.maintain()
 
     def restart(self, client, confirmed=False):
-        if client not in CLIENTS or confirmed is not True:
+        if client != 'all' and client not in CLIENTS or confirmed is not True:
             raise AccountError('Restart requires explicit confirmation.')
+        if client == 'all':
+            # A catalog sync can mark several desktop clients at once.  A
+            # single approved restart action applies the same generation to
+            # every connected desktop client; CLI is intentionally excluded
+            # because its running terminal cannot be safely replaced.
+            targets = [name for name in ('codex', 'claude_desktop')
+                       if self.owned(name) and self.state['restart'].get(name)]
+            if targets:
+                self.integrations.restart_desktop(targets)
+                for name in targets:
+                    self.state['restart'].pop(name, None)
+                self.save()
+            return {'restartRequested': bool(targets), 'sessionVerified': bool(targets), 'clients': targets}
         if client == 'claude_cli':
             return {'manual': True, 'message': 'Start a new Claude Code session after saving your current work.'}
         if not self.owned(client):

@@ -7,7 +7,8 @@ the UI and request guard independent of any particular model name.
 
 def normalized_plan(account):
     quota = account.get('quota') or {}
-    value = quota.get('plan_type') or account.get('plan_type') or ''
+    id_token = account.get('id_token') or {}
+    value = quota.get('plan_type') or account.get('plan_type') or id_token.get('plan_type') or ''
     return str(value).strip().lower().replace('_', ' ').replace('-', ' ')
 
 

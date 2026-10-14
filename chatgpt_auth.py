@@ -220,11 +220,10 @@ class ChatGPTAuth:
                                                    self.quota_limit_groups(quota))):
                 unmetered.add(account['name'])
         rows.sort(key=lambda row: 0 if row['name'] in unmetered else 1)
-        # Free subscriptions are the first pool for GPT models they advertise.
-        # The gateway's per-account model catalog prevents this ordering from
-        # sending an unsupported model to a free credential.
+        # Paid accounts with rolling 5h quota take precedence over fixed monthly free pools,
+        # ensuring fast response times and preventing single-account overload on heavy GPT models.
         free_names = {account['name'] for account in accounts if is_free_account(account)}
-        rows.sort(key=lambda row: 0 if row['name'] in free_names else 1)
+        rows.sort(key=lambda row: 1 if row['name'] in free_names else 0)
         for index, row in enumerate(rows):
             row['priority'] = len(rows) - index
         fresh = {a['name']: a for a in self.accounts() if not a.get('disabled')}

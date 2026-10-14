@@ -8,6 +8,7 @@ import yaml
 from backend import Controller, AccountError
 from integrations import Integrations
 from model_names import model_name
+from model_policy import text_models, is_disabled_model
 
 
 class ModelSelectionTests(unittest.TestCase):
@@ -113,6 +114,10 @@ class ModelSelectionTests(unittest.TestCase):
         client.apply(['codex'])
         import tomllib
         self.assertEqual(tomllib.loads(client.paths()['codex'][0].read_text())['model'], 'gemini-pro-agent')
+
+    def test_codex_auto_review_is_not_an_omni_model(self):
+        self.assertTrue(is_disabled_model('codex-auto-review'))
+        self.assertNotIn('codex-auto-review', text_models({'codex-auto-review', 'gpt-6.1-sol'}))
 
 
 if __name__ == '__main__': unittest.main()
