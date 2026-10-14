@@ -294,6 +294,7 @@ class QueueTests(unittest.TestCase):
         self.backend.files = []
         self.backend.status = 502
         self.gate.retry_delay = 0
+        self.gate.max_gpt_retries = 4
         self.client.request('POST', '/v1/responses', json.dumps({'model': 'gpt-test', 'stream': True}), {'x-api-key': 'client'})
         response = self.client.getresponse()
         self.assertEqual(response.status, 502)

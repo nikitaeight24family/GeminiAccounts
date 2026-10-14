@@ -341,3 +341,16 @@ class NativeBridgeTests(unittest.TestCase):
         self.bridge.poll_activity(now+61)
         self.assertFalse(self.messages[-1]['account']['active'])
         self.assertEqual(self.messages[-1]['account']['model'],'')
+
+    def test_running_job_immediately_activates_account_and_displays_model(self):
+        account = {'name': 'one', 'status': 'active', 'auth_index': 'idx-1'}
+        self.bridge.accounts['one'] = (account, 'openai')
+        self.controller.request = Mock(side_effect=lambda path: {'files': [{'name': 'one', 'auth_index': 'idx-1'}]} if path == '/auth-files' else [])
+        self.controller.model_aliases = Mock(return_value={})
+        self.controller.quota_wait_status = Mock(return_value={'jobs': [{'state': 'running', 'model': 'gpt-6.1-sol', 'auth_index': 'idx-1'}]})
+        self.bridge.activity.ingest = Mock()
+        self.bridge.poll_activity(100)
+        dto = self.messages[-1]['account']
+        self.assertTrue(dto['active'])
+        self.assertEqual(dto['model'], 'gpt-6.1-sol')
+        self.assertEqual(dto['activity'], 'running')

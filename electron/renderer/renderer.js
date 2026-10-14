@@ -12,6 +12,21 @@ translations['Connection needs attention']='Подключение требуе�
 Object.assign(translations,{'Codex settings':'Настройки Codex','Omni provider profile':'Профиль провайдера Omni','Omni model catalog':'Каталог моделей Omni','Claude Desktop settings':'Настройки Claude Desktop','Active profile index':'Индекс активного профиля','Omni model profile':'Профиль моделей Omni','Claude Code CLI settings':'Настройки Claude Code CLI','Local gateway address':'Адрес локального шлюза','Gateway access key':'Ключ доступа к шлюзу','OpenAI-compatible Responses protocol':'Протокол Responses для OpenAI','OpenAI sign-in bypass':'Вход OpenAI не требуется','Automatic model discovery':'Автоматическое обнаружение моделей','Gateway provider':'Провайдер шлюза','Available model list':'Список доступных моделей','Present; not managed by Omni':'Файл есть, но Omni им не управляет.'});
 const t=value=>state.language==='ru'?(translations[value]||value):value;
 const aliases=new Map();
+function formatModel(name){
+  if(!name) return '';
+  const s = String(name).trim();
+  if(s==='gemini-3.8-flash-high' || s==='3.8 Flash High' || s==='3.8 Flash') return '3.8 флеш';
+  if(s==='gemini-3.8-flash-medium' || s==='3.8 Flash Med') return '3.8 флеш мед';
+  if(s==='gemini-3.8-flash-low' || s==='3.8 Flash Low') return '3.8 флеш лоу';
+  if(s==='gemini-3.5-flash-lite' || s==='3.5 Flash Lite') return '3.5 флеш лайт';
+  if(s==='gemini-3.5-flash-low' || s==='3.5 Flash Med' || s==='3.5 Flash Medium') return '3.5 флеш мед';
+  if(s==='gemini-3.5-flash-extra-low' || s==='3.5 Flash Low') return '3.5 флеш лоу';
+  if(s==='gemini-3-flash' || s==='3 Flash') return '3 флеш';
+  if(s.startsWith('gemini-')) {
+    return s.slice(7).split('-').map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ');
+  }
+  return s;
+}
 function accountName(a){return a.customLabel|| (state.hidden?(a.privateLabel||a.label):a.label);}
 function icon(kind){const shapes={pause:'<path d="M7 5v14M17 5v14" stroke-width="4"/>',play:'<path d="m8 5 11 7-11 7Z" fill="currentColor" stroke="none"/>',up:'<path d="m7 10 5-5 5 5M12 5v14"/>',down:'<path d="m7 14 5 5 5-5M12 5V5"/>',remove:'<path d="m7 7 10 10M7 17 17 7"/>',reset:'<path d="M4 10a8 8 0 1 1 2 9M4 4v6h6"/>',settings:'<path d="M9.6 2.5h4.8l.5 2.7 1.4.8 2.6-.9 2.4 4.2-2.1 1.8v1.8l2.1 1.8-2.4 4.2-2.6-.9-1.4.8-.5 2.7H9.6l-.5-2.7-1.4-.8-2.6.9-2.4-4.2 2.1-1.8v-1.8L2.7 9.1l2.4-4.2 2.6.9 1.4-.8Z"/><circle cx="12" cy="12" r="4"/>',pin:'<path d="m9 3 9 3-3 5 1 5-5-2-5 3 2-6ZM8 14l-4 7"/>',eye:'<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',closed:'<path d="M3 10c2 7 16 7 18 0M6 14l-2 3m8-1v4m6-6 2 3"/>'};return `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${shapes[kind]||shapes.eye}</svg>`;}
 $('settings').innerHTML=icon('settings');
@@ -80,7 +95,7 @@ function render(){
     let currentModel=collapsed?rows.find(a=>a.active&&a.model)?.model:'';
     let modelNode=header.querySelector('.header-model');
     if(currentModel&&!modelNode){modelNode=document.createElement('span');modelNode.className='header-model';modelNode.dataset.key='current-model';header.insertBefore(modelNode,header.querySelector('.dots'));}
-    if(modelNode){modelNode.hidden=!currentModel||!collapsed;if(currentModel){setText(modelNode,currentModel);modelNode.title=t('Models currently used')+': '+currentModel;}}
+    if(modelNode){modelNode.hidden=!currentModel||!collapsed;if(currentModel){setText(modelNode,formatModel(currentModel));modelNode.title=t('Models currently used')+': '+currentModel;}}
     const families=provider==='gemini'?['gemini','claude']:[provider];
     const limitLabels=[...new Set(rows.flatMap(a=>(a.windows||[]).map(w=>w.label)).filter(Boolean))].sort((a,b)=>windowRank(a)-windowRank(b));
     patchMarkup(header.querySelector('.dots'),families.map(family=>limitLabels.filter(label=>rows.some(a=>(a.windows||[]).some(w=>w.label===label&&(provider!=='gemini'||w.family===family)))).map(label=>{const xs=rows.filter(a=>!a.disabled&&a.severity!=='error').flatMap(a=>(a.windows||[]).filter(w=>w.label===label&&(provider!=='gemini'||w.family===family)).map(w=>w.remaining)).filter(Number.isFinite);return dot(xs.length?xs.reduce((x,y)=>x+y,0)/xs.length/100:null,label);}).join('')).join(''));
@@ -117,7 +132,8 @@ function renderSummary(){
     const title=provider==='gemini'?'Google Gemini':provider==='openai'?'OpenAI':names[provider]+(provider==='tokenharbor'?` · ${accounts.length}pcs`:'');
     const body=labels.map((label,i)=>{const value=averages[i],windows=accounts.flatMap(a=>(a.windows||[]).filter(w=>w.label===label&&(provider!=='gemini'||w.family==='gemini'))).filter(w=>w.reset).sort((a,b)=>a.reset-b.reset);let position=(value||0)*100;const markers=windows.slice(0,8).map(w=>{const left=position;position+=((100-(value||0)*100)/Math.max(1,windows.length));return `<span class="forecast" data-position="${left}" title="${countdown(w.reset)}">${countdown(w.reset)}</span>`;}).join('');return `<div class="summary-line" style="--quota-color:${quotaColor(value==null?null:value*100)}"><div class="summary-label"><span>${provider==='gemini'?'Gemini · ':''}${label} · pooled remaining</span><b>${value==null?'—':(value*100).toFixed(1).replace('.',',')+'%'}</b></div><div class="summary-bar"><i style="width:${(value||0)*100}%"></i></div><div class="forecast-row">${markers}</div></div>`;}).join('');
     const content=provider==='tokenharbor'?`<div class="harbor-cards">${accounts.sort(accountSort).map(a=>{const card=document.createElement('article');updateCard(card,a);card.dataset.key=a.id;return card.outerHTML;}).join('')||`<div class="empty-list">${t('No accounts added')}</div>`}</div>`:body;
-    return `<section class="summary-group" data-key="${provider}"><div class="summary-header"><button class="summary-toggle" data-summary="${provider}">${collapsed?'▸':'▾'} &nbsp; ${title}</button>${collapsed?`<span class="dots">${labels.map((label,i)=>dot(averages[i],label)).join('')}</span>`:''}<button class="summary-add" data-add="${provider}" title="${t('Add account')}"><img src="assets/add.png" alt=""></button></div><div class="summary-body" ${collapsed?'hidden':''}>${content}</div></section>`;
+    const groupActive=collapsed&&accounts.some(a=>a.active);
+    return `<section class="summary-group" data-key="${provider}"><div class="summary-header ${groupActive?'active':''}"><button class="summary-toggle" data-summary="${provider}">${collapsed?'▸':'▾'} &nbsp; ${title}</button>${collapsed?`<span class="dots">${labels.map((label,i)=>dot(averages[i],label)).join('')}</span>`:''}<button class="summary-add" data-add="${provider}" title="${t('Add account')}"><img src="assets/add.png" alt=""></button></div><div class="summary-body" ${collapsed?'hidden':''}>${content}</div></section>`;
   }).join('');
   if(patchMarkup(box,html))requestAnimationFrame(layoutForecasts);
 }

@@ -500,15 +500,12 @@ class NativeBridge:
                 return {}
             priorities = prefs.setdefault('account-priorities', {})
             priorities[name] = max(0, min(999, priorities.get(name, 0)+int(command['delta'])))
-            # The UI preference must also reach the gateway immediately.  The
-            # periodic quota ranking may refine this order later, but a manual
-            # change must affect the very next routed request.
-            try:
-                self.controller.request('/auth-files/fields', 'PATCH', {'name': name, 'priority': priorities[name]})
-                account['priority'] = priorities[name]
-            except (AccountError, OSError, ValueError, TypeError):
-                # Keep the local preference; the next refresh retries the sync.
-                pass
+            self.controller.save()
+            if provider == 'openai':
+                try:
+                    self.clients['openai'].apply_reset_priority(self.clients['openai'].accounts())
+                except Exception:
+                    pass
             self.publish(account, provider)
         elif action == 'floor':
             value = int(command['value'])
@@ -677,6 +674,33 @@ class NativeBridge:
             for record in records:
                 record['upstream_model'] = aliases.get(record.get('model'), record.get('model'))
             self.activity.ingest(records, [a for a in files if a.get('auth_index')])
+            queue_status = self.controller.quota_wait_status()
+            running_jobs = [j for j in queue_status.get('jobs', []) if j.get('state') == 'running']
+            running_accounts = {}
+            for job in running_jobs:
+                job_model = job.get('upstream_model') or aliases.get(job.get('model'), job.get('model', ''))
+                auth_idx = job.get('auth_index')
+                matched_name = None
+                if auth_idx:
+                    matched_name = next((a['name'] for a in files if a.get('auth_index') == auth_idx), None)
+                if not matched_name:
+                    latest_acc = next((event.get('name') for event in self.activity.state.get('latest', {}).values()
+                                       if (event.get('upstream_model') == job_model or event.get('model') == job_model)), None)
+                    if latest_acc and latest_acc in self.accounts and not self.accounts[latest_acc][0].get('disabled'):
+                        matched_name = latest_acc
+                    else:
+                        family = 'gemini' if job_model.startswith('gemini-') else 'openai' if job_model.startswith('gpt-') else 'claude' if job_model.startswith('claude-') else 'grok' if job_model.startswith('grok-') else 'tokenharbor'
+                        candidates = [a for a in files if not a.get('disabled') and a.get('status') == 'active' and (
+                            (family == 'gemini' and a.get('provider') == 'antigravity') or
+                            (family == 'openai' and a.get('provider') == 'codex') or
+                            (family == 'claude' and a.get('provider') in ('claude', 'anthropic', 'antigravity')) or
+                            (family == 'grok' and a.get('provider') == 'xai')
+                        )]
+                        if candidates:
+                            candidates.sort(key=lambda a: -(a.get('priority') or 0))
+                            matched_name = candidates[0]['name']
+                if matched_name:
+                    running_accounts[matched_name] = job_model
             latest = {}
             for event in self.activity.state.get('latest', {}).values():
                 name = event.get('name')
@@ -690,13 +714,15 @@ class NativeBridge:
                         age = now - datetime.fromisoformat(event['at'].replace('Z', '+00:00')).timestamp()
                     except (KeyError, ValueError, TypeError):
                         age = 9999
-                    model = event.get('upstream_model') or event.get('model') or ''
-                    recent = 0 <= age < 60 and not event.get('failed') and not event.get('probe') and not account.get('disabled')
-                    # This is confirmed recent-account attribution, not an assertion
-                    # that a different request with the same model uses this account.
-                    state = 'recent' if recent else 'idle'
+                    if name in running_accounts:
+                        state = 'running'
+                        model = running_accounts[name]
+                    else:
+                        model = event.get('upstream_model') or event.get('model') or ''
+                        recent = 0 <= age < 60 and not event.get('failed') and not event.get('probe') and not account.get('disabled')
+                        state = 'recent' if recent else 'idle'
                     stats = self.activity.state.get('stats', {}).get(name, {})
-                    data = {'state': state, 'model': model if recent else '',
+                    data = {'state': state, 'model': model if (state in ('running', 'recent')) else '',
                             'responses': stats.get('success', account.get('success', 0)),
                             'tokens': max(0, int(stats.get('tokens', 0) or 0))}
                     if self.live_activity.get(name) != data:
@@ -709,7 +735,7 @@ class NativeBridge:
         if self.activity_thread is not None:
             return
         def monitor():
-            while not self.stop_event.wait(3):
+            while not self.stop_event.wait(0.5):
                 if not self.controller.key:
                     continue
                 try:

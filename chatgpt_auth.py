@@ -220,10 +220,33 @@ class ChatGPTAuth:
                                                    self.quota_limit_groups(quota))):
                 unmetered.add(account['name'])
         rows.sort(key=lambda row: 0 if row['name'] in unmetered else 1)
-        # Paid accounts with rolling 5h quota take precedence over fixed monthly free pools,
-        # ensuring fast response times and preventing single-account overload on heavy GPT models.
-        free_names = {account['name'] for account in accounts if is_free_account(account)}
-        rows.sort(key=lambda row: 1 if row['name'] in free_names else 0)
+        account_by_name = {a['name']: a for a in accounts}
+        def account_rank_key(row):
+            name = row['name']
+            account = account_by_name.get(name, {})
+            tier = row.get('tier', 2)
+            quota = account.get('quota') or {}
+            windows = {w.get('label'): w.get('remaining') for w in quota.get('windows', [])}
+            is_cooling = bool(account.get('cooldowns'))
+            is_exhausted = (tier >= 3 or
+                            account.get('status') == 'error' or
+                            account.get('unavailable') or
+                            quota.get('limit_reached') is True or
+                            quota.get('allowed') is False or
+                            any(r is not None and r <= 0 for r in windows.values()) or
+                            is_cooling)
+            is_free = is_free_account(account)
+            # Pool tiers:
+            # 0: Available paid accounts (tier 0-1, K12 / Team / Plus with quota > 0)
+            # 1: Available free accounts (tier 0-1)
+            # 2: Unknown / stale quota accounts
+            # 3: Exhausted / cooling accounts (MUST BE AT THE VERY BOTTOM!)
+            pool_tier = 3 if is_exhausted else (2 if tier == 2 else (1 if is_free else 0))
+            user_p = self.controller.preferences.get('account-priorities', {}).get(name, 0)
+            remaining_quota = float(row.get('remaining') or 0)
+            return (pool_tier, -user_p, -remaining_quota, name)
+
+        rows.sort(key=account_rank_key)
         for index, row in enumerate(rows):
             row['priority'] = len(rows) - index
         fresh = {a['name']: a for a in self.accounts() if not a.get('disabled')}

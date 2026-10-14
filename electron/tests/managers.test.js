@@ -388,6 +388,24 @@ test('quota window ordering everywhere: 5h above 1w, monthly after weekly, multi
  w.render();
  assert.ok(!openaiHeader.classList.contains('active'),'Collapsed group header with no active accounts must not be active');
 
+ // Collapsed group with active account must highlight header and summary
+ const firstAccount=[...w.state.accounts.values()].find(a=>a.provider==='openai');
+ if(firstAccount){
+   firstAccount.active=true;
+   firstAccount.model='gpt-6.1-sol';
+   w.render();
+   assert.ok(openaiHeader.classList.contains('active'),'Collapsed group header with active account must be active');
+   const modelSpan=openaiHeader.querySelector('.header-model');
+   assert.ok(modelSpan&&!modelSpan.hidden,'Collapsed group header must show active model');
+   assert.equal(modelSpan.textContent,'gpt-6.1-sol');
+
+   w.state.summaryCollapsed={openai:true};
+   w.renderSummary();
+   const summaryHeader=w.document.querySelector('.summary-group[data-key="openai"] .summary-header');
+   assert.ok(summaryHeader.classList.contains('active'),'Collapsed summary header with active account must be active');
+   firstAccount.active=false;
+ }
+
  // Verify collapsed summaries: dots in summary-header must be ordered 5h before 1w before 1mo
  w.state.summaryCollapsed={openai:true};
  w.renderSummary();

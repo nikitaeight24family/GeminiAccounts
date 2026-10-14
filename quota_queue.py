@@ -424,9 +424,25 @@ class Handler(BaseHTTPRequestHandler):
                         return
                 attempt += 1
                 self.trace('upstream_started', attempt=attempt, model=model, upstream_model=self.server.aliases.get(model, model))
-                conn, response = self.await_upstream(lambda: self.open_upstream(body), stream,
-                                                     cleanup=lambda result: result[0].close())
+                try:
+                    conn, response = self.await_upstream(lambda: self.open_upstream(body), stream,
+                                                         cleanup=lambda result: result[0].close())
+                except (OSError, http.client.HTTPException) as upstream_exc:
+                    routed_model = self.server.aliases.get(model, model)
+                    if routed_model.startswith('gpt-') and not started and attempt < getattr(self.server, 'max_gpt_retries', 10):
+                        self.trace('upstream_open_failed_retry', attempt=attempt, error=str(upstream_exc))
+                        delay = getattr(self.server, 'retry_delay', min(0.3 * attempt, 1.5))
+                        if delay > 0:
+                            time.sleep(delay)
+                        continue
+                    raise
                 started = self.response_started
+                trace_id = response.getheader('X-Cpa-Trace-Id') or ''
+                parts = trace_id.split('-')
+                if len(parts) >= 2 and parts[1]:
+                    with self.server.lock:
+                        if ident in self.server.jobs:
+                            self.server.jobs[ident]['auth_index'] = parts[1]
                 self.trace('upstream_headers', attempt=attempt, status=response.status)
                 try:
                     if response.status in (429, 403, 502, 503, 504):
@@ -436,9 +452,14 @@ class Handler(BaseHTTPRequestHandler):
                         if 'tokenharbor' in routed_model:
                             self.deliver(response, error, started, stream)
                             return
-                        if routed_model.startswith('gpt-') and response.status in (502, 503, 504) and not started and attempt <= 3:
-                            self.trace('provider_retry_scheduled', attempt=attempt, status=response.status)
-                            delay = getattr(self.server, 'retry_delay', min(0.4 * attempt, 1.5))
+                        # For GPT: retry across accounts silently without exposing transient errors to client.
+                        if routed_model.startswith('gpt-') and response.status in (502, 503, 504) and not started and attempt < getattr(self.server, 'max_gpt_retries', 10):
+                            rate_retries += 1
+                            delay = getattr(self.server, 'retry_delay', None)
+                            if delay is None:
+                                delay = min(getattr(self.server, 'retry_max_seconds', 10),
+                                            getattr(self.server, 'retry_base_seconds', 0.5) * (1.3 ** min(rate_retries - 1, 4)))
+                            self.trace('gpt_swallowed_error_retry', attempt=attempt, status=response.status, retry_in=round(delay, 2))
                             if delay > 0:
                                 time.sleep(delay)
                             continue
