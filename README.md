@@ -1,97 +1,97 @@
 <p align="center"><img src="assets/omni-icon.png" width="76" alt="Omni"></p>
 <h1 align="center">Omni</h1>
-<p align="center">Аккаунты AI, квоты, модели и подключения в одном приложении.</p>
+<p align="center">AI accounts, quotas, models and app connections in one place.</p>
 <p align="center">
   <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1"><img src="https://img.shields.io/github/v/release/nikitaeight24family/Omni?label=release&color=739aff" alt="Release 1.6.1"></a>
   <a href="https://github.com/nikitaeight24family/Omni/actions/workflows/build.yml"><img src="https://github.com/nikitaeight24family/Omni/actions/workflows/build.yml/badge.svg" alt="Build and tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-66d7b0" alt="MIT license"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/nikitaeight24family/Omni/releases/download/v1.6.1/Omni-Setup.exe"><b>Скачать Omni 1.6.1 для Windows</b></a> ·
-  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1">Все файлы релиза</a> ·
-  <a href="CLI.md">CLI</a>
+  <a href="https://github.com/nikitaeight24family/Omni/releases/download/v1.6.1/Omni-Setup.exe"><b>Download Omni 1.6.1 for Windows</b></a> ·
+  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1">Release files</a> ·
+  <a href="CLI.md">CLI guide</a>
 </p>
 
-Omni подключает Google Antigravity/Gemini, ChatGPT, Claude, Grok и TokenHarbor, показывает квоты и автоматически распределяет запросы через локальный gateway. Внешние клиенты — Codex, Claude Code, Claude Desktop и CLI — получают актуальный каталог доступных моделей.
+Omni connects Google Antigravity/Gemini, ChatGPT, Claude, Grok and TokenHarbor accounts, displays quotas and routes requests through a local gateway. Codex, Claude Code, Claude Desktop and the CLI receive the current model catalog from the connected accounts.
 
-Версия **1.6.1** — Electron-сборка для Windows. Python-приложение и CLI остаются в репозитории для macOS, Linux, Windows CLI и совместимости старых установок.
+Version **1.6.1** is the Electron desktop build for Windows. The Python application and CLI remain in the repository for macOS, Linux, Windows CLI use and compatibility with older installations.
 
-## Окна Omni
+## Omni windows
 
-Главное окно с аккаунтами, квотами, моделями, активностью и автоматической маршрутизацией:
+The main window shows accounts, quotas, models, activity and automatic routing:
 
-<p align="center"><img src="docs/omni-dashboard.png" width="1000" alt="Главное окно Omni"></p>
+<p align="center"><img src="docs/omni-dashboard.png" width="1000" alt="Omni main window"></p>
 
-Настройки интерфейса, языков, сервисов, уведомлений и подключений:
+Display, language, service, notification and connection settings:
 
-<p align="center"><img src="docs/omni-settings.png" width="1000" alt="Настройки Omni"></p>
+<p align="center"><img src="docs/omni-settings.png" width="1000" alt="Omni settings"></p>
 
-Отдельное окно автоматического входа: одна строка аккаунта, а области показаны отдельными карточками-ачивками. Данные входа можно показать, изменить карандашом или удалить крестиком; поддерживается вставка нескольких записей и пачки TXT-файлов.
+The separate automatic sign-in window shows one row per account and connected areas as status badges. Saved sign-in data can be revealed, edited with the pencil button or removed with the cross button. Multiple records and batches of TXT files are supported.
 
-<p align="center"><img src="docs/omni-auto-sign-in.png" width="1000" alt="Окно автоматического входа Omni"></p>
+<p align="center"><img src="docs/omni-auto-sign-in.png" width="1000" alt="Omni automatic sign-in window"></p>
 
-Скриншоты используют демонстрационные данные. Настоящие пароли, секреты 2FA, токены и история запросов в репозиторий не входят.
+Screenshots use demonstration data. Real passwords, 2FA secrets, tokens and request history are never included in the repository.
 
-## Что нового в 1.6.1
+## What's new in 1.6.1
 
-- отдельное Electron-окно автоматического входа ChatGPT;
-- таблица только аккаунтов, для которых сохранены данные автоматического входа;
-- одна строка на аккаунт и отдельные области Free/EDU/K12 в виде статусов-ачивок;
-- просмотр, редактирование и удаление зашифрованных данных входа;
-- bulk-вставка и drag-and-drop нескольких `.txt` файлов;
-- проблемные аккаунты исключаются из общего количества аккаунтов;
-- сохранение выбранных областей и проверка квоты после входа;
-- актуальная модель отображается на свернутой карточке;
-- плавный Electron-скролл без поэлементной перерисовки;
-- автоматическая синхронизация каталога моделей для Codex, Claude и CLI;
-- обновлённые настройки и подключение приложений.
+- Separate Electron automatic sign-in window for ChatGPT.
+- The automatic sign-in table includes only identities with saved automatic sign-in data.
+- One row per account with separate Free, EDU and K12 area badges.
+- Encrypted sign-in data can be viewed, edited or deleted from the manager.
+- Bulk paste and drag-and-drop for multiple `.txt` files.
+- Problem accounts are excluded from the global account count.
+- Selected workspaces are remembered and quota availability is verified after sign-in.
+- The active model is shown on collapsed account cards.
+- Smooth Electron scrolling without rebuilding every card during scroll.
+- Automatic model-catalog synchronization for Codex, Claude and the CLI.
+- Refreshed settings and application-connection screens.
 
-## Установка Windows
+## Windows installation
 
-1. Скачайте [Omni-Setup.exe](https://github.com/nikitaeight24family/Omni/releases/download/v1.6.1/Omni-Setup.exe) из релиза **v1.6.1**.
-2. Запустите установщик. Python и права администратора не нужны.
-3. Откройте Omni и добавьте аккаунты через `+` у нужного провайдера.
+1. Download [Omni-Setup.exe](https://github.com/nikitaeight24family/Omni/releases/download/v1.6.1/Omni-Setup.exe) from **v1.6.1**.
+2. Run the installer. Python and administrator access are not required.
+3. Open Omni and add accounts with the `+` button in the relevant provider section.
 
-Установщик сохраняет аккаунты и настройки при обновлении. Портативная сборка `Omni.exe` находится среди файлов релиза.
+Updates preserve accounts and settings. The portable `Omni.exe` build is also included in the release files.
 
-## Аккаунты и автоматический вход
+## Accounts and automatic sign-in
 
-Omni поддерживает:
+Omni supports:
 
 - Google Antigravity/Gemini;
-- ChatGPT/Codex с областями Free, EDU/K12 и другими доступными workspace;
-- нативные Claude и Grok;
-- TokenHarbor и API-ключи.
+- ChatGPT/Codex with Free, EDU/K12 and other available workspaces;
+- native Claude and Grok accounts;
+- TokenHarbor and API keys.
 
-Для ChatGPT можно использовать обычный вход, отдельный браузер или **Sign in automatically**. Автоматический вход принимает строки с любыми распространёнными разделителями, несколько строк и `.txt` файлы. Данные хранятся зашифрованно через Windows `safeStorage`.
+ChatGPT supports normal sign-in, an isolated browser sign-in and **Sign in automatically**. Automatic sign-in accepts common separators, multiple records and `.txt` files. Credentials are encrypted with Windows `safeStorage`.
 
-После входа Omni проверяет все области аккаунта, выбирает нужную область, сохраняет её идентификатор и проверяет реальную доступность квоты. Callback сам по себе не считается успешным входом.
+After sign-in, Omni checks every workspace, selects the requested workspace, remembers its identifier and verifies real quota availability. A callback alone is never treated as a successful sign-in.
 
-## Квоты и маршрутизация
+## Quotas and routing
 
-- 5h отображается выше 1w;
-- квоты и сбросы обновляются в фоне;
-- недоступные и проблемные аккаунты не учитываются в общем количестве;
-- аккаунты одного провайдера распределяются между параллельными запросами;
-- перегруженный маршрут получает повторную попытку через другой доступный аккаунт или модель;
-- ручные приоритеты и минимальные границы квоты сохраняются;
-- активный аккаунт показывает текущую модель и цветную подсветку.
+- 5h is displayed above 1w;
+- quotas and reset times refresh in the background;
+- unavailable and problem accounts are excluded from the global count;
+- parallel requests are distributed across accounts in the same provider pool;
+- a saturated route is retried through another available account or model;
+- manual priorities and quota reserves are preserved;
+- active accounts show their current model and animated color highlight.
 
-## Подключение приложений
+## Application connections
 
-В разделе **Connect applications** Omni проверяет и обновляет конфигурации:
+In **Connect applications**, Omni checks and updates client configuration:
 
-| Приложение | Что обновляется |
+| Application | Updated configuration |
 | --- | --- |
-| Codex Desktop / CLI | локальный gateway, Responses API и каталог моделей |
-| Claude Code CLI | gateway URL, ключ, модели и настройки CLI |
-| Claude Desktop | Code-провайдер и доступные модели |
+| Codex Desktop / CLI | local gateway, Responses API and model catalog |
+| Claude Code CLI | gateway URL, key, models and CLI settings |
+| Claude Desktop | Code provider and available models |
 
-Каталог моделей регулярно сверяется с доступными аккаунтами. Устаревшие модели удаляются, новые добавляются автоматически. Исходные конфигурации сохраняются в резервную копию.
+The model catalog is regularly synchronized with the connected accounts. Old models are removed and newly available models are added automatically. Original configuration files are backed up before changes.
 
-## CLI и другие ОС
+## CLI and other operating systems
 
-CLI доступен для Windows, macOS и Linux. Скачать архивы можно на странице [релиза v1.6.1](https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1). Исходный запуск:
+The CLI is available for Windows, macOS and Linux. Download the matching archive from the [v1.6.1 release](https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1). From source:
 
 ```sh
 python console.py
@@ -101,15 +101,15 @@ python console.py configure --clients claude_cli codex
 python console.py serve
 ```
 
-Подробности: [CLI.md](CLI.md).
+See [CLI.md](CLI.md) for the complete terminal guide.
 
-## Хранение и безопасность
+## Storage and security
 
-Gateway и native service работают только локально (`127.0.0.1`). Публичные сборки не содержат аккаунтов, паролей, токенов, ключей и истории запросов. Windows использует DPAPI/safeStorage; macOS и Linux используют локальное шифрование и права пользователя.
+The gateway and native service listen on localhost only (`127.0.0.1`). Public builds contain no accounts, passwords, tokens, keys or request history. Windows uses DPAPI/safeStorage; macOS and Linux use local encryption and user-only file permissions.
 
-Не публикуйте папки `auth`, `config.yaml`, `preferences.json`, `client-key.txt` и диагностические архивы с личными данными.
+Never publish `auth`, `config.yaml`, `preferences.json`, `client-key.txt` or diagnostic archives containing personal data.
 
-## Разработка
+## Development
 
 ```sh
 python -m pip install -r requirements.txt
@@ -120,9 +120,8 @@ npm test
 npm run pack -- --config.directories.output=dist-local
 ```
 
-Electron-исходники находятся в `electron/`, Python backend — в корне, CLI — в `console.py`. Для новой публикации сначала выполните полный локальный набор тестов и соберите затронутую платформу.
+Electron sources are in `electron/`, the Python backend is in the repository root and the CLI entry point is `console.py`. Run the complete local test suite and build every affected platform before publishing a release.
 
-## История
+## History
 
-Проект ранее назывался **Gemini Accounts**. Старые имена исполняемых файлов и папки данных сохранены для совместимости существующих установок.
-
+The project was previously called **Gemini Accounts**. Legacy executable names and data directories remain compatible with existing installations.
