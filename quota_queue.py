@@ -452,18 +452,21 @@ class Handler(BaseHTTPRequestHandler):
                         if 'tokenharbor' in routed_model:
                             self.deliver(response, error, started, stream)
                             return
-                        # For GPT: retry across accounts silently without exposing transient errors to client.
-                        if routed_model.startswith('gpt-') and response.status in (502, 503, 504) and not started and attempt < getattr(self.server, 'max_gpt_retries', 10):
-                            rate_retries += 1
-                            delay = getattr(self.server, 'retry_delay', None)
-                            if delay is None:
-                                delay = min(getattr(self.server, 'retry_max_seconds', 10),
-                                            getattr(self.server, 'retry_base_seconds', 0.5) * (1.3 ** min(rate_retries - 1, 4)))
-                            self.trace('gpt_swallowed_error_retry', attempt=attempt, status=response.status, retry_in=round(delay, 2))
-                            if delay > 0:
-                                time.sleep(delay)
-                            continue
-                        if response.status != 429 and routed_model.startswith('gpt-'):
+                        # For GPT: swallow all provider transient/capacity/quota errors (429, 403, 502, 503, 504).
+                        # Never expose "Selected model is at capacity" to client.
+                        # Seamlessly retry across the account pool while client stays in thinking state.
+                        if routed_model.startswith('gpt-') and not started:
+                            max_retries = getattr(self.server, 'max_gpt_retries', 25)
+                            if attempt < max_retries:
+                                rate_retries += 1
+                                delay = getattr(self.server, 'retry_delay', None)
+                                if delay is None:
+                                    delay = min(getattr(self.server, 'retry_max_seconds', 8),
+                                                getattr(self.server, 'retry_base_seconds', 0.5) * (1.2 ** min(rate_retries - 1, 5)))
+                                self.trace('gpt_swallowed_error_retry', attempt=attempt, status=response.status, retry_in=round(delay, 2))
+                                if delay > 0:
+                                    time.sleep(delay)
+                                continue
                             self.deliver(response, error, started, stream)
                             return
                         try:

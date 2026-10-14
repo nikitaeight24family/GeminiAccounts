@@ -89,6 +89,7 @@ class QueueTests(unittest.TestCase):
         self.backend.files = [{'provider': 'codex', 'disabled': False, 'cooldowns': []}]
         self.backend.status = 429
         self.backend.retry_after = 792
+        self.gate.max_gpt_retries = 1
         self.client.request('POST', '/v1/responses', json.dumps({'model': 'gpt-6.1-sol', 'stream': True}), {'x-api-key': 'client'})
         response = self.client.getresponse()
         self.assertEqual(response.status, 429)
