@@ -363,7 +363,7 @@ class Handler(BaseHTTPRequestHandler):
             self.forward(body)
             return
         stream = bool(request.get('stream'))
-        guarded = self.path.split('?')[0] == '/v1/messages'
+        guarded = self.path.split('?')[0] in ('/v1/messages', '/v1/responses', '/v1/chat/completions')
         ident = self.request_id
         attempt = 0
         self.trace('validated', model=model, requested_model=requested_model, stream=stream, request_bytes=size)
@@ -437,6 +437,7 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     raise
                 started = self.response_started
+                routed_model = self.server.aliases.get(model, model)
                 trace_id = response.getheader('X-Cpa-Trace-Id') or ''
                 parts = trace_id.split('-')
                 if len(parts) >= 2 and parts[1]:
@@ -448,7 +449,6 @@ class Handler(BaseHTTPRequestHandler):
                     if response.status in (429, 403, 502, 503, 504):
                         error = response.read()
                         self.trace('provider_rejected', status=response.status, reason=failure_reason(response.status, error) or 'Provider rejected request', **provider_error_metadata(error))
-                        routed_model = self.server.aliases.get(model, model)
                         if 'tokenharbor' in routed_model:
                             self.deliver(response, error, started, stream)
                             return
@@ -506,11 +506,13 @@ class Handler(BaseHTTPRequestHandler):
                             self.recovery_error(stream)
                             return
                         if not valid:
-                            self.trace('empty_response', attempt=attempt)
+                            self.trace('empty_or_failed_response', attempt=attempt)
                             empty_retries += 1
-                            if empty_retries <= 2:
+                            max_retries = 6 if routed_model.startswith('gpt-') else 2
+                            if empty_retries <= max_retries:
                                 with self.server.lock:
                                     self.server.jobs[ident].update(recovery_reason='empty_response', attempt=empty_retries + 1)
+                                time.sleep(0.5)
                                 continue
                             self.recovery_error(stream)
                         return
@@ -571,7 +573,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.trace('first_upstream_bytes')
             self.trace('stream_progress')
             probe.feed(data)
-            if probe.usable or probe.error:
+            if probe.usable:
                 self.trace('content_available', terminal=probe.terminal, error=probe.error)
                 if not self.response_started:
                     self.start_stream(True)
@@ -579,13 +581,23 @@ class Handler(BaseHTTPRequestHandler):
                 # Continue the original stream; never retry a tool already exposed.
                 self.deliver(response, None, True, True)
                 return True
-            if probe.terminal:
+            if probe.error or probe.terminal:
+                self.trace('stream_terminal_without_usable_content', terminal=probe.terminal, error=probe.error)
                 break
         self.trace('stream_without_answer', terminal=probe.terminal)
         return False
 
     def recovery_error(self, stream):
         self.trace('recovery_exhausted', status=502)
+        if self.path.split('?')[0] == '/v1/responses':
+            error = {'error': {'type': 'server_error', 'code': 'server_error', 'message': 'The model is currently busy. Please retry shortly.'}}
+            if not self.response_started:
+                self.json_reply(502, error)
+            else:
+                self.chunk(b'event: response.failed\ndata: ' + json.dumps(error).encode() + b'\n\n')
+                self.wfile.write(b'0\r\n\r\n')
+                self.wfile.flush()
+            return
         error = {'type': 'error', 'error': {'type': 'api_error',
             'message': 'The model returned no usable answer after 3 attempts. Retry the request; no tool call was delivered.'}}
         if not self.response_started:
