@@ -503,7 +503,8 @@ class NativeBridge:
             self.controller.save()
             if provider == 'openai':
                 try:
-                    self.clients['openai'].apply_reset_priority(self.clients['openai'].accounts())
+                    cached_openai = [acc for acc, p in self.accounts.values() if p == 'openai']
+                    self.clients['openai'].apply_reset_priority(cached_openai or self.clients['openai'].accounts())
                 except Exception:
                     pass
             self.publish(account, provider)

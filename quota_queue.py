@@ -452,10 +452,11 @@ class Handler(BaseHTTPRequestHandler):
                         if 'tokenharbor' in routed_model:
                             self.deliver(response, error, started, stream)
                             return
-                        # For GPT: swallow all provider transient/capacity/quota errors (429, 403, 502, 503, 504).
-                        # Never expose "Selected model is at capacity" to client.
-                        # Seamlessly retry across the account pool while client stays in thinking state.
-                        if routed_model.startswith('gpt-') and not started:
+                        # For Codex (/v1/responses): swallow all provider transient/capacity/quota errors (429, 403, 502, 503, 504).
+                        # Never expose "Selected model is at capacity" to Codex.
+                        # Seamlessly retry across the account pool while Codex stays in thinking state.
+                        is_codex = self.path.split('?')[0] in ('/v1/responses', '/v1/chat/completions')
+                        if is_codex and routed_model.startswith('gpt-') and not started:
                             max_retries = getattr(self.server, 'max_gpt_retries', 25)
                             if attempt < max_retries:
                                 rate_retries += 1

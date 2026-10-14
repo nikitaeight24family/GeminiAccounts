@@ -220,9 +220,22 @@ class ChatGPTAuth:
                                                    self.quota_limit_groups(quota))):
                 unmetered.add(account['name'])
         rows.sort(key=lambda row: 0 if row['name'] in unmetered else 1)
+        acc_map = {a['name']: a for a in accounts}
+        def is_exhausted(r):
+            a = acc_map.get(r['name'], {})
+            quota = a.get('quota') or {}
+            windows = {w.get('label'): w.get('remaining') for w in quota.get('windows', [])}
+            status = str(a.get('status') or '').lower()
+            detail = str(a.get('status_message') or '').lower()
+            return (r.get('tier', 0) >= 3 or
+                    'exhaust' in status or 'limit' in status or 'usage_limit_reached' in detail or
+                    quota.get('limit_reached') is True or quota.get('allowed') is False or
+                    bool(a.get('cooldowns')) or
+                    any(rem is not None and rem <= 1 for rem in windows.values()))
+
         rows.sort(key=lambda row: 0 if row['name'] in unmetered else 1)
         # Ensure exhausted / cooling accounts (tier >= 3) stay at the bottom of the pool.
-        rows.sort(key=lambda row: 1 if row.get('tier', 0) >= 3 else 0)
+        rows.sort(key=lambda row: 1 if is_exhausted(row) else 0)
         for index, row in enumerate(rows):
             row['priority'] = len(rows) - index
         fresh = {a['name']: a for a in self.accounts() if not a.get('disabled')}

@@ -33,7 +33,7 @@ $('settings').innerHTML=icon('settings');
 document.querySelector('.brand')?.addEventListener('click',()=>{if(omniEasterActive)return;omniLogoClicks++;clearTimeout(omniLogoClickTimer);if(omniLogoClicks>=3){omniLogoClicks=0;triggerOmniEasterEgg();}else omniLogoClickTimer=setTimeout(()=>{omniLogoClicks=0;},900);});
 function providerIcon(p){const file=p==='gemini'?'antigravity':p.startsWith('openai')?'openai':p==='claude'?'claude':p==='grok'?'grok':'omni';return `<img class="provider-icon ${p}" src="assets/${file}.png" alt="">`;}
 function buttonIcon(kind){const file=kind==='pause'?'pause':kind==='play'?'play':kind==='up'?'up':kind==='down'?'down':kind==='remove'?'remove':'reset';return `<img class="button-icon" src="assets/${file}.png" alt="">`;}
-function exhausted(a){return a.severity!=='error'&&(a.windows||[]).some(w=>w.remaining!=null&&w.remaining<1);}
+function exhausted(a){return a.severity==='error'||String(a.status).toLowerCase().includes('exhaust')||(a.windows||[]).some(w=>w.remaining!=null&&w.remaining<=1);}
 function bucket(a){return a.provider==='openai'&&String(a.plan).toLowerCase()==='free'?'openai-free':a.provider;}
 function severityClass(a){ return a.severity || (a.status==='Available'?'normal':'warning'); }
 function formatTokens(value){const n=Number(value)||0;if(n>=1e9)return (n/1e9).toFixed(n>=1e10?0:1).replace(/\.0$/,'')+'B tokens';if(n>=1e6)return (n/1e6).toFixed(n>=1e7?0:1).replace(/\.0$/,'')+'M tokens';if(n>=1e3)return (n/1e3).toFixed(n>=1e4?0:1).replace(/\.0$/,'')+'K tokens';return Math.round(n)+' tokens';}
