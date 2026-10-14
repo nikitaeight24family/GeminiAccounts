@@ -1,174 +1,128 @@
-<p align="center"><img src="assets/omni-icon.png" width="72" alt="Omni logo"></p>
+<p align="center"><img src="assets/omni-icon.png" width="76" alt="Omni"></p>
 <h1 align="center">Omni</h1>
-<p align="center">Your AI accounts, quotas and applications in one place.</p>
+<p align="center">Аккаунты AI, квоты, модели и подключения в одном приложении.</p>
 <p align="center">
-  <a href="https://github.com/nikitaeight24family/Omni/releases/latest"><img src="https://img.shields.io/github/v/release/nikitaeight24family/Omni?label=release&color=739aff" alt="Latest release"></a>
+  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1"><img src="https://img.shields.io/github/v/release/nikitaeight24family/Omni?label=release&color=739aff" alt="Release 1.6.1"></a>
   <a href="https://github.com/nikitaeight24family/Omni/actions/workflows/build.yml"><img src="https://github.com/nikitaeight24family/Omni/actions/workflows/build.yml/badge.svg" alt="Build and tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-66d7b0" alt="MIT license"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/nikitaeight24family/Omni/releases/latest/download/Omni-Setup.exe"><b>Download for Windows</b></a> ·
-  <a href="https://github.com/nikitaeight24family/Omni/releases/latest">All downloads</a> ·
-  <a href="CLI.md">Terminal guide</a> ·
-  <a href="https://github.com/nikitaeight24family/Omni/issues">Report an issue</a>
+  <a href="https://github.com/nikitaeight24family/Omni/releases/download/v1.6.1/Omni-Setup.exe"><b>Скачать Omni 1.6.1 для Windows</b></a> ·
+  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1">Все файлы релиза</a> ·
+  <a href="CLI.md">CLI</a>
 </p>
 
-Omni manages **Google Antigravity / Gemini, ChatGPT, Claude, Grok and TokenHarbor** accounts, monitors quotas and connects **Claude Code, Claude Desktop and Codex** through a local gateway. Select an account yourself or let Omni rotate available accounts using quota reset times and your priorities.
+Omni подключает Google Antigravity/Gemini, ChatGPT, Claude, Grok и TokenHarbor, показывает квоты и автоматически распределяет запросы через локальный gateway. Внешние клиенты — Codex, Claude Code, Claude Desktop и CLI — получают актуальный каталог доступных моделей.
 
-**Windows desktop** · **Windows / macOS / Linux terminal** · **English / Russian interface** · **Dark / light themes**
+Версия **1.6.1** — Electron-сборка для Windows. Python-приложение и CLI остаются в репозитории для macOS, Linux, Windows CLI и совместимости старых установок.
 
-<p align="center"><img src="docs/omni-dashboard.png" width="900" alt="Omni dashboard with demo accounts, subscription badges, priorities, quota limits and account details"></p>
+## Окна Omni
 
-*Screenshots use demo accounts, sample quotas and synthetic calculator measurements. No personal credentials or actual token-capacity claims are shown.*
+Главное окно с аккаунтами, квотами, моделями, активностью и автоматической маршрутизацией:
 
-## Omni 1.6.0 highlights
+<p align="center"><img src="docs/omni-dashboard.png" width="1000" alt="Главное окно Omni"></p>
 
-- New Electron desktop interface with separate account-manager windows, incremental account updates and smooth scrolling that does not redraw cards while you scroll.
-- Collapsed account groups show the model currently being used; account status, quota windows, and application connections refresh automatically.
-- Electron Windows installer and portable app are built alongside the compatible legacy installer.
+Настройки интерфейса, языков, сервисов, уведомлений и подключений:
 
+<p align="center"><img src="docs/omni-settings.png" width="1000" alt="Настройки Omni"></p>
 
-- Successful Gemini and other provider responses remain highlighted for 60 seconds after completion, including fast requests missed between queue polls and long responses. Quota waits, failures and background probes do not activate the highlight.
-- ChatGPT imports reject sessions shared with local Codex and duplicate sessions already connected to Omni, preventing old token copies from replacing renewed credentials. Use a separate ChatGPT sign-in for each application.
+Отдельное окно автоматического входа: одна строка аккаунта, а области показаны отдельными карточками-ачивками. Данные входа можно показать, изменить карандашом или удалить крестиком; поддерживается вставка нескольких записей и пачки TXT-файлов.
 
-- TokenHarbor Haiku 5.5 appears in Claude Desktop's Code menu when its key is added after connecting Claude, including profiles that only use ChatGPT models. Existing approved profiles recover a missing TokenHarbor menu entry automatically; restart Claude Desktop after updating.
-- ChatGPT quota resets clear stale local routing blocks, and quota cards update as each account responds.
+<p align="center"><img src="docs/omni-auto-sign-in.png" width="1000" alt="Окно автоматического входа Omni"></p>
 
-- **Rainbow reset icons for every saved credit**, including credits that OpenAI does not currently allow you to redeem. Hover explains availability; disabled buttons remain protected from accidental redemption.
-- **Token capacity calculator** in Routing statistics: persistent estimates by provider, subscription, model and 5h / 1w window, with a percentage input and measurement counts.
-- **Complete active-account borders** that stay inside the card and remain visible beneath quota rows.
-- **Stable account imports** that keep loaded quotas and subscription badges, with compact cards while new data loads.
-- **Available ChatGPT accounts without a reported 5h window go first** until an actual provider refusal, pause or quota reserve excludes them.
+Скриншоты используют демонстрационные данные. Настоящие пароли, секреты 2FA, токены и история запросов в репозиторий не входят.
 
-<p align="center"><img src="docs/omni-token-calculator.png" width="900" alt="Token capacity calculator with synthetic per-model 5h and weekly measurements"></p>
+## Что нового в 1.6.1
 
-Omni was previously named **Gemini Accounts**. The repository retains its history and releases, and legacy executable names and data folders remain compatible. For installations up to 1.4.4, download the current installer once to switch to the renamed release feed.
+- отдельное Electron-окно автоматического входа ChatGPT;
+- таблица только аккаунтов, для которых сохранены данные автоматического входа;
+- одна строка на аккаунт и отдельные области Free/EDU/K12 в виде статусов-ачивок;
+- просмотр, редактирование и удаление зашифрованных данных входа;
+- bulk-вставка и drag-and-drop нескольких `.txt` файлов;
+- проблемные аккаунты исключаются из общего количества аккаунтов;
+- сохранение выбранных областей и проверка квоты после входа;
+- актуальная модель отображается на свернутой карточке;
+- плавный Electron-скролл без поэлементной перерисовки;
+- автоматическая синхронизация каталога моделей для Codex, Claude и CLI;
+- обновлённые настройки и подключение приложений.
 
-## Windows desktop: three steps
+## Установка Windows
 
-1. [Download Omni](https://github.com/nikitaeight24family/Omni/releases/latest/download/Omni-Setup.exe) and click **Install**. No Python or administrator access required.
-2. Click the small **+ in a provider strip at the bottom** and choose account sign-in or API key. Google, ChatGPT, Claude, Grok and TokenHarbor connections have their own menus. ChatGPT sign-in opens an isolated Edge/Chrome profile for each account, so multiple accounts can be added without switching the browser's everyday account. Enter the password and 2FA code on the official sign-in page. Existing Codex `auth.json` files can still be imported from the same menu.
-3. Open **Connect applications** and approve setup of installed clients. Original configs are backed up. Restarting running clients requires separate consent.
+1. Скачайте [Omni-Setup.exe](https://github.com/nikitaeight24family/Omni/releases/download/v1.6.1/Omni-Setup.exe) из релиза **v1.6.1**.
+2. Запустите установщик. Python и права администратора не нужны.
+3. Откройте Omni и добавьте аккаунты через `+` у нужного провайдера.
 
-**MoreLogin and other browser profiles:** choose **Google Gemini → + → MoreLogin / another browser**. Copy the sign-in link from Omni into the intended profile on the same computer. If the browser blocks the final `localhost` redirect, copy the full blocked address (including `state` and `code`), paste it into Omni's sign-in window and click **Complete sign-in**. A pasted `Blocked URL:` prefix is accepted. Omni checks the current sign-in session, forwards the code to the local gateway and waits for Google confirmation. Authorization codes are not saved to preferences or the request journal. Expired or mismatched callbacks produce an inline error; start a new sign-in if the session expired.
+Установщик сохраняет аккаунты и настройки при обновлении. Портативная сборка `Omni.exe` находится среди файлов релиза.
 
-A desktop shortcut is created. Updates preserve accounts and configurations; active requests block an update. Install Claude / Codex clients separately.
+## Аккаунты и автоматический вход
 
-## Terminal: Windows, macOS and Linux
+Omni поддерживает:
 
-Download the matching CLI archive from [Releases](https://github.com/nikitaeight24family/Omni/releases/latest), extract it and open a terminal in that folder. Python is included. The first run downloads a checksum-verified native service.
+- Google Antigravity/Gemini;
+- ChatGPT/Codex с областями Free, EDU/K12 и другими доступными workspace;
+- нативные Claude и Grok;
+- TokenHarbor и API-ключи.
 
-| Platform | Archive | Start |
-| --- | --- | --- |
-| Windows x64 | `GeminiAccounts-CLI-windows-x64.zip` | `.\GeminiAccounts-CLI.exe` |
-| Mac with Apple Silicon | `GeminiAccounts-CLI-macos-arm64.tar.gz` | `./gemini-accounts` |
-| Mac with Intel | `GeminiAccounts-CLI-macos-x64.tar.gz` | `./gemini-accounts` |
-| Linux x64 | `GeminiAccounts-CLI-linux-x64.tar.gz` | `./gemini-accounts` |
+Для ChatGPT можно использовать обычный вход, отдельный браузер или **Sign in automatically**. Автоматический вход принимает строки с любыми распространёнными разделителями, несколько строк и `.txt` файлы. Данные хранятся зашифрованно через Windows `safeStorage`.
 
-Use the interactive menu for sign-in, quotas, verification, client setup and restoration. Keep it open while using clients. **Ctrl+C / Exit** stops services started by that terminal and preserves accounts. Services already running from another instance are reused and are not stopped on exit.
+После входа Omni проверяет все области аккаунта, выбирает нужную область, сохраняет её идентификатор и проверяет реальную доступность квоты. Callback сам по себе не считается успешным входом.
 
-Mac executables are not notarized. macOS may require approval in **System Settings → Privacy & Security**. Source launch is also available. See the [terminal guide](CLI.md).
+## Квоты и маршрутизация
 
-## Connections and restoration
+- 5h отображается выше 1w;
+- квоты и сбросы обновляются в фоне;
+- недоступные и проблемные аккаунты не учитываются в общем количестве;
+- аккаунты одного провайдера распределяются между параллельными запросами;
+- перегруженный маршрут получает повторную попытку через другой доступный аккаунт или модель;
+- ручные приоритеты и минимальные границы квоты сохраняются;
+- активный аккаунт показывает текущую модель и цветную подсветку.
 
-| Client | Changes after approval |
+## Подключение приложений
+
+В разделе **Connect applications** Omni проверяет и обновляет конфигурации:
+
+| Приложение | Что обновляется |
 | --- | --- |
-| Claude Desktop on Windows | Local gateway preset for the **Code** tab. Choose available Gemini and Claude models in Claude's model menu. Ordinary web chats retain their own connection. |
-| Claude Code CLI, all supported platforms | Gateway URL, local key, model defaults and gateway model discovery merged into `~/.claude/settings.json`. Choose an available model with `/model`. |
-| Codex Desktop on Windows / Codex CLI | Responses API provider and a local model catalog in `~/.codex/config.toml`. Choose an available model in Codex. The existing Codex models stay in the catalog. |
+| Codex Desktop / CLI | локальный gateway, Responses API и каталог моделей |
+| Claude Code CLI | gateway URL, ключ, модели и настройки CLI |
+| Claude Desktop | Code-провайдер и доступные модели |
 
-Before any changes, the app lists affected files and asks for consent. Projects, sign-ins and session history are preserved. History is not transferred between applications. Organizational policies may prevent third-party providers. Automatic Claude Desktop setup and desktop client restarting are Windows-only; Mac terminal mode configures Claude Code CLI and Codex CLI.
+Каталог моделей регулярно сверяется с доступными аккаунтами. Устаревшие модели удаляются, новые добавляются автоматически. Исходные конфигурации сохраняются в резервную копию.
 
-**Restore:** desktop **☰ → Connect applications → Restore previous settings / reset preferences**, or terminal `./gemini-accounts restore`. After confirmation, exact original configs are restored and files that did not exist before setup are removed. Later edits to those files are replaced by their original backups. App preferences return to defaults. **Google sign-ins are kept.** Restart clients afterward.
+## CLI и другие ОС
 
-## Features
-
-| Area | What you can do |
-| --- | --- |
-| Accounts | Connect Google, ChatGPT, Claude, Grok and TokenHarbor accounts or API keys from each provider menu. Import Codex credentials, rename an account with a double-click, pause/resume with drawn icons and complete provider verification. |
-| Quotas | See separate Gemini / Claude / OpenAI **5h and 1w** windows, remaining percentages and reset countdowns. Subscription badges show the reported Google AI Pro / Ultra or ChatGPT Free / Plus / Pro plan. |
-| Priorities | Adjust account priorities with compact drawn arrows beside the pause control. Higher priority moves its card upward and ranks usable credentials first. Equal priorities retain automatic quota/reset ordering. |
-| Quota reserves | Drag the thin marker on a per-account quota bar to set the **minimum remaining percentage**. It grows and shows a percentage while held. **70% means stop at 70% remaining**, not spend 70%. The default is **0%**. Each account, provider family and time window has its own saved boundary. |
-| Compact mode | Collapse account lists or pooled quotas. Green, orange and red circles show remaining capacity with **5h / 1w inside the circle**. Counts use **8pcs**. The bottom panel stays anchored and TokenHarbor stays last. |
-| Live activity | Identify responding accounts with a full animated border, provider indicators and the recent model. A confirmed successful response remains highlighted for 60 seconds so short requests remain visible. Gemini and Claude can run on different Google accounts simultaneously. |
-| Privacy | The open/closed eye beside Omni hides account names across cards, details and history using stable numbered aliases. Double-click a hidden name to set a private alias without exposing the real identity. |
-| Settings | Click the **gear beside Omni** to open service visibility, **English / Russian** and **dark / light theme** settings, including from compact mode. Changes persist without restarting. |
-| Window | Remember the last screen position. The drawn pin beside the settings gear keeps the window above other applications; both settings persist. |
-| Usage resets | One animated rainbow icon per saved credit. Provider permission determines whether each button can be used; hover shows availability and expiry. |
-| Token calculator | Estimate tokens for a chosen percentage of 5h / 1w capacity, separately by provider, subscription and model. Measurements persist across restarts; results include sample counts. |
-| Reset forecasts | Expanded Google and OpenAI 5h / 1w strips show reset markers and countdowns on the pooled quota bar. |
-| Refreshes | Existing cards, bars and controls update in place. Unchanged values skip redraws, and priority changes reuse cards. |
-| Releases | The **GitHub icon in the expanded panel** opens the latest release. Windows can download and verify updates while waiting for active requests to finish. |
-| Diagnostics | Request, error and account-switch history; local diagnostic export with lifecycle logs and a live state snapshot. |
-
-### Account routing and recovery
-
-Google and OpenAI have independent account pools. Manual priority is applied among available credentials; quota-exhausted or restricted accounts remain behind usable accounts. Automatic ordering favors the nearest **five-hour reset**. Weekly quota controls eligibility rather than the five-hour order. Models selected in Claude or Codex use their exact available model IDs.
-
-Quota reserves are enforced through the local gateway's per-account model exclusions. A reached Gemini boundary excludes Gemini models; a reached Claude boundary excludes Claude / GPT-OSS; a reached OpenAI boundary excludes that ChatGPT credential. Other provider families and accounts remain available. Existing user exclusions are preserved, and Omni removes only its own exclusions when quota recovers or the boundary is lowered. Native quota resets and usage-reset credits restore eligibility after refreshed data confirms enough capacity.
-
-The boundary uses the provider's reported quota. Configured ChatGPT reserves are refreshed before routing each generation request, independently of the desktop window. Display quotas refresh every minute and after relevant activity; an in-flight response can cross the boundary before the next measurement. A reserve is a stop condition for future requests, not an exact token budget. With a nonzero boundary and missing quota data, that family is held until quota data becomes available.
-
-Both Google and ChatGPT can start a full unused five-hour window with a minimal request after three minutes: Gemini 3.1 Pro Low / GPT-OSS for Google, Luna for ChatGPT. Gemini Flash responses do not start Google's metered window, so the Gemini ping allows at most 32 output tokens and verifies the reported quota drop. Real client usage suppresses the ping, weekly exhaustion and user reserves are respected, and retries are bounded. Background pings appear separately in Routing statistics and do not inflate client response counts; HTTP success alone is not reported as a confirmed window start.
-
-Confirmed provider quota blocks queue affected requests with streaming keep-alives. Requests resume after a reset or when a new usable account joins. Cancelling the client cancels its wait; pending requests are not saved to disk. Reserve exclusions do not fabricate provider cooldowns. Forwarded HTTP 429 responses use a short client retry interval so an old Retry-After deadline does not hide recovered accounts for many minutes.
-
-The **token capacity calculator** in Routing statistics learns from completed requests and observed quota drops. Choose a model/plan and a quota percentage to estimate tokens for 5h and 1w. Results appear after at least three measurements and 2% measured consumption; each provider, plan, model and window is tracked separately. Measurements persist across restarts. Mixed-model intervals and quota resets are excluded. Values are empirical estimates of reported total tokens, affected by cache, reasoning, workload and any usage outside Omni. Missing provider windows stay unknown.
-
-When OpenAI confirms an account is available but does not report a five-hour window, Omni uses it before accounts with timed windows. Actual provider failures, cooldowns, pauses and configured quota reserves still control eligibility. Missing windows are labelled explicitly rather than shown as invented percentages. Importing an account preserves existing cards, loaded quotas and subscription badges.
-
-ChatGPT cards show one drawn reset button per available **usage-reset credit**, in the same header row as priority and pause. Every saved credit has an animated rainbow icon, even when it cannot currently be redeemed. Zero credits leave no label or button. Hover reveals availability and expiry. OpenAI reports the saved count and the currently applicable count separately; a credit can be unexpired and plan-supported while its button remains disabled because the applicable count is zero. Confirmation and a fresh availability check are required. The provider chooses the credit consumed; Omni does not automatically repeat a timed-out reset.
-
-Quota exhaustion is shown as a quota status. Verification, invalid credentials, access restrictions and provider errors remain distinct, and unfamiliar status messages stay visible. Active borders clear on idle or quota wait; recent models remain visible for one minute. Desktop countdowns update every 15 seconds.
-
-### Appearance and service visibility
-
-The gear opens **Display settings**, also available as a tab in the expanded panel. Choose whether to show **Gemini, Claude, OpenAI, Grok and TokenHarbor**. Hiding a service changes its display only; it does not pause accounts or remove them from routing. Pooled Google Gemini and OpenAI sections show their own 5h / 1w totals, exclude paused accounts and identify incomplete quota data.
-
-Omni uses its own orbit logo. Google accounts carry the Antigravity icon; ChatGPT accounts carry the OpenAI mark. Subscription badges sit beneath account names. Account selection applies only while details are open; compact mode keeps verification actions available.
-
-### Optional TokenHarbor
-
-Expand **TokenHarbor → + Add TokenHarbor account**, enter a Universal Key and review the connection changes. Omni tests the exact **`claude-haiku-5.5:free`** route before adding it to approved clients. No paid fallback is configured. Each key shows its latest success or error and the last-used key is marked after the gateway reports usage.
-
-The free route is a limited-time offer and requires access on the TokenHarbor account. Published rate limits appear in its connection window. Use **Balance and reset** for live campaign allowance and expiry: TokenHarbor has no documented read API for those remaining values, so Omni does not invent them. TokenHarbor says free-route prompts and responses may be retained. **Remove TokenHarbor connection** removes the provider and client menu entry.
-
-## Availability and storage
-
-Google Antigravity determines account eligibility, models and quotas. A Gemini web subscription alone does not guarantee access to Claude or every model. This is an independent project, not an official Google, Anthropic or OpenAI application.
-
-Gateway: `127.0.0.1:8317`; native service: `127.0.0.1:8318`. Both are local-only. Each installation receives random keys. Releases contain no personal sign-ins, private keys or history.
-
-Windows uses LocalAppData, or an existing Codex LocalCache installation. macOS uses `~/Library/Application Support/GeminiAccounts`; Linux uses `$XDG_DATA_HOME/GeminiAccounts` or `~/.local/share/GeminiAccounts`. `GEMINI_ACCOUNTS_HOME` selects an explicit runtime root. Google sign-ins are in `ClaudeGemini/auth/`.
-
-Windows protects management keys, verification state and backups with **DPAPI**. Mac / Linux encrypt these files with **Fernet** and a user-only local storage key; this is file-permission protection, not Keychain integration. Keep the storage key with the protected data. Never publish installed auth folders, keys or client configs.
-
-## Development
-
-Python 3.12+. Desktop: `requirements.txt`; terminal-only: `requirements-cli.txt` (no Tk or GUI dependencies).
+CLI доступен для Windows, macOS и Linux. Скачать архивы можно на странице [релиза v1.6.1](https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.1). Исходный запуск:
 
 ```sh
-python -m pip install -r requirements-cli.txt
-python console.py --help
-python -m unittest tests.test_console tests.test_accounts tests.test_activity tests.test_quota_queue tests.test_quota_starts tests.test_routing
+python console.py
+python console.py status
+python console.py models
+python console.py configure --clients claude_cli codex
+python console.py serve
 ```
 
-Windows build: `build-release.ps1`. Terminal binary: `python -m PyInstaller --onefile --name gemini-accounts --add-data assets/cliproxy-models.json:assets --collect-all tzdata console.py` on macOS / Linux (use `;assets` on Windows). GitHub Actions builds and tests Windows, Mac Apple Silicon / Intel and Linux editions. Native CLIProxyAPI is pinned to **8.0.16**, with committed SHA-256 checksums and its license included. Client configuration interfaces may change with client updates.
+Подробности: [CLI.md](CLI.md).
 
-Documentation: [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-advanced), [Claude Code environment variables](https://code.claude.com/docs/en/env-vars), [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
+## Хранение и безопасность
 
-### Diagnostic logs
+Gateway и native service работают только локально (`127.0.0.1`). Публичные сборки не содержат аккаунтов, паролей, токенов, ключей и истории запросов. Windows использует DPAPI/safeStorage; macOS и Linux используют локальное шифрование и права пользователя.
 
-Request lifecycle logging is automatic, including active requests, quota waits, upstream attempts, streaming progress, cancellations and failures. **Routing statistics → Save diagnostic log…** exports a ZIP with rotated JSONL logs, request history and a live state snapshot. No prompts, generated text, authentication tokens or client configuration files are included. Logs contain account names. Terminal: `./gemini-accounts diagnostics --output diagnostics.zip` (Windows: `GeminiAccounts-CLI.exe diagnostics --output diagnostics.zip`). The export also works when services are offline.
+Не публикуйте папки `auth`, `config.yaml`, `preferences.json`, `client-key.txt` и диагностические архивы с личными данными.
 
-Windows desktop checks GitHub for newer releases. **Routing statistics → Update to …** downloads the verified installer, waits for active requests, replaces application files and restarts services. Client configurations are not automatically rewritten. **Send diagnostic log…** requires owner confirmation for every upload, uses the configured HTTPS recipient and replaces email addresses with account labels. The default recipient is https://logs.conch-labs.com/ingest. An upload access token is required and stored encrypted locally; no token is embedded in public builds.
+## Разработка
 
-### Native Claude accounts
+```sh
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests
+cd electron
+npm install
+npm test
+npm run pack -- --config.directories.output=dist-local
+```
 
-Use **+ Claude** to sign in on the official Claude website in a separate browser profile. Native Claude credentials stay in the local gateway, separately from Google accounts that also provide Claude models. The Claude panel shows the provider-reported subscription (Pro, Max 5x/20x, Team or Enterprise), remaining 5h/1w quota, reset timers, statuses and active model. Missing quota or plan data remains unknown.
+Electron-исходники находятся в `electron/`, Python backend — в корне, CLI — в `console.py`. Для новой публикации сначала выполните полный локальный набор тестов и соберите затронутую платформу.
 
-Each account has inline priority arrows and quota reserve markers. Available Claude accounts rotate independently; the request queue can continue through Claude when Google is exhausted. Full untouched windows can be started after the same three-minute grace period using an available Haiku model; real usage, reserves and weekly exhaustion suppress that probe. Collapsed account and pooled headers retain quota circles. Claude visibility, privacy names, theme and language use the shared settings.
+## История
 
-### Native desktop migration
+Проект ранее назывался **Gemini Accounts**. Старые имена исполняемых файлов и папки данных сохранены для совместимости существующих установок.
 
-The shipped Windows manager remains the current Python desktop application. Experimental WPF, SwiftUI and GTK clients in [`native/`](native/README.md) are development work and are not included in this release.
