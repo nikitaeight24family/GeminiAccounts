@@ -2,7 +2,17 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
+const {webcrypto}=require('node:crypto');
 const {JSDOM}=require('jsdom');
+const {parseCredentialLine,totp,pageAutomationScript}=require('../chatgpt_auto_login');
+const {CredentialStore}=require('../credential_store');
+test('automatic inventory only includes saved automatic sign-in identities and all their areas',()=>{
+ const store=new CredentialStore('',{});
+ store.read=()=>({'auto@example.com':{email:'auto@example.com',password:'private',secret:'private'}});
+ const rows=[{id:'free',email:'AUTO@example.com'},{id:'edu',email:'auto@example.com'},{id:'manual',email:'manual@example.com'}];
+ assert.deepEqual(store.filterInventory(rows),rows.slice(0,2));
+ store.read=()=>({});assert.deepEqual(store.filterInventory(rows),[]);
+});
 function setup(snapshot,loginStatus){
  const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../renderer/index.html'),'utf8'),{url:'https://omni.test',runScripts:'outside-only',pretendToBeVisual:true});
  const calls=[];const w=dom.window;const listeners=[];
@@ -35,14 +45,158 @@ test('adding an account opens a separate window and keeps the sidebar narrow',as
   assert.equal(w.document.getElementById('settings-view').hidden,true);
  }finally{dom.window.close();}
 });
-function setupManager(provider,loginStatus,reviewResult){
+function setupManager(provider,loginStatus,reviewResult,mode=''){
  const html=fs.readFileSync(path.join(__dirname,'../renderer/manager.html'),'utf8');
- const dom=new JSDOM(html,{url:`https://omni.test/manager.html?provider=${provider}`,runScripts:'outside-only',pretendToBeVisual:true});
- const w=dom.window,calls=[],listeners=[];
- w.omni={send:async(action,fields)=>{calls.push({action,fields});if(action==='preferences')return {language:'en'};if(action==='login_pending')return [{state:'pending',url:'https://auth.openai.com',created_at:Date.now()/1000}];if(action==='login')return {state:'test',url:'https://auth.openai.com',expires_at:Date.now()/1000+600};if(action==='login_status')return loginStatus??{status:'wait'};if(action==='login_review')return reviewResult??{status:'checking'};return {};},onEvent:fn=>listeners.push(fn),copy:async()=>{calls.push({action:'copy'});},open:async()=>{calls.push({action:'open'});},paste:async()=>'',importAuth:async()=>({cancelled:true})};
+ const dom=new JSDOM(html,{url:`https://omni.test/manager.html?provider=${provider}&mode=${mode}`,runScripts:'outside-only',pretendToBeVisual:true});
+ const w=dom.window,calls=[],listeners=[];Object.defineProperty(w.crypto,'subtle',{value:webcrypto.subtle});w.Date.now=()=>59000;
+ w.omni={send:async(action,fields)=>{calls.push({action,fields});if(action==='preferences')return {language:'en'};if(action==='login_pending')return [{state:'pending',url:'https://auth.openai.com',created_at:Date.now()/1000}];if(action==='login')return {state:'test',url:'https://auth.openai.com',expires_at:Date.now()/1000+600};if(action==='login_status')return loginStatus??{status:'wait'};if(action==='login_review')return reviewResult??{status:'checking'};return {};},chatgptAutoLogin:async line=>{calls.push({action:'chatgpt-auto-login',line});return {state:'auto-test',automatic:true,expires_at:Date.now()/1000+600};},chatgptAutoLoginCancel:async state=>{calls.push({action:'chatgpt-auto-login-cancel',state});},onEvent:fn=>listeners.push(fn),copy:async()=>{calls.push({action:'copy'});},open:async()=>{calls.push({action:'open'});},paste:async()=>'',importAuth:async()=>({cancelled:true})};
  w.eval(fs.readFileSync(path.join(__dirname,'../renderer/manager.js'),'utf8'));
  return {dom,w,calls,listeners};
 }
+test('ChatGPT automatic sign-in sends the input directly to its hidden flow without opening a browser',async()=>{
+ const {dom,w,calls}=setupManager('openai',null,null,'automatic');try{
+  await new Promise(r=>setTimeout(r,10));
+  const field=w.document.querySelector('#credential-line');field.value='person@example.com | private-test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  w.document.querySelector('#automatic-login .submit').click();await new Promise(r=>setTimeout(r,20));
+  assert.equal(w.document.querySelector('#credential-line').value,'');
+  assert.equal(calls.some(call=>call.action==='chatgpt-auto-login'&&call.line.includes('private-test-password')),true);
+  assert.equal(calls.some(call=>call.action==='open'||call.action==='copy'),false);
+  assert.equal(calls.some(call=>call.action==='login'),false);
+  assert.equal(w.document.querySelector('#session #callback'),null);
+  assert.equal(w.document.querySelector('#session .actions'),null);
+ }finally{dom.window.close();}
+});
+test('ChatGPT automatic sign-in accepts bulk records pasted or loaded from text',async()=>{
+ const {dom,w,calls,listeners}=setupManager('openai',null,null,'automatic');try{
+  await new Promise(r=>setTimeout(r,10));
+  const field=w.document.querySelector('#credential-line');field.value='first@example.com | pass-one | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ\nsecond@example.com; pass-two; GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  w.document.querySelector('#automatic-login .submit').click();await new Promise(r=>setTimeout(r,20));
+  assert.equal(calls.filter(call=>call.action==='chatgpt-auto-login').length,1);
+  listeners.forEach(fn=>fn({event:'chatgpt-auto-login',state:'auto-test',status:'callback'}));await new Promise(r=>setTimeout(r,20));
+  const lines=calls.filter(call=>call.action==='chatgpt-auto-login').map(call=>call.line);
+  assert.equal(lines.length,2);assert.match(lines[0],/first@example\.com/);assert.match(lines[1],/second@example\.com/);
+  assert.equal(w.document.querySelector('#credential-line').value,'');
+ }finally{dom.window.close();}
+});
+test('automatic window has a multi-file drop zone and no file picker',async()=>{
+ const {dom,w}=setupManager('openai',null,null,'automatic');try{
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(w.document.querySelector('#methods').hidden,true);
+  const drop=w.document.querySelector('.file-drop');assert.ok(drop);
+  assert.equal(w.document.querySelector('#credential-file').hidden,true);
+  const event=new w.Event('drop',{bubbles:true,cancelable:true});
+  Object.defineProperty(event,'dataTransfer',{value:{files:[{name:'one.txt',text:async()=> 'first@example.com | password | SECRET'},{name:'two.txt',text:async()=> 'second@example.com | password | SECRET'}]}});
+  drop.dispatchEvent(event);await new Promise(r=>setTimeout(r,10));
+  assert.match(w.document.querySelector('textarea').value,/first@example.com[\s\S]*\nsecond@example.com/);
+ }finally{dom.window.close();}
+});
+test('ChatGPT credentials validate and TOTP matches the RFC 6238 SHA-1 vector',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ assert.equal(credentials.email,'person@example.com');assert.equal(credentials.password,'test-password');assert.equal(totp(credentials.secret,59000),'287082');
+ assert.throws(()=>parseCredentialLine('person@example.com | test-password | not-base32'));
+});
+test('pin highlight cannot draw an account border over the window',async()=>{
+ const {dom,w}=setup();try{
+  w.omni.pin=async()=>true;
+  w.document.querySelector('#pin').click();await new Promise(r=>setImmediate(r));
+  assert.equal(w.document.querySelector('#pin').classList.contains('active'),true);
+  const css=fs.readFileSync(path.join(__dirname,'../renderer/styles.css'),'utf8');
+  assert.doesNotMatch(css,/(?:^|\})\.active:before\{/);
+  assert.match(css,/\.account\.active:before\{/);
+ }finally{dom.window.close();}
+});
+test('password submission ignores the passkey button before Continue',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<form><input type="password"><button type="submit">Use a passkey</button><button type="submit">Продолжить</button></form>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{
+  for(const node of dom.window.document.querySelectorAll('input,button'))Object.defineProperty(node,'offsetWidth',{value:120});
+  let passkey=0,continued=0;const buttons=dom.window.document.querySelectorAll('button');
+  buttons[0].onclick=()=>passkey++;buttons[1].onclick=()=>continued++;
+  dom.window.document.querySelector('form').onsubmit=e=>e.preventDefault();
+  assert.equal(dom.window.eval(pageAutomationScript(credentials,'123456')).status,'submitted-password');
+  assert.equal(passkey,0);assert.equal(continued,1);
+ }finally{dom.window.close();}
+});
+test('recovery selects Personal Free instead of K12 when both workspaces exist',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<h1>Choose workspace</h1><label><input type="radio" name="w">K12</label><label><input type="radio" name="w">Personal workspace</label><button>Continue</button>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{
+  for(const node of dom.window.document.querySelectorAll('label,input,button'))Object.defineProperty(node,'offsetWidth',{value:120});
+  assert.equal(dom.window.eval(pageAutomationScript(credentials,'123456',true,'free')).status,'selected-target-workspace');
+  assert.deepEqual([...dom.window.document.querySelectorAll('input')].map(node=>node.checked),[false,true]);
+ }finally{dom.window.close();}
+});
+test('workspace radio page is detected without chooser text',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<label>EDU<input type="radio" name="workspace_id" value="edu"></label><label>RLRЛичная учетная запись<input type="radio" name="workspace_id" value="free"></label><button>Продолжить</button>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{for(const node of dom.window.document.querySelectorAll('label,input,button'))Object.defineProperty(node,'offsetWidth',{value:120});assert.equal(dom.window.eval(pageAutomationScript(credentials,'123456',true,'free','free')).status,'selected-target-workspace');assert.deepEqual([...dom.window.document.querySelectorAll('input')].map(n=>n.checked),[false,true]);}finally{dom.window.close();}
+});
+test('hidden sign-in script submits only supported auth fields on the provider login origin',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<form><input type="email"><button type="submit">Continue</button></form>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{let submitted=0;Object.defineProperty(dom.window.document.querySelector('input'),'offsetWidth',{value:160});dom.window.document.querySelector('form').addEventListener('submit',event=>{event.preventDefault();submitted++;});
+  const result=dom.window.eval(pageAutomationScript(credentials,'123456'));
+  assert.equal(result.status,'submitted-email');assert.equal(dom.window.document.querySelector('input').value,credentials.email);assert.equal(submitted,1);
+  const outside=new JSDOM('<input type="email">',{url:'https://example.com',runScripts:'outside-only'});assert.equal(outside.window.eval(pageAutomationScript(credentials,'123456')).status,'waiting');outside.window.close();
+ }finally{dom.window.close();}
+});
+test('hidden sign-in script advances through email, password and TOTP fields without a visible browser',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<form><input type="email"><input type="password"><input name="code"><button type="submit">Continue</button></form>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{const inputs=[...dom.window.document.querySelectorAll('input')];for(const input of inputs)Object.defineProperty(input,'offsetWidth',{value:120});let submissions=0;dom.window.document.querySelector('form').addEventListener('submit',event=>{event.preventDefault();submissions++;});
+  const statuses=[1,2,3].map(()=>dom.window.eval(pageAutomationScript(credentials,'654321')).status);
+  assert.deepEqual(statuses,['submitted-email','submitted-password','submitted-code']);
+  assert.deepEqual(inputs.map(input=>input.value),['person@example.com','test-password','654321']);assert.equal(submissions,3);
+ }finally{dom.window.close();}
+});
+test('hidden sign-in selects all available workspaces when the provider offers multi-select',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<main><h1>Choose a workspace</h1><form><label><input type="checkbox">Personal workspace</label><label><input type="checkbox">Team workspace</label><button type="submit">Continue</button></form></main>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{const boxes=[...dom.window.document.querySelectorAll('input')];for(const node of [...boxes,...dom.window.document.querySelectorAll('button')])Object.defineProperty(node,'offsetWidth',{value:120});let submitted=0;dom.window.document.querySelector('form').addEventListener('submit',event=>{event.preventDefault();submitted++;});
+  const result=dom.window.eval(pageAutomationScript(credentials,'123456'));
+  assert.equal(result.status,'selected-all-workspaces');assert.deepEqual(boxes.map(box=>box.checked),[true,true]);assert.equal(submitted,1);
+ }finally{dom.window.close();}
+});
+test('hidden sign-in completes Codex consent after MFA exactly once',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<h1>Sign in to Codex</h1><form><button type="submit">Continue</button></form>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{
+  Object.defineProperty(dom.window.document.querySelector('button'),'offsetWidth',{value:120});
+  let submissions=0;dom.window.document.querySelector('form').addEventListener('submit',event=>{event.preventDefault();submissions++;});
+  assert.equal(dom.window.eval(pageAutomationScript(credentials,'123456')).status,'submitted-consent');
+  assert.equal(dom.window.eval(pageAutomationScript(credentials,'123456')).status,'waiting-consent');
+  assert.equal(submissions,1);
+ }finally{dom.window.close();}
+});
+test('hidden sign-in never confirms an unrelated consent screen',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<h1>Authorize Another Application</h1><button>Allow</button><input value="private-value">',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{
+  Object.defineProperty(dom.window.document.querySelector('button'),'offsetWidth',{value:120});
+  let clicks=0;dom.window.document.querySelector('button').onclick=()=>clicks++;
+  const result=dom.window.eval(pageAutomationScript(credentials,'123456'));
+  assert.equal(result.status,'waiting');assert.equal(clicks,0);
+  assert.equal(JSON.stringify(result).includes('private-value'),false);
+  assert.equal(JSON.stringify(result).includes(credentials.password),false);
+ }finally{dom.window.close();}
+});
+test('hidden sign-in selects the only offered workspace and continues',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<h1>Select a workspace</h1><form><input type="checkbox"><button type="submit">Continue</button></form>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{
+  for(const node of dom.window.document.querySelectorAll('input,button'))Object.defineProperty(node,'offsetWidth',{value:120});
+  let submissions=0;dom.window.document.querySelector('form').addEventListener('submit',event=>{event.preventDefault();submissions++;});
+  assert.equal(dom.window.eval(pageAutomationScript(credentials,'123456')).status,'selected-all-workspaces');
+  assert.equal(dom.window.document.querySelector('input').checked,true);assert.equal(submissions,1);
+ }finally{dom.window.close();}
+});
+test('hidden sign-in refuses to guess when the provider only allows one workspace',()=>{
+ const credentials=parseCredentialLine('person@example.com | test-password | GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+ const dom=new JSDOM('<main><h1>Select a workspace</h1><label><input type="radio" name="workspace">Personal workspace</label><label><input type="radio" name="workspace">Team workspace</label></main>',{url:'https://auth.openai.com',runScripts:'outside-only'});
+ try{for(const node of dom.window.document.querySelectorAll('input'))Object.defineProperty(node,'offsetWidth',{value:120});
+  assert.equal(dom.window.eval(pageAutomationScript(credentials,'123456')).status,'single-workspace-picker');assert.equal([...dom.window.document.querySelectorAll('input')].some(input=>input.checked),false);
+ }finally{dom.window.close();}
+});
 for(const provider of ['gemini','openai','claude','grok','tokenharbor'])test(`${provider}: separate manager has provider-specific methods`,async()=>{
  const {dom,w,calls}=setupManager(provider);try{
  await new Promise(r=>setTimeout(r,10));
@@ -130,12 +284,12 @@ test('rename finishes on Enter and Escape and applies account updates received w
   for(const key of ['Enter','Escape']){
    card.querySelector('[data-rename]').dispatchEvent(new w.MouseEvent('dblclick',{bubbles:true}));
    const input=card.querySelector('.editor');assert.ok(input);input.value='Updated';
-   w.state.accounts.set(account.id,{...account,responses:42});w.render();
+    w.state.accounts.set(account.id,{...account,tokens:42000});w.render();
    assert.equal(card.querySelector('.editor'),input);
    const before=calls.filter(c=>c.action==='rename').length;
    input.dispatchEvent(new w.KeyboardEvent('keydown',{key,bubbles:true}));
    assert.equal(card.querySelector('.editor'),null);
-   assert.match(card.querySelector('.status').textContent,/42 resp/);
+    assert.match(card.querySelector('.status').textContent,/42K tokens/);
    assert.equal(calls.filter(c=>c.action==='rename').length,before+(key==='Enter'?1:0));
   }
  }finally{dom.window.close();}

@@ -1,10 +1,75 @@
-const { app, BrowserWindow, ipcMain, shell, Menu, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog, safeStorage } = require('electron');
+const {CredentialStore} = require('./credential_store');
+function credentialStore(){return new CredentialStore(path.join(app.getPath('userData'),'automatic-sign-in.bin'),safeStorage);}
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
+const { parseCredentialLine, totp, pageAutomationScript } = require('./chatgpt_auto_login');
+
+function chatGPTAuthLog(stage, details = {}) {
+  try {
+    const directory = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(directory, { recursive: true });
+    const record = { time: new Date().toISOString(), stage };
+    if (details.host && /^[a-z0-9.:-]+$/i.test(details.host)) record.host = details.host;
+    if (details.urlShape) record.url = details.urlShape;
+    if (details.pageStage && /^[a-z-]+$/i.test(details.pageStage)) record.pageStage = details.pageStage;
+    if (Number.isInteger(details.errorCode)) record.errorCode = details.errorCode;
+    if (details.diagnostics) {
+      const safe = {};
+      for (const key of ['email','password','otp','workspace','consent']) {
+        if (typeof details.diagnostics[key] === 'boolean') safe[key] = details.diagnostics[key];
+      }
+      if (Number.isInteger(details.diagnostics.buttons)) safe.buttons = details.diagnostics.buttons;
+      if (Array.isArray(details.diagnostics.buttonLabels)) safe.buttonLabels = details.diagnostics.buttonLabels.filter(label => typeof label === 'string').slice(0, 6);
+      record.screen = safe;
+    }
+    fs.appendFileSync(path.join(directory, 'chatgpt-auto-login.log'), `${JSON.stringify(record)}\n`, 'utf8');
+  } catch { /* Diagnostics must never interrupt sign-in. */ }
+}
+
+function authHostname(value) {
+  try { return new URL(value).hostname.toLowerCase(); } catch { return ''; }
+}
+function authUrlShape(value) {
+  try { const u = new URL(value); return {host:u.hostname.toLowerCase(), port:u.port, path:u.pathname}; } catch { return {}; }
+}
 
 let windowRef;
 const managerWindows = new Set();
+const autoLoginWindows = new Map();
+const recoveryAttempts = new Map();
+let recoveryBusy=false;
+async function repairExpiredAccounts(){
+  if(recoveryBusy||quitting||autoLoginWindows.size)return;
+  recoveryBusy=true;
+  try{
+    const snapshot=await send('snapshot');
+    for(const account of snapshot?.accounts||[]){
+      if(account.provider!=='openai'||account.status!=='Sign in again'||account.disabled)continue;
+      if(Date.now()-(recoveryAttempts.get(account.id)||0)<30*60*1000)continue;
+      const identity=await send('account_identity',{id:account.id});
+      if(!identity?.email)continue;
+      const saved=credentialStore().get(identity.email);
+      if(!saved)continue;
+      recoveryAttempts.set(account.id,Date.now());
+      const inventory=await send('account_inventory',{email:identity.email});
+      const target=inventory.find(row=>row.id===account.id);
+      if(!target||target.area==='Unknown workspace')continue;
+      Object.assign(target,await send('recovery_target',{id:account.id}));
+      const result=await beginChatGPTAutoLogin(null,`${saved.email} | ${saved.password} | ${saved.secret}`,target);
+      await new Promise(resolve=>{const timer=setInterval(()=>{if(quitting||!autoLoginWindows.has(result.state)){clearInterval(timer);resolve();}},500);});
+      const status=await send('login_status',{provider:'openai',state:result.state});
+      if(status?.status==='ok'){
+        await send('refresh');
+        const verification=await send('recovery_verify',{id:account.id});
+        chatGPTAuthLog(verification.verified?'recovery-verified':'recovery-not-verified');
+      }
+      break;
+    }
+  }catch{chatGPTAuthLog('recovery-check-failed');}finally{recoveryBusy=false;}
+}
 const accountProviders = new Set(['gemini','openai','claude','grok','tokenharbor']);
 function broadcast(channel, message) {
   for (const win of [windowRef, ...managerWindows]) if (win && !win.isDestroyed()) win.webContents.send(channel, message);
@@ -108,13 +173,13 @@ function createWindow() {
   windowRef.on('closed', () => { windowRef = null; });
 }
 
-function openAccountManager(provider) {
+function openAccountManager(provider, mode = '') {
   if (!accountProviders.has(provider)) throw new Error('Unsupported account provider');
   const win = new BrowserWindow({width:520,height:570,minWidth:440,minHeight:440,title:`Omni · ${provider}`,
     backgroundColor:'#10141d',show:false,autoHideMenuBar:true,
     webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,sandbox:true,nodeIntegration:false}});
   managerWindows.add(win);
-  win.loadFile(path.join(__dirname,'renderer','manager.html'),{query:{provider}});
+  win.loadFile(path.join(__dirname,'renderer','manager.html'),{query:{provider, mode}});
   win.once('ready-to-show',()=>win.show());
   win.on('closed',()=>managerWindows.delete(win));
   win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
@@ -122,11 +187,139 @@ function openAccountManager(provider) {
   return true;
 }
 
+function trustedChatGPTAuthUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'http:' && ['localhost','127.0.0.1'].includes(url.hostname) && ((url.port === '1455' && url.pathname.startsWith('/auth/callback')) || (url.port === '8318' && url.pathname.startsWith('/codex/callback')))) return true;
+    return url.protocol === 'https:' && (url.hostname === 'openai.com' || url.hostname.endsWith('.openai.com') || url.hostname === 'chatgpt.com' || url.hostname.endsWith('.chatgpt.com') || url.hostname === 'login.microsoftonline.com' || url.hostname.endsWith('.login.microsoftonline.com') || url.hostname === 'login.live.com');
+  } catch { return false; }
+}
+
+function closeAutoLogin(state, status, message) {
+  const session = autoLoginWindows.get(state);
+  if (!session) return;
+  autoLoginWindows.delete(state);
+  clearInterval(session.timer);
+  clearTimeout(session.expiry);
+  if (session.window && !session.window.isDestroyed()) session.window.destroy();
+  if (status) broadcast('bridge-event', {event:'chatgpt-auto-login', state, status, message});
+}
+
+async function beginChatGPTAutoLogin(event, line, target = null) {
+  chatGPTAuthLog('request-received');
+  const credentials = parseCredentialLine(line);
+  credentialStore().save(credentials);
+  const owner = event?.sender ? BrowserWindow.fromWebContents(event.sender) : windowRef;
+  const result = await send('login', {provider:'openai'});
+  if (!result?.state || !trustedChatGPTAuthUrl(result.url)) {
+    chatGPTAuthLog('provider-login-start-failed');
+    throw new Error('Omni could not start a secure ChatGPT sign-in.');
+  }
+  chatGPTAuthLog('provider-login-started', { host: authHostname(result.url) });
+  if(target){
+    const url=new URL(result.url);
+    url.searchParams.set('codex_cli_simplified_flow','false');
+    if(target.accountId)url.searchParams.set('organization_id',target.accountId);
+    result.url=url.href;
+    chatGPTAuthLog('target-workspace-login-started');
+  }
+  const win = new BrowserWindow({
+    width: 480, height: 640, show: false, parent: owner || undefined,
+    webPreferences: { preload:path.join(__dirname,'auth_preload.js'),partition:`omni-chatgpt-auth-${randomUUID()}`, contextIsolation:true, sandbox:true, nodeIntegration:false, backgroundThrottling:false }
+  });
+  win.webContents.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`);
+  const session = {window:win, credentials, status:'starting', pageStage:'starting', startedAt:Date.now(), timer:null, expiry:null};
+  autoLoginWindows.set(result.state, session);
+  const fail = message => {
+    chatGPTAuthLog('flow-failed', { host: authHostname(win.webContents.getURL()), pageStage: session.pageStage });
+    closeAutoLogin(result.state, 'error', message);
+  };
+  const inspect = async () => {
+    if (!autoLoginWindows.has(result.state) || win.isDestroyed() || session.inspectBusy) return;
+    session.inspectBusy = true;
+    try {
+    const url = win.webContents.getURL();
+    if (url && !trustedChatGPTAuthUrl(url)) { chatGPTAuthLog('untrusted-redirect', {urlShape: authUrlShape(url)}); fail('The provider redirected to an untrusted sign-in page.'); return; }
+    try {
+      if (url) { const callback = new URL(url); if ((callback.port === '1455' && callback.pathname.startsWith('/auth/callback')) || (callback.port === '8318' && callback.pathname.startsWith('/codex/callback'))) { chatGPTAuthLog('callback-reached', { host: authHostname(url) }); closeAutoLogin(result.state, 'callback', 'ChatGPT sign-in completed.'); return; } }
+      if (!url) return;
+      const host = authHostname(url);
+      if (!['auth.openai.com','login.openai.com','login.microsoftonline.com','login.live.com','chatgpt.com','www.chatgpt.com'].includes(host)) {
+        if (session.status !== `waiting:${host}`) { session.status = `waiting:${host}`; session.pageStage = 'unsupported-page'; chatGPTAuthLog('unsupported-auth-page', { host }); }
+        return;
+      }
+      const code = totp(credentials.secret);
+      if(session.mfaSubmitted){
+        const shape=await win.webContents.executeJavaScript(`(()=>{const visible=n=>!!(n.offsetWidth||n.offsetHeight||n.getClientRects().length);const scrub=s=>String(s||'').replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+/gi,'[email]').replace(/\\b\\d{6}\\b/g,'[code]').slice(0,120);return {path:location.pathname,headings:[...document.querySelectorAll('h1,h2')].map(n=>scrub(n.textContent)),controls:[...document.querySelectorAll('button,select,[role="combobox"],[role="option"],input[type="radio"]')].filter(visible).map(n=>({tag:n.tagName,role:n.getAttribute('role'),type:n.getAttribute('type'),name:n.getAttribute('name'),value:n.value||'',label:scrub(n.textContent||n.parentElement?.textContent),html:scrub(n.outerHTML).slice(0,500),options:n.tagName==='SELECT'?[...n.options].map(o=>({text:scrub(o.textContent),value:o.value})):undefined}))}})()`);
+        const key=JSON.stringify(shape);if(session.shapeKey!==key){session.shapeKey=key;fs.appendFileSync(path.join(app.getPath('userData'),'logs','workspace-structure.log'),key+'\n');}
+      }
+      const script = pageAutomationScript(credentials, code, session.mfaSubmitted, target?.area, target?.accountId);
+      const outcome = await win.webContents.executeJavaScript(script, true);
+      const diagnosticKey = JSON.stringify(outcome?.diagnostics);
+      if (outcome?.diagnostics && session.diagnosticKey !== diagnosticKey) {
+        session.diagnosticKey = diagnosticKey;
+        chatGPTAuthLog('screen-detected', {host: authHostname(url), diagnostics: outcome.diagnostics});
+      }
+      if (outcome?.status === 'verification') { chatGPTAuthLog('verification-required', { host: authHostname(url) }); fail('ChatGPT requires a security check that Omni cannot complete automatically.'); return; }
+      if (outcome?.status === 'target-workspace-unavailable') { fail('The required workspace was not found. Sign-in has not been restored.'); return; }
+      if (outcome?.status === 'single-workspace-picker') { chatGPTAuthLog('single-workspace-picker', { host: authHostname(url) }); fail('ChatGPT only allows one workspace per sign-in on this page, so Omni did not choose one at random.'); return; }
+      if (outcome?.status === 'rejected') { chatGPTAuthLog('provider-rejected-sign-in', { host: authHostname(url) }); fail('ChatGPT rejected the sign-in details. Check the saved values and try again.'); return; }
+      if (outcome?.status === 'submitted-code') session.mfaSubmitted = true;
+      const labels = {starting:'Signing in to ChatGPT…','submitted-email':'Email submitted; continuing sign-in…','submitted-password':'Password submitted; continuing sign-in…','submitted-code':'Two-factor code submitted…','selected-all-workspaces':'All available workspaces selected…','submitted-consent':'Confirming sign-in to Codex…','waiting-consent':'Waiting for sign-in confirmation…'};
+      const next = labels[outcome?.status] || 'Signing in to ChatGPT…';
+      if (session.status !== next) {
+        session.status = next;
+        session.pageStage = outcome?.status || 'waiting';
+        chatGPTAuthLog('page-step', { host: authHostname(url), pageStage: outcome?.status || 'waiting' });
+        broadcast('bridge-event', {event:'chatgpt-auto-login',state:result.state,status:'progress',message:next});
+      }
+    } catch { chatGPTAuthLog('page-navigation-during-step', { host: authHostname(url) }); /* Navigation may replace the document while an automation step is running. */ }
+    } finally { session.inspectBusy = false; }
+  };
+  win.webContents.on('did-finish-load', inspect);
+  win.webContents.on('did-navigate-in-page', inspect);
+  win.webContents.on('did-fail-load', (_event, code, _description, url) => {
+    if (code !== -3) { chatGPTAuthLog('page-load-failed', { host: authHostname(url), errorCode: code }); fail('The hidden ChatGPT sign-in page could not be loaded.'); }
+  });
+  win.webContents.setWindowOpenHandler(({url}) => {
+    if (trustedChatGPTAuthUrl(url)) { win.loadURL(url).catch(()=>fail('The ChatGPT sign-in page could not be opened.')); }
+    else fail('ChatGPT tried to open an unsupported sign-in page.');
+    return {action:'deny'};
+  });
+  win.webContents.on('will-navigate', (navigationEvent, url) => { if (!trustedChatGPTAuthUrl(url)) { navigationEvent.preventDefault(); fail('The provider redirected to an untrusted sign-in page.'); } });
+  session.timer = setInterval(inspect, 700);
+  session.expiry = setTimeout(()=>fail('ChatGPT sign-in timed out.'), 15*60*1000);
+  win.on('closed',()=>{if(autoLoginWindows.has(result.state))closeAutoLogin(result.state,'error','ChatGPT sign-in was interrupted.');});
+  win.loadURL(result.url).catch(()=>{ chatGPTAuthLog('initial-page-load-failed', { host: authHostname(result.url) }); fail('The hidden ChatGPT sign-in page could not be loaded.'); });
+  return {state:result.state, expires_at:result.expires_at, automatic:true};
+}
+
+function cancelChatGPTAutoLogin(state) { closeAutoLogin(state, null, null); return true; }
+
 app.whenReady().then(() => { if(!demo&&!app.hasSingleInstanceLock())return; Menu.setApplicationMenu(null); if(!demo)startBridge(); createWindow(); if(demo)windowRef.webContents.once('did-finish-load',()=>runDemo()); });
-app.on('before-quit',()=>{quitting=true;clearTimeout(bridgeRetryTimer);});
+app.on('before-quit',()=>{quitting=true;clearTimeout(bridgeRetryTimer);for(const state of [...autoLoginWindows.keys()])closeAutoLogin(state,null,null);});
 app.on('window-all-closed', () => {quitting=true;clearTimeout(bridgeRetryTimer); clearTimeout(saveWindowTimer); if (bridge) {const child=bridge;bridge.stdin.end();if(process.platform==='win32')spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true});else child.kill();} if (process.platform !== 'darwin') app.quit(); });
-ipcMain.handle('bridge-send', (_, action, fields) => send(action, fields));
-ipcMain.handle('open-account-manager',(_,provider)=>openAccountManager(provider));
+ipcMain.handle('bridge-send', async (event, action, fields) => {
+  if (['automatic_account_inventory', 'automatic_account_update', 'automatic_account_remove'].includes(action)) {
+    const url = new URL(event.sender.getURL());
+    if (path.basename(url.pathname) !== 'manager.html' || url.searchParams.get('mode') !== 'automatic') throw new Error('Open the automatic sign-in manager first.');
+    const store = credentialStore();
+    if (action === 'automatic_account_update') {
+      store.update(fields.email, parseCredentialLine(fields.value));
+      return {saved: true};
+    }
+    if (action === 'automatic_account_remove') {
+      store.remove(fields.email);
+      return {removed: true};
+    }
+    return store.inventory(await send('account_inventory', {}));
+  }
+  return send(action, fields);
+});
+ipcMain.handle('chatgpt-auto-login', beginChatGPTAutoLogin);
+app.whenReady().then(()=>{if(!demo){const timer=setInterval(repairExpiredAccounts,60000);timer.unref();setTimeout(repairExpiredAccounts,15000);}});
+ipcMain.handle('chatgpt-auto-login-cancel',(_,state)=>cancelChatGPTAutoLogin(state));
+ipcMain.handle('open-account-manager',(_,provider,mode)=>openAccountManager(provider,mode));
 ipcMain.handle('open-external', (_, url) => {const target=new URL(url);if(target.protocol!=='https:'||!['github.com','accounts.google.com','auth.openai.com','claude.ai','grok.com','x.ai','accounts.x.ai','auth.x.ai'].includes(target.hostname))throw new Error('Unsupported link');return shell.openExternal(target.href);});
 ipcMain.handle('window-pin',()=>{windowRef.setAlwaysOnTop(!windowRef.isAlwaysOnTop());saveWindow();return windowRef.isAlwaysOnTop();});
 ipcMain.handle('window-panel',(_,expanded)=>{const [x,y]=windowRef.getPosition();const [,height]=windowRef.getSize();windowRef.setBounds({x,y,width:expanded?1120:280,height});return expanded;});

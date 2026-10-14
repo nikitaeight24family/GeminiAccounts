@@ -21,6 +21,9 @@
     "productName": "Omni",
     "files": [
       "main.js",
+      "chatgpt_auto_login.js",
+      "credential_store.js",
+      "auth_preload.js",
       "preload.js",
       "renderer/**/*"
     ],

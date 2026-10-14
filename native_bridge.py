@@ -158,6 +158,7 @@ class NativeBridge:
         if changed:
             self.controller.save()
         live = self.live_activity.get(name, {})
+        usage_tokens = max(0, int(live.get('tokens', 0) or 0))
         return {'id': name, 'provider': provider,
                 'label': prefs.get('api-account-labels' if account.get('api') else 'labels', {}).get(name) or account.get('email') or name,
                 'plan': quota.get('subscription') or quota.get('plan_type') or account.get('plan_type') or account.get('subscription') or 'Plan unknown',
@@ -166,7 +167,8 @@ class NativeBridge:
                 'status': status, 'severity': severity, 'detail': detail, 'windows': windows,
                 'priority': account.get('priority', 0) if account.get('api') else prefs.get('account-priorities', {}).get(name, 0),
                 'disabled': bool(account.get('disabled')), 'api': bool(account.get('api')),
-                'responses': max(account.get('success', 0), live.get('responses', 0)), 'model': live.get('model', ''),
+                'responses': max(account.get('success', 0), live.get('responses', 0)), 'tokens': usage_tokens,
+                'model': live.get('model', ''),
                 'activity': live.get('state', 'idle'),
                 'resetCredits': quota.get('reset_credits'), 'resetAvailable': bool(quota.get('reset_options')),
                 'resetReason': quota.get('reset_error') or '',
@@ -263,15 +265,24 @@ class NativeBridge:
                             'claude': {'claude', 'anthropic'}, 'grok': {'xai'}}[provider]
         rows = self.controller.request('/auth-files').get('files', [])
         candidates = []
+        recent_candidates = []
         for row in rows:
             if row.get('provider', row.get('type')) not in gateway_provider:
                 continue
-            try:
-                created = datetime.fromisoformat(row['created_at'].replace('Z', '+00:00')).timestamp()
-            except (KeyError, AttributeError, ValueError, TypeError, OverflowError):
-                continue
-            if started_at - 5 <= created <= time.time() + 5:
+            timestamps = []
+            for field in ('created_at', 'updated_at', 'last_refresh', 'modified_at'):
+                try:
+                    raw = row.get(field)
+                    if raw:
+                        timestamps.append(datetime.fromisoformat(str(raw).replace('Z', '+00:00')).timestamp())
+                except (AttributeError, ValueError, TypeError, OverflowError):
+                    pass
+            if any(started_at - 60 <= stamp <= time.time() + 10 for stamp in timestamps):
                 candidates.append(row)
+            elif row.get('auth_index') and timestamps and max(timestamps) >= started_at - 300:
+                recent_candidates.append(row)
+        if not candidates and len(recent_candidates) == 1:
+            candidates = recent_candidates
         if not candidates:
             return {'status': 'checking'}
         if len(candidates) != 1:
@@ -280,7 +291,7 @@ class NativeBridge:
         identity = account.get('account') if provider == 'openai' and account.get('account') else account.get('email')
         duplicate = bool(identity and any(
             other is not account and other.get('provider', other.get('type')) in gateway_provider
-            and str((other.get('account') if provider == 'openai' and account.get('account') else other.get('email')) or '').casefold() == str(identity).casefold()
+            and str((other.get('account') if provider == 'openai' and other.get('account') else other.get('email')) or '').casefold() == str(identity).casefold()
             for other in rows))
         status, _, detail = account_status(account)
         if status in ('Sign in again', 'Access denied', 'Account blocked', 'Verification required'):
@@ -400,6 +411,50 @@ class NativeBridge:
                 return {'preferences': self.preferences(),
                         'accounts': list(self.cached_accounts.values()) if self.initial_inventory_complete else list(self.startup_accounts),
                         'inventoryComplete': self.initial_inventory_complete}
+        if action == 'account_identity':
+            with self.state_lock:
+                entry = self.accounts.get(command.get('id'))
+                return {'email': entry[0].get('email', '')} if entry else {}
+        if action == 'replace_recovered':
+            raise AccountError('Recovery must verify the original workspace before replacing credentials.')
+        if action == 'recovery_target':
+            name = str(command.get('id') or '')
+            raw = self.controller.request('/auth-files/download?name='+quote(name))
+            from chatgpt_auth import gateway_credential
+            credential = gateway_credential(raw)
+            return {'accountId': credential['account_id'], 'email': credential['email'], 'area': credential['plan_type']}
+        if action == 'recovery_verify':
+            name = str(command.get('id') or '')
+            rows = self.clients['openai'].accounts()
+            row = next((r for r in rows if r.get('name') == name), None)
+            if not row:
+                return {'verified': False}
+            quota = self.clients['openai'].quota(row)
+            return {'verified': not bool(quota.get('error')), 'error': quota.get('error', '')}
+        if action == 'account_inventory':
+            email = str(command.get('email') or '').strip().casefold()
+            rows = self.controller.request('/auth-files').get('files', [])
+            result = []
+            for row in rows:
+                if email and str(row.get('email') or '').casefold() != email:
+                    continue
+                with self.state_lock:
+                    entry = self.accounts.get(row.get('name'))
+                    if entry:
+                        row = {**row, **entry[0]}
+                status, severity, detail = account_status(row)
+                name = str(row.get('name') or '')
+                area = row.get('plan_type') or (row.get('quota') or {}).get('plan_type')
+                if not area:
+                    import re
+                    match = re.search(r'-(free|k12|edu|plus|team|pro|business)\.json$', name, re.I)
+                    area = match.group(1) if match else 'Unknown workspace'
+                result.append({'id': name, 'email': row.get('email',''),
+                               'area': area,
+                               'status': status, 'severity': severity,
+                               'detail': detail, 'auth_index': bool(row.get('auth_index')),
+                               'models': row.get('models') or row.get('model_ids') or []})
+            return result
         if action == 'visibility':
             provider = command['provider']
             if provider not in SERVICES:
@@ -630,8 +685,10 @@ class NativeBridge:
                     # This is confirmed recent-account attribution, not an assertion
                     # that a different request with the same model uses this account.
                     state = 'recent' if recent else 'idle'
+                    stats = self.activity.state.get('stats', {}).get(name, {})
                     data = {'state': state, 'model': model if recent else '',
-                            'responses': self.activity.state.get('stats', {}).get(name, {}).get('success', account.get('success', 0))}
+                            'responses': stats.get('success', account.get('success', 0)),
+                            'tokens': max(0, int(stats.get('tokens', 0) or 0))}
                     if self.live_activity.get(name) != data:
                         self.live_activity[name] = data
                         changed.append((account, provider))
