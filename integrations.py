@@ -278,7 +278,14 @@ class Integrations:
         # routes in the gateway in sync with the live Gemini catalog as well;
         # configuring only Claude's environment leaves a stale custom model
         # visible to the client but unknown to the provider.
-        self.configure_desktop_routes(sorted(m for m in models if m.startswith('gemini-')))
+        # The CLI environment can be prepared before the local gateway is
+        # running (for example on a fresh machine or during an offline setup).
+        # Keep the client configuration usable and let the next connection
+        # check reconcile gateway aliases once the service is available.
+        try:
+            self.configure_desktop_routes(sorted(m for m in models if m.startswith('gemini-')))
+        except (AccountError, OSError, KeyError, ValueError):
+            pass
         env = settings.setdefault('env', {})
         env.update({'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317',
                     'ANTHROPIC_AUTH_TOKEN': key, 'ANTHROPIC_API_KEY': '',

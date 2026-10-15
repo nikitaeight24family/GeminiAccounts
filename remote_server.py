@@ -250,7 +250,10 @@ def collect_accounts_payload(controller):
                 accounts[path.name] = path.read_text(encoding='utf-8')
             except Exception:
                 continue
-    payload = {'accounts': accounts}
+    # Keep an empty fixture truly empty. The deployment script accepts both
+    # the structured payload and the legacy bare account mapping, so there is
+    # no need to add an empty wrapper when there is nothing to migrate.
+    payload = {'accounts': accounts} if accounts else {}
     models_file = controller.proxy_dir / 'cliproxy-models.json'
     if models_file.exists():
         try:
