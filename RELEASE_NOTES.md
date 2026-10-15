@@ -1,4 +1,4 @@
-# Omni 1.6.4 — CI and offline setup fixes
+# Omni 1.6.5 — CI-verified desktop release
 
 - Removed the redundant Connections button from the top bar; Connections remains available inside Settings.
 - Renamed **Accounts & Archive** to **Accounts** while keeping archive export and import in the Accounts settings page.
