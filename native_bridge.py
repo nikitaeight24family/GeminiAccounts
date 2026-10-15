@@ -206,6 +206,19 @@ class NativeBridge:
         if cached != dto:
             self.emit({'event': 'account', 'account': dto})
 
+    def _refresh_openai_priorities(self):
+        """Reconcile provider priorities away from the UI command thread."""
+        try:
+            with self.state_lock:
+                accounts = [account for account, provider in self.accounts.values()
+                            if provider == 'openai' and not account.get('api')]
+            if accounts:
+                self.clients['openai'].apply_reset_priority(accounts)
+        except Exception:
+            # The clicked value is already persisted locally. A later refresh
+            # will retry the remote reconciliation without delaying the UI.
+            pass
+
     def schedule_cache_save(self):
         if self.cache_timer:
             self.cache_timer.cancel()
@@ -621,11 +634,10 @@ class NativeBridge:
             priorities[name] = max(0, min(999, priorities.get(name, 0)+int(command['delta'])))
             self.controller.save()
             if provider == 'openai':
-                try:
-                    cached_openai = [acc for acc, p in self.accounts.values() if p == 'openai']
-                    self.clients['openai'].apply_reset_priority(cached_openai or self.clients['openai'].accounts())
-                except Exception:
-                    pass
+                # The remote priority write is slow network work. Publish the
+                # clicked value first and reconcile the provider pool off the
+                # command path so the UI responds immediately.
+                self.pool.submit(self._refresh_openai_priorities)
             self.publish(account, provider)
         elif action == 'floor':
             value = int(command['value'])
@@ -777,6 +789,8 @@ class NativeBridge:
                 on_progress=lambda rows: self.emit({'event': 'connections', 'connections': rows}))
         elif action == 'connect':
             return self.connections.connect(command['client'])
+        elif action == 'restore_client':
+            return self.connections.restore(command['client'])
         elif action == 'restart_client':
             return self.connections.restart(command['client'], command.get('confirmed', False))
         else:

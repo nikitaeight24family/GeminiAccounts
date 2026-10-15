@@ -51,10 +51,17 @@ def free_model_catalog(accounts):
 
 
 def accounts_for_model(accounts, model):
-    """Filter GPT accounts to free-only when the free catalog supports model."""
+    """Keep Free credentials away from paid-only GPT model requests.
+
+    A missing or stale Free catalog must fail closed.  Previously an empty
+    catalog made this function return every account, allowing a paid model
+    such as Sol to be attempted on a Free credential before the next catalog
+    refresh completed.
+    """
     free = free_model_catalog(accounts)
     if model not in free:
-        return list(accounts)
+        return [account for account in accounts
+                if not account.get('disabled') and not is_free_account(account)]
     return [account for account in accounts
             if not account.get('disabled') and is_free_account(account)
             and model in supported_models(account)]

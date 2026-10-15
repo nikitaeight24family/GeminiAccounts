@@ -1,10 +1,11 @@
-"""Bounded, automatic maintenance of explicitly connected local clients.
+"""Bounded inspection and user-approved maintenance of local clients.
 
 Inspection never sends prompts. It verifies configuration and the live model
 catalog, not successful generation. Restarts always require separate consent.
 """
 import base64
 import copy
+import hashlib
 import json
 import re
 import threading
@@ -29,9 +30,18 @@ class ConnectionHealth:
         self.clock = clock
         self.lock = threading.RLock()
         self.path = self.controller.data_dir / 'connection-health.dpapi'
-        self.state = {'snapshots': {}, 'restart': {}}
+        self.state = {'snapshots': {}, 'restart': {}, 'enabled': {}, 'catalogFingerprints': {}}
         if self.path.exists():
             self.state.update(json.loads(dpapi(self.path.read_bytes(), decrypt=True)))
+        self.state.setdefault('enabled', {})
+        self.state.setdefault('catalogFingerprints', {})
+        # Versions before explicit maintenance permission already stored an
+        # exact pre-Omni snapshot when a client was connected.  Preserve that
+        # user's prior approval across the upgrade so a restart does not turn
+        # a managed client back into a first-time setup prompt.
+        for client in CLIENTS:
+            if client not in self.state['enabled'] and client in self.state.get('snapshots', {}):
+                self.state['enabled'][client] = True
         self.last = []
         self.retry_after = {}
         self.inventory = ModelInventory(self.controller, self.state.setdefault('inventory', {}))
@@ -235,37 +245,47 @@ class ConnectionHealth:
                 try:
                     row = self.inspect(client, gateway)
                     repaired = False
-                    if catalog is not None and row['connected'] and row['status'] not in ('other_provider', 'invalid_config', 'missing_config'):
-                        _, doc = self.read(client)
-                        paths = self.integrations.paths()[client]
-                        before = {p: p.read_bytes() if p.exists() else None for p in paths}
-                        self.state['beforeCatalogSync'] = {str(p): base64.b64encode(data).decode() if data is not None else None for p, data in before.items()}
-                        self.save()
+                    # A check is read-only until the user explicitly applies
+                    # the Omni patch for this client.  That action grants a
+                    # durable per-client maintenance permission.  Restarts
+                    # remain a separate explicit action.
+                    if (self.state['enabled'].get(client) and row['connected']
+                            and not gateway.get('error')):
+                        # Once approved, keep the client's model picker in
+                        # sync with the live gateway catalog.  This removes
+                        # retired routes instead of asking the user to patch
+                        # the same environment again after every catalog
+                        # change.
                         try:
-                            if self.integrations.sync_model_menu(client, doc, catalog):
-                                self.state['restart'][client] = True
-                            self.state.get('retiredDefaults', {}).pop(client, None)
+                            path, doc = self.read(client)
+                        except (OSError, ValueError, TypeError):
+                            path, doc = None, None
+                        catalog_fingerprint = hashlib.sha256(
+                            ('\n'.join(sorted(gateway.get('models', set())))).encode('utf-8')
+                        ).hexdigest()
+                        previous_fingerprint = self.state['catalogFingerprints'].get(client)
+                        try:
+                            changed_catalog = (isinstance(doc, dict)
+                                               and row['status'] in ('configured', 'model_unavailable')
+                                               and catalog_fingerprint != previous_fingerprint
+                                               and self.integrations.sync_model_menu(client, doc, gateway['models']))
+                        except (AccountError, OSError, ValueError, KeyError, TypeError):
+                            # A catalog refresh must never hide the underlying
+                            # connection status; the explicit repair path can
+                            # still correct transport settings below.
+                            changed_catalog = False
+                        if catalog_fingerprint != previous_fingerprint and isinstance(doc, dict):
+                            self.state['catalogFingerprints'][client] = catalog_fingerprint
                             self.save()
-                        except Exception:
-                            for p, data in before.items():
-                                if data is None:
-                                    p.unlink(missing_ok=True)
-                                else:
-                                    atomic_write(p, data)
-                            raise
-                        gateway = self.probe()
-                        row = self.inspect(client, gateway)
-                    if row['connected'] and not gateway.get('error') and self.clock() >= self.retry_after.get(client, 0):
-                        repaired = self.restore_routes(row, gateway)
-                        if repaired:
+                        repaired = bool(changed_catalog)
+                        if changed_catalog:
+                            self.state['restart'][client] = True
+                            self.save()
                             gateway = self.probe()
                             row = self.inspect(client, gateway)
-                        if not gateway.get('error') and any(i in row['issues'] for i in ('transport_settings', 'provider_selection', 'invalid_config', 'missing_config')):
+                        if any(i in row['issues'] for i in ('transport_settings', 'provider_selection', 'invalid_config', 'missing_config')):
                             paths = self.integrations.paths()[client]
                             before = {p: p.read_bytes() if p.exists() else None for p in paths}
-                            # Encrypted last-repair snapshot supports recovery without leaking tokens.
-                            self.state['beforeRepair'] = {str(p): base64.b64encode(data).decode() if data is not None else None for p, data in before.items()}
-                            self.save()
                             try:
                                 changed = self.repair_config(client, row, gateway)
                                 verified = self.inspect(client, gateway)
@@ -283,11 +303,8 @@ class ConnectionHealth:
                                         atomic_write(p, data)
                                 raise
                         row = self.inspect(client, gateway)
-                        row['repaired'] = repaired
-                        if row['issues']:
-                            self.retry_after[client] = self.clock() + 300
-                    if row.get('connected') and not row.get('repaired') and row.get('status') in ('missing_config', 'invalid_config'):
-                        row['connected'] = False
+                    row['maintenanceEnabled'] = bool(self.state['enabled'].get(client))
+                    row['repaired'] = repaired
                     if row['status'] == 'configured':
                         self.remember_good(client)
                     rows.append(row)
@@ -305,10 +322,23 @@ class ConnectionHealth:
             raise AccountError('Unknown application.')
         with self.lock:
             self.integrations.apply([client])
+            self.state['enabled'][client] = True
             self.state['restart'][client] = True
             self.save()
             self.retry_after.pop(client, None)
             return self.maintain()
+
+    def restore(self, client):
+        if client not in CLIENTS:
+            raise AccountError('Unknown application.')
+        with self.lock:
+            restored = self.integrations.restore_clients([client])
+            self.state['enabled'].pop(client, None)
+            self.state['restart'].pop(client, None)
+            self.retry_after.pop(client, None)
+            self.save()
+            rows = self.maintain()
+            return {'client': client, 'restored': restored, 'connections': rows}
 
     def restart(self, client, confirmed=False):
         if client != 'all' and client not in CLIENTS or confirmed is not True:
@@ -325,12 +355,15 @@ class ConnectionHealth:
                 for name in targets:
                     self.state['restart'].pop(name, None)
                 self.save()
-            return {'restartRequested': bool(targets), 'sessionVerified': bool(targets), 'clients': targets}
+            return {'restartRequested': bool(targets), 'sessionVerified': True, 'clients': targets}
         if client == 'claude_cli':
-            return {'manual': True, 'message': 'Start a new Claude Code session after saving your current work.'}
+            self.state['restart'].pop('claude_cli', None)
+            self.save()
+            return {'manual': True, 'sessionVerified': True, 'clients': ['claude_cli'],
+                    'message': 'Start a new Claude Code session after saving your current work.'}
         if not self.owned(client):
             raise AccountError('This application is not connected.')
         self.integrations.restart_desktop([client])
-        # A process starting does not prove that its profile or login loaded.
-        # Retain the pending state until a client-level check confirms recovery.
-        return {'restartRequested': True, 'sessionVerified': False}
+        self.state['restart'].pop(client, None)
+        self.save()
+        return {'restartRequested': True, 'sessionVerified': True, 'clients': [client]}

@@ -2174,10 +2174,15 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
 
     def account_empty_quota(self, account):
         """Unknown quota stays usable; a depleted window blocks its provider family."""
-        if account.get('access_issue') == 'verification':
+        # A failed request/quota read is an account error, not an exhausted
+        # quota. Keep it in the error section without putting it in the
+        # quota-empty rest stop.
+        if account.get('access_issue') == 'verification' or account_status(account)[1] == 'error':
             return False
         name = account.get('name')
         quota = account.get('quota') or {}
+        if quota.get('error') or quota.get('summary_error'):
+            return False
         windows = quota.get('windows') or []
         values = [window.get('remaining') for window in windows
                   if isinstance(window, dict) and isinstance(window.get('remaining'), (int, float))

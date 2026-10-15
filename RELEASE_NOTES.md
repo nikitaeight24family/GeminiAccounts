@@ -1,3 +1,9 @@
+# Omni 1.6.2 — Electron UI cleanup
+
+- Removed the redundant Connections button from the top bar; Connections remains available inside Settings.
+- Renamed **Accounts & Archive** to **Accounts** while keeping archive export and import in the Accounts settings page.
+- Kept the Electron desktop build and rebuilt the portable Windows package.
+
 # Omni 1.5.0 — Account highlights and safer ChatGPT imports
 
 - Fixed missing Gemini highlights when fast responses finish between queue polls. Successful responses remain highlighted for 60 seconds after completion, including long responses.

@@ -171,7 +171,7 @@ def get_client_snippets(server_ip, client_key):
     base_url = f'http://{server_ip}:8317'
     responses_url = f'{base_url}/v1'
 
-    claude_cli_ps = f'''[IO.File]::WriteAllText("$HOME\\.claude\\settings.json", '{{"env":{{"ANTHROPIC_BASE_URL":"{base_url}","ANTHROPIC_AUTH_TOKEN":"{client_key}","ANTHROPIC_API_KEY":"","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1","API_TIMEOUT_MS":"604800000","CLAUDE_ENABLE_STREAM_WATCHDOG":"0"}}}}')'''
+    claude_cli_ps = f'''[IO.File]::WriteAllText("$HOME\\.claude\\settings.json", '{{"env":{{"ANTHROPIC_BASE_URL":"{base_url}","ANTHROPIC_AUTH_TOKEN":"{client_key}","ANTHROPIC_API_KEY":"","CLAUDE_CODE_AUTO_MODE_SERVER":"0","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1","API_TIMEOUT_MS":"604800000","CLAUDE_ENABLE_STREAM_WATCHDOG":"0"}}}}')'''
 
     claude_cli_bash = f'''mkdir -p ~/.claude && cat << 'EOF' > ~/.claude/settings.json
 {{
@@ -179,6 +179,7 @@ def get_client_snippets(server_ip, client_key):
     "ANTHROPIC_BASE_URL": "{base_url}",
     "ANTHROPIC_AUTH_TOKEN": "{client_key}",
     "ANTHROPIC_API_KEY": "",
+    "CLAUDE_CODE_AUTO_MODE_SERVER": "0",
     "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
     "API_TIMEOUT_MS": "604800000",
     "CLAUDE_ENABLE_STREAM_WATCHDOG": "0"

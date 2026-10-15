@@ -10,6 +10,7 @@ translations['Account archive']='Архив аккаунтов';
 Object.assign(translations,{'What Omni checked':'Что Omni проверил','App found':'Приложение найдено','App not found':'Приложение не найдено','Files Omni manages':'Файлы, которыми управляет Omni','Settings written':'Какие настройки записаны','Models in gateway':'Моделей в шлюзе','Models selected in app':'Модели, выбранные в приложении','User action needed':'Что нужно от вас','Save work, then restart to apply these settings.':'Сохраните работу и перезапустите приложение, чтобы применить настройки.','Start a new terminal session to apply these settings.':'Откройте новый сеанс терминала, чтобы применить настройки.','Everything is ready':'Всё готово','Settings are verified and active.':'Настройки проверены и уже действуют.','Connected; waiting for you to apply changes':'Подключено; осталось применить изменения','Show setup details':'Показать, что меняется','Hide setup details':'Скрыть подробности','Omni writes these files when you connect:':'При подключении Omni записывает эти файлы:','Connect this application to install Omni settings and its current model catalog.':'Подключите приложение, чтобы записать настройки Omni и текущий каталог моделей.','Catalog checked without sending a model request.':'Каталог проверен без отправки запроса модели.','Models currently used':'Модель, используемая сейчас','No model request is active':'Сейчас нет активного запроса модели','Configure connection':'Настроить подключение','Select an available model in the app:':'Выберите доступную модель в приложении:'});
 Object.assign(translations,{'What Omni checked':'Что проверил Omni','App found':'Приложение найдено','App not found':'Приложение не найдено','Files Omni manages':'Файлы Omni','Settings written':'Записанные настройки','Models in gateway':'Моделей в шлюзе','Models selected in app':'Модели в приложении','User action needed':'Требуется от вас','Save work, then restart to apply these settings.':'Сохраните работу и перезапустите приложение, чтобы применить настройки.','Start a new terminal session to apply these settings.':'Откройте новый сеанс терминала, чтобы применить настройки.','Everything is ready':'Всё готово','Settings are verified and active.':'Настройки проверены и применяются.','Connected; waiting for you to apply changes':'Подключено; осталось применить изменения','Show setup details':'Показать подробности подключения','Hide setup details':'Скрыть подробности подключения','Omni writes these files when you connect:':'При подключении Omni записывает эти файлы:','Connect this application to install Omni settings and its current model catalog.':'Подключите приложение, чтобы записать настройки Omni и актуальный каталог моделей.','Catalog checked without sending a model request.':'Каталог проверен без отправки запроса модели.','Models currently used':'Текущая модель','No model request is active':'Сейчас нет активного запроса модели','Configure connection':'Настроить подключение','Select an available model in the app:':'Выберите доступную модель в приложении:','Verified':'Проверено','Will be created on connect':'Будет создан при подключении','No fixed model is set; the app uses its model picker.':'Модель не закреплена: приложение использует собственный список.','Omni connection':'Подключение Omni','Omni settings are not installed for this application.':'Настройки Omni для приложения ещё не записаны.','Restart is needed to load the settings.':'Нужен перезапуск, чтобы применить настройки.','Complete the connection step below.':'Выполните подключение ниже.'});
 translations['Connection needs attention']='Подключение требует внимания';translations['Check and repair']='Проверить и исправить';
+Object.assign(translations,{'Apply Omni patch':'Применить патч Omni','Check connection':'Проверить подключение','Restore stock settings':'Вернуть стоковые настройки','Restore stock settings for this application?':'Вернуть стоковые настройки этого приложения?','Stock settings restored':'Стоковые настройки восстановлены','Connections are checked only. Nothing changes until you apply a patch.':'Проверка только читает состояние. Изменения появятся после явного применения патча.','Patch applied; restart is still manual.':'Патч применён; перезапуск выполняется вручную.'});
 Object.assign(translations,{'Codex settings':'Настройки Codex','Omni provider profile':'Профиль провайдера Omni','Omni model catalog':'Каталог моделей Omni','Claude Desktop settings':'Настройки Claude Desktop','Active profile index':'Индекс активного профиля','Omni model profile':'Профиль моделей Omni','Claude Code CLI settings':'Настройки Claude Code CLI','Local gateway address':'Адрес локального шлюза','Gateway access key':'Ключ доступа к шлюзу','OpenAI-compatible Responses protocol':'Протокол Responses для OpenAI','OpenAI sign-in bypass':'Вход OpenAI не требуется','Automatic model discovery':'Автоматическое обнаружение моделей','Gateway provider':'Провайдер шлюза','Available model list':'Список доступных моделей','Present; not managed by Omni':'Файл есть, но Omni им не управляет.'});
 Object.assign(translations,{'Remote server':'Удалённый сервер','Host / IP address':'Хост / IP-адрес','SSH port':'SSH-порт','SSH username':'SSH-логин','SSH password':'SSH-пароль','Password (optional if using key)':'Пароль (необязательно при ключе)','SSH private key file':'Файл приватного ключа SSH','Select private key file…':'Выберите файл ключа…','FIDO / Security Key':'FIDO / Ключ безопасности','Authenticate via Windows Hello / hardware FIDO key (requires touch)':'Вход через Windows Hello / FIDO-ключ (требуется касание)','Test connection':'Проверить соединение','Deploy backend to server':'Перенести бекенд на сервер','Backend routing mode':'Режим работы бекенда','Local backend (127.0.0.1)':'Локальный бекенд (127.0.0.1)','Connect clients to server':'Подключение клиентов к серверу','Copy PowerShell':'Копировать PowerShell','Copy Bash':'Копировать Bash','Copy JSON':'Копировать JSON','Copied!':'Скопировано!','Deploying…':'Развёртывание…','Connection test failed':'Ошибка подключения'});
 const t=value=>state.language==='ru'?(translations[value]||value):value;
@@ -35,7 +36,7 @@ $('settings').innerHTML=icon('settings');
 document.querySelector('.brand')?.addEventListener('click',()=>{if(omniEasterActive)return;omniLogoClicks++;clearTimeout(omniLogoClickTimer);if(omniLogoClicks>=3){omniLogoClicks=0;triggerOmniEasterEgg();}else omniLogoClickTimer=setTimeout(()=>{omniLogoClicks=0;},900);});
 function providerIcon(p){const file=p==='gemini'?'antigravity':p.startsWith('openai')?'openai':p==='claude'?'claude':p==='grok'?'grok':'omni';return `<img class="provider-icon ${p}" src="assets/${file}.png" alt="">`;}
 function buttonIcon(kind){const file=kind==='pause'?'pause':kind==='play'?'play':kind==='up'?'up':kind==='down'?'down':kind==='remove'?'remove':'reset';return `<img class="button-icon" src="assets/${file}.png" alt="">`;}
-function exhausted(a){return a.severity==='error'||String(a.status).toLowerCase().includes('exhaust')||(a.windows||[]).some(w=>w.remaining!=null&&w.remaining<=1);}
+function exhausted(a){return a.severity!=='error'&&(String(a.status).toLowerCase().includes('exhaust')||(a.windows||[]).some(w=>w.remaining!=null&&w.remaining<=1));}
 function effectiveRemaining(a,w){if(w.remaining==null)return null;const enclosing=(a.windows||[]).find(x=>x.family===w.family&&((w.label==='5h'&&(x.label==='1w'||x.label==='1mo'))||(w.label==='1w'&&x.label==='1mo')));if(enclosing&&enclosing.remaining!=null){if(enclosing.remaining<=1)return 0;return Math.min(w.remaining,enclosing.remaining);}return w.remaining;}
 function bucket(a){return a.provider==='openai'&&String(a.plan).toLowerCase()==='free'?'openai-free':a.provider;}
 function severityClass(a){ return a.severity || (a.status==='Available'?'normal':'warning'); }
@@ -187,7 +188,7 @@ function applyAccountEvent(e,paint=true){if(e.event==='account')state.accounts.s
 function acceptAccountEvent(e){if(firstInventoryPending){bufferedAccountEvents.push(e);if(e.event!=='accounts')return;for(const buffered of bufferedAccountEvents)applyAccountEvent(buffered,false);bufferedAccountEvents=[];firstInventoryPending=false;queueRender();return;}applyAccountEvent(e);}
 window.omni.onEvent(e=>{if(e.event==='account'||e.event==='accounts'){if(startupSnapshotPending)bufferedAccountEvents.push(e);else acceptAccountEvent(e);} if(e.event==='preferences')applyPreferences(e.preferences); if(e.event==='ready')$('notice').textContent='● '+t('Connected'); if(e.event==='error'||e.event==='notice')$('notice').textContent=e.message; if(e.event==='remote_deploy_progress'){const m=$('ssh-deploy-msg'),b=$('ssh-deploy-progress');if(m&&b){b.style.display='block';m.textContent='● '+e.message;}}});
 function applyPreferences(p){if(!p)return;state.language=p.language||'en';state.theme=p.theme||'dark';state.telegram=p.telegram||{};state.summaryCollapsed=p.summaryCollapsed||{};state.hidden=!!p.private;state.visible=p.visible||state.visible;state.backendMode=p.backendMode||'local';state.remoteServer=p.remoteServer||{};state.remoteServerConfig=p.remoteServerConfig||{};state.remoteSnippets=p.remoteSnippets||null;localStorage.setItem('private',state.hidden?'1':'0');for(const [k,v] of Object.entries(p.collapsed||{}))state.collapsed[k]=v;document.documentElement.dataset.theme=p.theme||'dark';$('privacy').innerHTML=`<img src="assets/eye-${state.hidden?'closed':'open'}.png" alt="">`;$('pin').innerHTML='<img src="assets/pin.png" alt="">';render();}
-document.querySelector('.sidebar').addEventListener('click',e=>{const toggle=e.target.closest('[data-toggle]');if(toggle){const p=toggle.dataset.toggle;state.collapsed[p]=!state.collapsed[p];command('collapse',{provider:p,value:state.collapsed[p]});render();return}const b=e.target.closest('[data-action]');if(!b)return;const action=b.dataset.action;if(action==='priority')return command('priority',{id:b.dataset.id,delta:Number(b.dataset.delta)});if(action==='remove'&&!confirm(t('Remove account')+'?'))return;command(action,{id:b.dataset.id});});
+document.querySelector('.sidebar').addEventListener('click',e=>{const toggle=e.target.closest('[data-toggle]');if(toggle){const p=toggle.dataset.toggle;state.collapsed[p]=!state.collapsed[p];command('collapse',{provider:p,value:state.collapsed[p]});render();return}const b=e.target.closest('[data-action]');if(!b)return;const action=b.dataset.action;if(action==='priority'){const a=state.accounts.get(b.dataset.id);if(!a)return;const previous=Number(a.priority)||0;const next=Math.max(0,Math.min(999,previous+(Number(b.dataset.delta)||0)));if(next===previous)return;a.priority=next;render();command('priority',{id:b.dataset.id,delta:next-previous}).then(result=>{if(result===null){a.priority=previous;render();}});return;}if(action==='remove'&&!confirm(t('Remove account')+'?'))return;command(action,{id:b.dataset.id});});
 document.querySelector('.sidebar').addEventListener('dblclick',e=>{const name=e.target.closest('[data-rename]');if(!name||name.querySelector('input'))return;const id=name.dataset.rename,a=state.accounts.get(id),input=document.createElement('input');input.className='editor';input.value=a.customLabel||a.label||'';name.replaceChildren(input);input.focus();input.select();let saved=false;const finish=cancel=>{if(saved)return;saved=true;if(!cancel)command('rename',{id,label:input.value.trim()});if(input.isConnected)input.remove();const card=cardNodes.get(id);if(card){card._markup=null;updateCard(card,state.accounts.get(id)||a);}};input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();finish(false);}if(event.key==='Escape'){event.preventDefault();finish(true);}};input.onblur=()=>finish(false);});
 $('privacy').onclick=()=>{state.hidden=!state.hidden;localStorage.setItem('private',state.hidden?'1':'0');render();command('private',{value:state.hidden});};
 $('pin').onclick=()=>window.omni.pin().then(v=>{$('pin').classList.toggle('active',v);$('notice').textContent=v?'Pinned above other windows':'Window pin disabled';});
@@ -212,7 +213,7 @@ function settings(){ $('settings-view').querySelector('h1').textContent=t('Setti
   const counts={};for(const a of state.accounts.values()){counts[a.provider]=(counts[a.provider]||0)+1;}
   $('settings-content').innerHTML=`<nav class="settings-nav" aria-label="${t('Settings')}">
     <button class="selected" data-settings-tab="appearance">${t('Appearance')}</button>
-    <button data-settings-tab="accounts">${t('Accounts & Archive')}</button>
+    <button data-settings-tab="accounts">${t('Accounts')}</button>
     <button data-settings-tab="server">${t('Remote server')}</button>
     <button data-settings-tab="notifications">${t('Notifications')}</button>
     <button data-settings-connections>${t('Connections')}</button></nav>
@@ -290,7 +291,7 @@ function settings(){ $('settings-view').querySelector('h1').textContent=t('Setti
         <p class="settings-description">${t('Get notified when an account needs attention.')}</p>
         <label class="settings-row"><span><b>${t('Account alerts')}</b><small>${t('Only meaningful account status changes')}</small></span>
           <input class="switch" id="tg-enabled" type="checkbox" ${telegram.enabled?'checked':''}></label>
-        <label class="settings-field" for="tg-token">${t('Bot token')}<span class="settings-description">${t(telegram.tokenSaved?'Token saved':'No token saved')}</span></label>
+        <label class="settings-field" for="tg-token">${t('Bot token')}<span id="tg-token-status" class="settings-description" style="${telegram.tokenSaved?'color:var(--green)':''}">${t(telegram.tokenSaved?'Token saved':'No token saved')}</span></label>
         <div class="settings-input-action"><input id="tg-token" type="password" autocomplete="off" placeholder="${t('Paste bot token')}">
           <button id="tg-save">${t('Save')}</button></div>
         <label class="settings-field" for="tg-chat">${t('Chat ID')}</label>
@@ -352,20 +353,59 @@ function settings(){ $('settings-view').querySelector('h1').textContent=t('Setti
     document.querySelectorAll('[data-settings-tab]').forEach(b=>b.classList.toggle('selected',b===button));
     document.querySelector('[data-settings-connections]')?.classList.remove('selected');
     connectionsVisible=false;
-    if(button.dataset.settingsTab==='archive'){
-      document.querySelectorAll('[data-settings-page]').forEach(page=>page.hidden=page.dataset.settingsPage!==button.dataset.settingsTab);
-      setupInlineArchive();
-      return;
-    }
     document.querySelectorAll('[data-settings-page]').forEach(page=>page.hidden=page.dataset.settingsPage!==button.dataset.settingsTab);
+    if(button.dataset.settingsTab==='accounts'){
+      setupInlineArchive();
+    }
   });
   document.querySelector('[data-settings-connections]').onclick=()=>{
     connectionsVisible=true;
     document.querySelectorAll('[data-settings-tab]').forEach(b=>b.classList.remove('selected'));
     document.querySelector('[data-settings-connections]').classList.add('selected');
     document.querySelectorAll('[data-settings-page]').forEach(page=>page.hidden=page.id!=='inline-connections-page');
-    $('connections').click();
-  };;$('theme').value=state.theme;$('language').value=state.language;document.querySelectorAll('[data-service]').forEach(input=>input.onchange=e=>command('visibility',{provider:e.target.dataset.service,value:e.target.checked}));$('theme').onchange=e=>command('theme',{value:e.target.value});$('language').onchange=e=>command('language',{value:e.target.value});$('tg-enabled').onchange=e=>command('telegram_preferences',{enabled:e.target.checked,chatId:$('tg-chat').value});$('tg-chat').onchange=e=>command('telegram_preferences',{enabled:$('tg-enabled').checked,chatId:e.target.value});$('tg-save').onclick=async()=>{const input=$('tg-token');const result=await command('telegram_token',{token:input.value});if(result&&input.isConnected)input.value='';};$('tg-find').onclick=()=>command('telegram_find');$('tg-test').onclick=()=>command('telegram_test');$('refresh').onclick=()=>command('refresh');$('github').onclick=()=>window.omni.open('https://github.com/nikitaeight24family/Omni/releases/latest');}
+    openConnectionsPanel();
+  };
+  $('theme').value=state.theme;
+  $('language').value=state.language;
+  document.querySelectorAll('[data-service]').forEach(input=>input.onchange=e=>command('visibility',{provider:e.target.dataset.service,value:e.target.checked}));
+  $('theme').onchange=e=>command('theme',{value:e.target.value});
+  $('language').onchange=e=>command('language',{value:e.target.value});
+  $('tg-enabled').onchange=e=>command('telegram_preferences',{enabled:e.target.checked,chatId:$('tg-chat').value});
+  $('tg-chat').onchange=e=>command('telegram_preferences',{enabled:$('tg-enabled').checked,chatId:e.target.value});
+  $('tg-save').onclick=async()=>{
+    const input=$('tg-token');
+    const token=(input.value||'').trim();
+    if(!token)return;
+    const status=$('tg-token-status');
+    if(status){status.textContent=t('Saving…');status.style.color='';}
+    try{
+      const result=await command('telegram_token',{token});
+      if(result){
+        state.telegram=result.telegram||state.telegram;
+        if(status){
+          status.style.color='var(--green)';
+          status.textContent='✓ '+t('Token saved');
+        }
+        if(input.isConnected)input.value='';
+      }else{
+        if(status){
+          status.style.color='#ff6b7a';
+          status.textContent='✕ '+t('Could not save token');
+        }
+      }
+    }catch(err){
+      if(status){
+        status.style.color='#ff6b7a';
+        status.textContent='✕ '+(err.message||t('Error'));
+      }
+    }
+  };
+  $('tg-find').onclick=()=>command('telegram_find');
+  $('tg-test').onclick=()=>command('telegram_test');
+  $('refresh').onclick=()=>command('refresh');
+  $('github').onclick=()=>window.omni.open('https://github.com/nikitaeight24family/Omni/releases/latest');
+  setupInlineArchive();
+}
 command('snapshot').then(result=>{if(result){applyPreferences(result.preferences);for(const a of result.accounts||[])state.accounts.set(a.id,a);firstInventoryPending=!result.inventoryComplete;}const events=bufferedAccountEvents;bufferedAccountEvents=[];startupSnapshotPending=false;for(const e of events)acceptAccountEvent(e);queueRender();});
 
 let dragging=null;
@@ -394,7 +434,7 @@ const connectionMessages={configured:'Configuration and model catalog verified',
 function renderConnections(){
  if(!connectionsVisible)return;
  const host=$('inline-connections-page');if(!host)return;
- patchMarkup(host,`<p>${t('Connected applications are checked and repaired automatically. Restarting always requires your permission.')}</p><div class="connection-list">${connectionRows.map(row=>{
+ patchMarkup(host,`<p>${t('Connections are checked only. Nothing changes until you apply a patch.')}</p><div class="connection-list">${connectionRows.map(row=>{
   const ready=row.connected&&row.status==='configured'&&!row.restartRequired;
   const details=!!row.detailsOpen;
   const fileRows=(row.files||[]).map(file=>{const verified=file.exists&&row.connected;return `<li><b>${esc(t(file.role))}</b><code>${esc(file.path)}</code><span class="connection-file-state ${verified?'ok':''}">${verified?'✓ '+t('Verified'):file.exists?t('Present; not managed by Omni'):'○ '+t('Will be created on connect')}</span></li>`;}).join('');
@@ -402,14 +442,78 @@ function renderConnections(){
   const managed=(row.managedSettings||[]).map(x=>`<div class="connection-setting"><code>${esc(x.name)}</code><span>${esc(x.value)}</span></div>`).join('');
   const configuredModels=(row.configuredModels||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||`<span class="connection-note">${t('No fixed model is set; the app uses its model picker.')}</span>`;
   const connectionVerified=row.connected&&row.status==='configured';
-  const action=row.checking?'':!row.connected?`<div class="connection-user-action"><b>${t('User action needed')}</b><span>${t('Connect this application to install Omni settings and its current model catalog.')}</span><button data-connect="${esc(row.id)}">${t('Configure connection')}</button></div>`:row.restartRequired?`<div class="connection-user-action"><b>${t('User action needed')}</b><span>${t(row.id==='claude_cli'?'Start a new terminal session to apply these settings.':'Save work, then restart to apply these settings.')}</span><button data-restart="${esc(row.id)}">${t(row.id==='claude_cli'?'New terminal session required':'Restart application…')}</button></div>`:ready?`<div class="connection-good"><b>✓ ${t('Everything is ready')}</b><span>${t('Settings are verified and active.')}</span></div>`:`<div class="connection-user-action"><b>${t('Connection needs attention')}</b><span>${esc(t(connectionMessages[row.status]||row.status))}</span><button data-recheck="${esc(row.id)}">${t('Check and repair')}</button></div>`;
-  return `<article class="connection-card ${ready?'is-ready':''}" data-key="${esc(row.id)}"><div class="connection-card-head"><div><h2>${esc(row.name)}</h2><span class="connection-overall ${row.checking?'checking':ready?'ok':'pending'}">${row.checking?t('Checking connections…'):ready?'✓ '+t('Everything is ready'):row.connected?esc(t(connectionMessages[row.status]||row.status)):t('Not connected')}</span></div><button class="connection-details-toggle" data-details="${esc(row.id)}">${t(details?'Hide setup details':'Show setup details')}</button></div><div class="connection-steps">${check(!!row.detected,row.detected?'App found':'App not found')}${check(connectionVerified,'Omni connection',connectionVerified?t('Configuration and model catalog verified'):t('Omni settings are not installed for this application.'))}${check(row.gatewayModelCount!=null&&!row.unavailableModels?.length,'Models in gateway',row.gatewayModelCount==null?'':`${row.gatewayModelCount} · ${t('Catalog checked without sending a model request.')}`)}${check(ready,'Everything is ready',ready?t('Settings are verified and active.'):t(row.restartRequired?'Restart is needed to load the settings.':'Complete the connection step below.'))}</div>${row.repaired?`<p class="connection-repaired">✓ ${t('Connection restored automatically')}</p>`:''}${row.unavailableModels?.length?`<p class="connection-warning">${t('Select an available model in the app:')} ${row.unavailableModels.map(esc).join(', ')}</p>`:''}${details?`<div class="connection-details"><h3>${t('Files Omni manages')}</h3><ul class="connection-files">${fileRows}</ul><h3>${t('Settings written')}</h3><div class="connection-chips">${managed}</div><h3>${t('Models selected in app')}</h3><div class="connection-model-list">${configuredModels}</div><p class="connection-note">${t('Catalog checked without sending a model request.')}</p></div>`:''}${action}</article>`;
+  const broken=row.connected&&!row.repaired&&(row.status==='missing_config'||row.status==='invalid_config');
+  const needsPatch=(!row.maintenanceEnabled&&(!row.connected||['missing_config','invalid_config','transport_settings','provider_selection','model_unavailable'].includes(row.status)))||(row.maintenanceEnabled&&row.status==='not_connected');
+  const stock=row.connected||row.status!=='not_connected';
+  const applyButton=`<button data-connect="${esc(row.id)}">${t('Apply Omni patch')}</button>`;
+  const action=row.checking?'':row.restartRequired?`<div class="connection-user-action"><b>${t('User action needed')}</b><span>${t(row.id==='claude_cli'?'Start a new terminal session to apply these settings.':'Save work, then restart to apply these settings.')}</span><button data-restart="${esc(row.id)}">${t(row.id==='claude_cli'?'New terminal session required':'Restart application…')}</button></div>`:needsPatch?`<div class="connection-user-action"><b>${t('User action needed')}</b><span>${t('Connect this application to install Omni settings and its current model catalog.')}</span>${applyButton}</div>`:ready?`<div class="connection-good"><b>✓ ${t('Everything is ready')}</b><span>${t('Settings are verified and active.')}</span></div>`:`<div class="connection-user-action"><b>${t('Connection needs attention')}</b><span>${esc(t(connectionMessages[row.status]||row.status))}</span><button data-recheck="${esc(row.id)}">${t('Check connection')}</button></div>`;
+  const restoreButton=stock?`<button class="connection-restore" data-restore="${esc(row.id)}">${t('Restore stock settings')}</button>`:'';
+  return `<article class="connection-card ${ready?'is-ready':''}" data-key="${esc(row.id)}"><div class="connection-card-head"><div><h2>${esc(row.name)}</h2><span class="connection-overall ${row.checking?'checking':ready?'ok':'pending'}">${row.checking?t('Checking connections…'):ready?'✓ '+t('Everything is ready'):row.connected?esc(t(connectionMessages[row.status]||row.status)):t('Not connected')}</span></div><button class="connection-details-toggle" data-details="${esc(row.id)}">${t(details?'Hide setup details':'Show setup details')}</button></div><div class="connection-steps">${check(!!row.detected,row.detected?'App found':'App not found')}${check(connectionVerified,'Omni connection',connectionVerified?t('Configuration and model catalog verified'):t('Omni settings are not installed for this application.'))}${check(row.gatewayModelCount!=null&&!row.unavailableModels?.length,'Models in gateway',row.gatewayModelCount==null?'':`${row.gatewayModelCount} · ${t('Catalog checked without sending a model request.')}`)}${check(ready,'Everything is ready',ready?t('Settings are verified and active.'):t(row.restartRequired?'Restart is needed to load the settings.':'Complete the connection step below.'))}</div>${row.unavailableModels?.length?`<p class="connection-warning">${t('Select an available model in the app:')} ${row.unavailableModels.map(esc).join(', ')}</p>`:''}${details?`<div class="connection-details"><h3>${t('Files Omni manages')}</h3><ul class="connection-files">${fileRows}</ul><h3>${t('Settings written')}</h3><div class="connection-chips">${managed}</div><h3>${t('Models selected in app')}</h3><div class="connection-model-list">${configuredModels}</div><p class="connection-note">${t('Catalog checked without sending a model request.')}</p></div>`:''}${action}${restoreButton}</article>`;
  }).join('')}</div>`);
  host.querySelectorAll('[data-details]').forEach(button=>button.onclick=()=>{const row=connectionRows.find(r=>r.id===button.dataset.details);if(row){row.detailsOpen=!row.detailsOpen;renderConnections();}});
  host.querySelectorAll('[data-connect]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{const rows=await command('connect',{client:button.dataset.connect});if(Array.isArray(rows)){connectionRows=rows;renderConnections();}}finally{if(button.isConnected)button.disabled=false;}});
- host.querySelectorAll('[data-recheck]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{const rows=await command('connections');if(Array.isArray(rows))connectionRows=rows;renderConnections();}finally{if(button.isConnected)button.disabled=false;}});
- host.querySelectorAll('[data-restart]').forEach(button=>button.onclick=async()=>{const row=connectionRows.find(r=>r.id===button.dataset.restart);if(!confirm(t('Restart')+' '+row.name+'? '+t('Running tasks may be interrupted. Save your work first.')))return;button.disabled=true;try{const pendingDesktop=connectionRows.some(r=>r.restartRequired&&r.id!=='claude_cli');const result=await command('restart_client',{client:pendingDesktop?'all':row.id,confirmed:true});if(result?.manual)$('notice').textContent=t(result.message);else if(result){for(const item of connectionRows){if(result.clients?.includes(item.id)||result.sessionVerified&&item.id===row.id)item.restartRequired=false;}renderConnections();}}finally{if(button.isConnected)button.disabled=false;}});
+ host.querySelectorAll('[data-recheck]').forEach(button=>button.onclick=async()=>{
+   button.disabled=true;
+   const label=button.textContent;
+   button.textContent=t('Checking connections…');
+   try{
+     const rows=await command('connections');
+     if(Array.isArray(rows))connectionRows=rows;
+     renderConnections();
+   }finally{
+     if(button.isConnected){button.disabled=false;button.textContent=label;}
+   }
+ });
+ host.querySelectorAll('[data-restore]').forEach(button=>button.onclick=async()=>{
+   const row=connectionRows.find(item=>item.id===button.dataset.restore);
+   if(!row||!confirm(t('Restore stock settings for this application?')))return;
+   button.disabled=true;
+   try{
+     const result=await command('restore_client',{client:row.id});
+     if(Array.isArray(result?.connections))connectionRows=result.connections;
+     $('notice').textContent=t('Stock settings restored');
+     renderConnections();
+   }finally{if(button.isConnected)button.disabled=false;}
+ });
+ host.querySelectorAll('[data-restart]').forEach(button=>button.onclick=async()=>{
+   const row=connectionRows.find(r=>r.id===button.dataset.restart);
+   if(!confirm(t('Restart')+' '+row.name+'? '+t('Running tasks may be interrupted. Save your work first.')))return;
+   button.disabled=true;
+   try{
+     // Restart only the application whose button was pressed. A Claude
+     // restart must never close Codex (and vice versa).
+     const result=await command('restart_client',{client:row.id,confirmed:true});
+     if(result?.message)$('notice').textContent=t(result.message);
+     row.restartRequired=false;
+     if(result?.clients){
+       for(const item of connectionRows){
+         if(result.clients.includes(item.id))item.restartRequired=false;
+       }
+     }
+     const rows=await command('connections');
+     if(Array.isArray(rows))connectionRows=rows;
+     renderConnections();
+   }finally{if(button.isConnected)button.disabled=false;}
+ });
 }
-$('connections').onclick=async()=>{connectionsVisible=true;$('settings-view').hidden=false;window.omni.panel(true);if(!document.querySelector('[data-settings-page="connections"]'))settings();document.querySelectorAll('[data-settings-tab]').forEach(b=>b.classList.remove('selected'));document.querySelector('[data-settings-connections]')?.classList.add('selected');document.querySelectorAll('[data-settings-page]').forEach(page=>page.hidden=page.id!=='inline-connections-page');connectionRows=[{id:'codex',name:'Codex',checking:true,status:'checking',connected:false,issues:[],restartRequired:false,files:[],managedSettings:[],configuredModels:[]},{id:'claude_desktop',name:'Claude Desktop',checking:true,status:'checking',connected:false,issues:[],restartRequired:false,files:[],managedSettings:[],configuredModels:[]},{id:'claude_cli',name:'Claude Code CLI',checking:true,status:'checking',connected:false,issues:[],restartRequired:false,files:[],managedSettings:[],configuredModels:[]}];renderConnections();const rows=await command('connections');if(Array.isArray(rows))connectionRows=rows;renderConnections();};
-window.omni.onEvent(e=>{if(e.event==='connections'&&Array.isArray(e.connections)){const checked=new Set(e.connections.map(r=>r.id));connectionRows=[...e.connections,...connectionRows.filter(r=>r.checking&&!checked.has(r.id))];renderConnections();}});
+async function openConnectionsPanel(){
+  connectionsVisible=true;$('settings-view').hidden=false;window.omni.panel(true);
+  if(!document.querySelector('[data-settings-page="connections"]'))settings();
+  document.querySelectorAll('[data-settings-tab]').forEach(b=>b.classList.remove('selected'));
+  document.querySelector('[data-settings-connections]')?.classList.add('selected');
+  document.querySelectorAll('[data-settings-page]').forEach(page=>page.hidden=page.id!=='inline-connections-page');
+  if(!connectionRows.length){
+    connectionRows=[{id:'codex',name:'Codex',checking:true,status:'checking',connected:false,issues:[],restartRequired:false,files:[],managedSettings:[],configuredModels:[]},{id:'claude_desktop',name:'Claude Desktop',checking:true,status:'checking',connected:false,issues:[],restartRequired:false,files:[],managedSettings:[],configuredModels:[]},{id:'claude_cli',name:'Claude Code CLI',checking:true,status:'checking',connected:false,issues:[],restartRequired:false,files:[],managedSettings:[],configuredModels:[]}];
+    renderConnections();
+  }
+  const rows=await command('connections');
+  if(Array.isArray(rows))connectionRows=rows;
+  renderConnections();
+};
+window.omni.onEvent(e=>{
+  if(e.event==='connections'&&Array.isArray(e.connections)){
+    connectionRows=e.connections;
+    renderConnections();
+  }
+});
 Object.assign(window,{state,render,renderSummary,updateCard,sortWindows,windowRank});

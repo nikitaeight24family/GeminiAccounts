@@ -274,10 +274,16 @@ class Integrations:
         models = self.connection_models()
         if not models:
             raise AccountError('No models are currently available from the gateway.')
+        # Claude Code can select Anthropic-shaped aliases directly. Keep those
+        # routes in the gateway in sync with the live Gemini catalog as well;
+        # configuring only Claude's environment leaves a stale custom model
+        # visible to the client but unknown to the provider.
+        self.configure_desktop_routes(sorted(m for m in models if m.startswith('gemini-')))
         env = settings.setdefault('env', {})
         env.update({'ANTHROPIC_BASE_URL': 'http://127.0.0.1:8317',
                     'ANTHROPIC_AUTH_TOKEN': key, 'ANTHROPIC_API_KEY': '',
                     'CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY': '1',
+                    'CLAUDE_CODE_AUTO_MODE_SERVER': '0',
                     'API_TIMEOUT_MS': '604800000', 'CLAUDE_ENABLE_STREAM_WATCHDOG': '0'})
         # availableModels is a restriction shared with Desktop's Code sessions,
         # not a discovery catalog. Canonical IDs would disable desktop routes.
@@ -441,6 +447,10 @@ class Integrations:
         if client == 'claude_cli':
             env = updated.setdefault('env', {})
             env['CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'] = '1'
+            # Keep the gateway's Anthropic-shaped routes in lockstep with the
+            # live Gemini catalog. Claude Code may retain a custom route in
+            # its model picker even after the alias was removed upstream.
+            self.configure_desktop_routes(sorted(m for m in models if m.startswith('gemini-')))
             updated.pop('availableModels', None)
             for key in ('ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL'):
                 old = strip_context_suffix(env.get(key, ''))
@@ -522,6 +532,35 @@ class Integrations:
             self.backup_path.unlink(missing_ok=True)
             return len(saved)
 
+    def restore_clients(self, clients):
+        """Restore the exact pre-Omni files for explicitly selected clients."""
+        clients = list(dict.fromkeys(clients))
+        if not clients or any(client not in self.paths() for client in clients):
+            raise AccountError('Choose applications to restore.')
+        with self.lock:
+            saved = self.backups()
+            allowed = {str(p.resolve()) for group in self.paths().values() for p in group}
+            if any(path not in allowed for path in saved):
+                raise AccountError('The backup contains an unexpected path. Restoration cancelled.')
+            selected = {str(p.resolve()) for client in clients for p in self.paths()[client]}
+            restored = 0
+            for name in list(saved):
+                if name not in selected:
+                    continue
+                path = Path(name)
+                data = saved.pop(name)
+                if data is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    atomic_write(path, base64.b64decode(data))
+                restored += 1
+            if saved:
+                atomic_write(self.backup_path, dpapi(json.dumps(saved).encode()))
+            else:
+                self.backup_path.unlink(missing_ok=True)
+            return restored
+
     @staticmethod
     def restart_desktop(clients):
         """Restart an identified client with its original launch arguments and graceful close."""
@@ -532,6 +571,19 @@ class Integrations:
         script = r'''
 $ErrorActionPreference = 'Stop'
 $targets = ConvertFrom-Json $env:GEMINI_ACCOUNTS_RESTART_CLIENTS
+function Get-Descendants($rootId, $all) {
+    $found = @()
+    $queue = New-Object System.Collections.Generic.Queue[int]
+    $queue.Enqueue([int]$rootId)
+    while ($queue.Count -gt 0) {
+        $parentId = $queue.Dequeue()
+        foreach ($child in @($all | Where-Object { $_.ParentProcessId -eq $parentId })) {
+            $found += $child
+            $queue.Enqueue([int]$child.ProcessId)
+        }
+    }
+    return $found
+}
 $processes = @(Get-CimInstance Win32_Process)
 foreach ($target in $targets) {
     $candidates = @($processes | Where-Object {
@@ -553,34 +605,43 @@ foreach ($target in $targets) {
     } else { throw "Cannot preserve launch arguments for $target" }
     $launch = @{FilePath=$exe; WorkingDirectory=(Split-Path -LiteralPath $exe); PassThru=$true}
     if ($arguments) { $launch.ArgumentList = $arguments }
-    $process = Get-Process -Id $main.ProcessId
+    # Capture the complete process tree before closing.  Both clients can
+    # keep their main window alive in the tray; a graceful close alone is not
+    # enough to apply a changed gateway profile.
+    $children = @(Get-Descendants $main.ProcessId $processes | Where-Object {
+        $_.ExecutablePath -eq $exe
+    })
+    $process = Get-Process -Id $main.ProcessId -ErrorAction SilentlyContinue
+    if (-not $process) { throw "The identified process disappeared before restart: $target" }
     $closed = $process.CloseMainWindow()
-    if (-not $process.WaitForExit($(if ($closed) { 15000 } else { 1000 }))) {
-        if ($target -ne 'claude_desktop') {
-            # Restore a window hidden by close-to-tray before reporting failure.
-            Start-Process @launch | Out-Null
-            throw "Application did not exit; its existing session was preserved: $target"
-        }
-        # Claude's close button hides to tray. Only stop this identified instance
-        # and its Electron children, never another client or a Claude CLI task.
-        $children = @(Get-CimInstance Win32_Process | Where-Object {
-            $_.ParentProcessId -eq $main.ProcessId -and $_.ExecutablePath -eq $exe
-        })
-        $current = Get-Process -Id $main.ProcessId -ErrorAction SilentlyContinue
-        if ($current -and $current.StartTime -eq $process.StartTime) {
-            Stop-Process -InputObject $current -Force
-            $current.WaitForExit(5000) | Out-Null
-        }
-        foreach ($child in $children) {
+    $exited = $process.WaitForExit($(if ($closed) { 15000 } else { 1000 }))
+    if (-not $exited) {
+        # Close-to-tray is common for Electron clients.  Stop only this
+        # identified process tree, never another app or a Claude Code CLI.
+        foreach ($child in @($children | Sort-Object @{Expression={($_.ParentProcessId -eq $main.ProcessId)}}, ProcessId -Descending)) {
             $live = Get-CimInstance Win32_Process -Filter "ProcessId=$($child.ProcessId)"
             if ($live -and $live.CreationDate -eq $child.CreationDate -and $live.ExecutablePath -eq $exe) {
                 Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
             }
         }
+        $current = Get-Process -Id $main.ProcessId -ErrorAction SilentlyContinue
+        if ($current -and $current.StartTime -eq $process.StartTime) {
+            Stop-Process -InputObject $current -Force -ErrorAction SilentlyContinue
+            $current.WaitForExit(5000) | Out-Null
+        }
+        if (Get-Process -Id $main.ProcessId -ErrorAction SilentlyContinue) {
+            throw "Application did not exit after its identified process tree was stopped: $target"
+        }
     }
     $started = Start-Process @launch
     Start-Sleep -Milliseconds 1000
-    if ($started.HasExited) { throw "Application launch could not be verified: $target" }
+    $live = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.ExecutablePath -eq $exe -and $_.CommandLine -notmatch '(?:^|\s)--type='
+    })
+    if ($started.HasExited -and $live.Count -eq 0) { throw "Application launch could not be verified: $target" }
+    # A single-instance Electron launcher can hand off to an existing child
+    # and exit immediately; refresh the snapshot before the next client.
+    $processes = @(Get-CimInstance Win32_Process)
 }
 '''
         subprocess.run(['powershell.exe', '-NoProfile', '-Command', script], env=env,

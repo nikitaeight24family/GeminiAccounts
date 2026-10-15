@@ -36,7 +36,7 @@ class ChatGPTAuthTests(unittest.TestCase):
         self.assertTrue(is_free_account(accounts[0]))
         self.assertEqual(free_model_catalog(accounts), {'gpt-new-reasoner'})
         self.assertEqual(accounts_for_model(accounts, 'gpt-new-reasoner'), [accounts[0]])
-        self.assertEqual(accounts_for_model(accounts, 'gpt-paid-only'), accounts)
+        self.assertEqual(accounts_for_model(accounts, 'gpt-paid-only'), [accounts[1]])
 
     def test_free_supported_model_waits_only_on_free_accounts(self):
         files = [

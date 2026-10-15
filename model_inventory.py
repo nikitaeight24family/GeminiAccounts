@@ -8,21 +8,28 @@ class ModelInventory:
         self.controller, self.state, self.clock = controller, state, clock
 
     def refresh(self, public_models=None, aliases=None):
+        from concurrent.futures import ThreadPoolExecutor
         files = self.controller.request('/auth-files')['files']
         if not isinstance(files, list):
             raise ValueError('Invalid account catalog')
         current = {}
-        # Commit only complete snapshots. Partial provider failures preserve all data.
-        for account in files:
-            if account.get('disabled'):
-                continue
+        active = [a for a in files if not a.get('disabled')]
+
+        def fetch_models(account):
             name = account['name']
             response = self.controller.request('/auth-files/models?' + urllib.parse.urlencode({'name': name}))
-            entries = response['models']
+            entries = response.get('models', [])
             if not isinstance(entries, list) or any(not isinstance(m, dict) or not isinstance(m.get('id'), str) for m in entries):
                 raise ValueError('Invalid model catalog')
-            current[name] = {'provider': account.get('provider', account.get('type', '')),
-                             'models': sorted({m['id'] for m in entries})}
+            return name, {
+                'provider': account.get('provider', account.get('type', '')),
+                'models': sorted({m['id'] for m in entries})
+            }
+
+        if active:
+            with ThreadPoolExecutor(max_workers=min(12, len(active))) as pool:
+                for name, data in pool.map(fetch_models, active):
+                    current[name] = data
         observed = {m for a in current.values() for m in a['models']}
         if public_models is not None:
             # Include API-key services and exclude routes the serving endpoint

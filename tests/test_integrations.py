@@ -109,6 +109,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(gemini['supports1m'])
         self.assertFalse(claude['supports1m'])
         self.assertEqual(env['CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY'], '1')
+        self.assertTrue(any(route['alias'] == self.client.claude_desktop_route('gemini-pro-agent')
+                            and route['name'] == 'gemini-pro-agent' for route in self.routes))
 
     def test_flash_reasoning_levels_appear_in_client_catalogs(self):
         choices = ['gemini-3.8-flash-high', 'gemini-3.8-flash-medium', 'gemini-3.8-flash-low',
