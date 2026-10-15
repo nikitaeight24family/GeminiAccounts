@@ -164,7 +164,12 @@ class Controller:
 
     def start_services(self):
         starter = self.proxy_dir / 'start-proxy.ps1'
-        if os.name == 'nt' and starter.exists():
+        # The Electron backend owns its queue binary. Do not fall back to an
+        # older installer launcher on Windows, or Claude Code will keep using
+        # a stale GeminiQuotaQueue.exe without Omni's context handling.
+        bundled_backend = (getattr(sys, 'frozen', False) and
+                           Path(sys.executable).name.lower() == 'omni-backend.exe')
+        if os.name == 'nt' and starter.exists() and not bundled_backend:
             subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(starter)],
                            creationflags=subprocess.CREATE_NO_WINDOW, timeout=15,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

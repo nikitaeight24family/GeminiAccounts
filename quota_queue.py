@@ -12,7 +12,7 @@ from pathlib import Path
 
 from backend import Controller, dpapi, AccountError
 import yaml
-from model_context import strip_context_suffix
+from model_context import context_window, strip_context_suffix
 from response_guard import StreamProbe, usable_message
 from gateway_diagnostics import Diagnostics
 from request_texts import RequestTextStore
@@ -26,6 +26,132 @@ HOP = {'connection', 'transfer-encoding', 'content-length', 'keep-alive',
 
 
 SDK_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK"
+
+# The Anthropic client does not know the context size of a custom Claude
+# route (for example a Claude-shaped alias backed by Gemini).  It can therefore
+# send the complete transcript past the upstream limit before its own compact
+# pass runs.  Keep a safety margin below the provider limit and compact only
+# requests that are genuinely large; ordinary requests are byte-for-byte
+# untouched.
+COMPACTION_ESTIMATE_BYTES_PER_TOKEN = 6
+COMPACTION_TRIGGER_RATIO = 0.90
+COMPACTION_TARGET_RATIO = 0.82
+COMPACTION_MARKER = '[Omni compacted older conversation to fit the upstream context window.]'
+
+
+def _encoded_size(value):
+    return len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+
+
+def estimate_input_tokens(request):
+    """Estimate input tokens without sending an over-limit request upstream."""
+    return max(1, (_encoded_size(request) + COMPACTION_ESTIMATE_BYTES_PER_TOKEN - 1) //
+               COMPACTION_ESTIMATE_BYTES_PER_TOKEN)
+
+
+def _append_compaction_marker(request):
+    system = request.get('system')
+    if isinstance(system, str):
+        request['system'] = system.rstrip() + '\n\n' + COMPACTION_MARKER
+        return
+    if isinstance(system, list):
+        blocks = list(system)
+        blocks.append({'type': 'text', 'text': COMPACTION_MARKER})
+        request['system'] = blocks
+        return
+    request['system'] = COMPACTION_MARKER
+
+
+def compact_messages_request(request, model, aliases):
+    """Trim the oldest transcript turns when a custom route reaches its limit.
+
+    The current user turn and the newest assistant/tool turns are retained. A
+    marker in the system prompt tells the model that older turns were removed,
+    while all under-budget requests keep the original object unchanged.
+    """
+    upstream = aliases.get(model, model)
+    limit = context_window(upstream)
+    messages = request.get('messages')
+    if not limit or not isinstance(messages, list) or len(messages) < 2:
+        return request, None
+    estimated = estimate_input_tokens(request)
+    trigger = int(limit * COMPACTION_TRIGGER_RATIO)
+    if estimated <= trigger:
+        return request, None
+
+    target_bytes = int(limit * COMPACTION_ESTIMATE_BYTES_PER_TOKEN * COMPACTION_TARGET_RATIO)
+    kept = list(messages)
+    original_count = len(kept)
+    while len(kept) > 1:
+        candidate = dict(request, messages=kept)
+        if _encoded_size(candidate) <= target_bytes:
+            break
+        kept.pop(0)
+    # Claude's messages API expects the transcript to begin with a user turn.
+    # Dropping a leading assistant/tool turn also avoids orphaning old tool
+    # calls after the cut.
+    while len(kept) > 1 and isinstance(kept[0], dict) and kept[0].get('role') != 'user':
+        kept.pop(0)
+    compacted = dict(request, messages=kept)
+    _append_compaction_marker(compacted)
+
+    # A single enormous tool result can still exceed the budget after all
+    # previous turns have been removed. Preserve its tail, which contains the
+    # newest result, and keep the request valid JSON.
+    while _encoded_size(compacted) > target_bytes and kept:
+        last = dict(kept[-1]) if isinstance(kept[-1], dict) else {'role': 'user', 'content': kept[-1]}
+        content = last.get('content')
+        if isinstance(content, str) and len(content) > 4096:
+            last['content'] = '[Earlier part of this result omitted by Omni.]\n' + content[-4096:]
+            kept[-1] = last
+        elif isinstance(content, list) and content:
+            changed = False
+            blocks = []
+            for block in content:
+                if isinstance(block, dict) and isinstance(block.get('text'), str) and len(block['text']) > 4096:
+                    block = dict(block)
+                    block['text'] = '[Earlier part omitted by Omni.]\n' + block['text'][-4096:]
+                    changed = True
+                blocks.append(block)
+            if changed:
+                last['content'] = blocks
+                kept[-1] = last
+            else:
+                break
+        else:
+            break
+        compacted['messages'] = kept
+    final_estimate = estimate_input_tokens(compacted)
+    return compacted, {'original_tokens': estimated, 'final_tokens': final_estimate,
+                       'original_messages': original_count, 'final_messages': len(kept),
+                       'limit': limit}
+
+
+def augment_model_catalog(value, aliases):
+    """Advertise context limits for Claude-shaped aliases in the live catalog."""
+    if not isinstance(value, dict) or not isinstance(value.get('data'), list):
+        return value, False
+    changed = False
+    rows = []
+    for item in value['data']:
+        if not isinstance(item, dict):
+            rows.append(item)
+            continue
+        row = dict(item)
+        upstream = aliases.get(row.get('id'), row.get('id'))
+        limit = context_window(upstream)
+        if limit and row.get('max_input_tokens') != limit:
+            row['max_input_tokens'] = limit
+            changed = True
+        # Anthropic's catalog also exposes max_tokens. Keep a conservative
+        # output default without overwriting an upstream value.
+        if limit and 'max_tokens' not in row:
+            row['max_tokens'] = 8192
+            changed = True
+        rows.append(row)
+    if changed:
+        value = dict(value, data=rows)
+    return value, changed
 
 
 def normalize_sdk_system(request):
@@ -328,9 +454,24 @@ class Handler(BaseHTTPRequestHandler):
                         self.trace('token_count_requested', model=normalized, requested_model=raw_model)
                         request['model'] = normalized
                         body = json.dumps(request, ensure_ascii=False).encode()
+                        upstream = self.server.aliases.get(normalized, normalized)
+                        limit = context_window(upstream)
+                        estimated = estimate_input_tokens(request)
+                        if limit and estimated > int(limit * COMPACTION_TRIGGER_RATIO):
+                            # Claude Code uses count_tokens to decide whether to
+                            # compact. Do not forward an already-over-limit
+                            # count request to a provider that rejects it first.
+                            self.trace('token_count_compaction_hint', model=normalized,
+                                       upstream_model=upstream, estimated_tokens=estimated,
+                                       limit=limit)
+                            self.json_reply(200, {'input_tokens': estimated})
+                            return
                 except (ValueError, TypeError, AttributeError):
                     pass
-            self.forward(body)
+            if self.path.split('?')[0] == '/v1/models':
+                self.forward_model_catalog(body)
+            else:
+                self.forward(body)
             return
         if not any(secrets.compare_digest(token.encode(), key.encode()) for token in tokens for key in self.server.client_keys):
             self.trace('authentication_rejected', status=401)
@@ -359,6 +500,13 @@ class Handler(BaseHTTPRequestHandler):
                     'code': 'model_disabled',
                     'message': 'This internal Codex review model is disabled in Omni.'}})
                 return
+            if self.path.split('?')[0] == '/v1/messages':
+                compacted, details = compact_messages_request(request, model, self.server.aliases)
+                if details:
+                    request = compacted
+                    body = json.dumps(request, ensure_ascii=False).encode()
+                    self.trace('context_compacted', model=model,
+                               upstream_model=self.server.aliases.get(model, model), **details)
         except (ValueError, KeyError, TypeError):
             self.forward(body)
             return
@@ -648,6 +796,29 @@ class Handler(BaseHTTPRequestHandler):
             conn, response = self.open_upstream(body)
             self.trace('forwarded_headers', status=response.status)
             self.deliver(response, None)
+            self.trace('finished')
+        except (OSError, http.client.HTTPException):
+            self.close_connection = True
+        finally:
+            if conn:
+                conn.close()
+
+    def forward_model_catalog(self, body):
+        """Forward /v1/models while filling metadata for custom Claude routes."""
+        conn = None
+        try:
+            conn, response = self.open_upstream(body)
+            data = self.await_upstream(response.read, False)
+            if response.status == 200:
+                try:
+                    value = json.loads(data)
+                    value, changed = augment_model_catalog(value, self.server.aliases)
+                except (ValueError, TypeError):
+                    changed = False
+                if changed:
+                    data = json.dumps(value, ensure_ascii=False).encode()
+                    self.trace('model_catalog_context_advertised')
+            self.deliver(response, data, self.response_started, False)
             self.trace('finished')
         except (OSError, http.client.HTTPException):
             self.close_connection = True

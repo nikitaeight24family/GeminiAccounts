@@ -249,7 +249,14 @@ def collect_accounts_payload(controller):
                 accounts[path.name] = path.read_text(encoding='utf-8')
             except Exception:
                 continue
-    return accounts
+    payload = {'accounts': accounts}
+    models_file = controller.proxy_dir / 'cliproxy-models.json'
+    if models_file.exists():
+        try:
+            payload['models_catalog'] = models_file.read_text(encoding='utf-8')
+        except Exception:
+            pass
+    return payload
 
 
 def deploy_to_server(config, controller, progress_callback=None):
@@ -275,6 +282,9 @@ set -euo pipefail
 TARGET_DIR="$HOME/.omni-server"
 mkdir -p "$TARGET_DIR/auth" "$TARGET_DIR/bin" "$HOME/.config/systemd/user"
 chmod 700 "$TARGET_DIR" "$TARGET_DIR/auth"
+
+# Ensure firewall allows gateway port
+sudo ufw allow 8317/tcp comment 'Omni AI Gateway' 2>/dev/null || true
 
 # Download latest linux-x64 binary if not present
 if [ ! -f "$TARGET_DIR/bin/cli-proxy-api" ]; then
@@ -304,6 +314,8 @@ server:
 access:
     api-keys:
         - __CLIENT_KEY__
+models:
+    catalog: __TARGET_DIR__/cliproxy-models.json
 routing:
     strategy: fill-first
     cooldown:
@@ -328,23 +340,46 @@ oauth:
             - name: gemini-3.8-flash-high
               alias: gemini-selected
               fork: true
+              display-name: 3.8 Flash High
+              force-mapping: true
+            - name: claude-sonnet-4-6
+              alias: claude-selected
+              fork: true
+              display-name: Sonnet 4.6
+              force-mapping: true
+            - name: gemini-3-flash
+              alias: claude-haiku-4-5-ga-3-flash
+              fork: true
+              display-name: 3 Flash
+              force-mapping: true
+            - name: gemini-3-flash-agent
+              alias: claude-sonnet-4-5-ga-3-flash-agent
+              fork: true
+              display-name: 3.5 Flash High
+              force-mapping: true
 CFG_EOF
 
 sed -i "s|__CLIENT_KEY__|$CLIENT_KEY|g" "$TARGET_DIR/config.yaml"
 sed -i "s|__AUTH_DIR__|$TARGET_DIR/auth|g" "$TARGET_DIR/config.yaml"
+sed -i "s|__TARGET_DIR__|$TARGET_DIR|g" "$TARGET_DIR/config.yaml"
 
 # Unpack transferred accounts from STDIN
 python3 -c "
 import sys, json, os
-data = json.loads(sys.stdin.read())
+payload = json.loads(sys.stdin.read())
+accounts = payload.get('accounts', payload)
 target = os.path.expanduser('~/.omni-server/auth')
 os.makedirs(target, exist_ok=True)
-for name, content in data.items():
+for name, content in accounts.items():
     p = os.path.join(target, name)
     with open(p, 'w', encoding='utf-8') as f:
         f.write(content)
     os.chmod(p, 0o600)
-print(f'Imported {len(data)} accounts')
+models = payload.get('models_catalog')
+if models:
+    with open(os.path.expanduser('~/.omni-server/cliproxy-models.json'), 'w', encoding='utf-8') as f:
+        f.write(models)
+print(f'Imported {len(accounts)} accounts and models catalog')
 "
 
 # Create systemd user service
@@ -365,7 +400,7 @@ WantedBy=default.target
 SVC_EOF
 
 # Enable lingering and start service
-loginctl enable-linger "$(whoami)" 2>/dev/null || true
+sudo loginctl enable-linger "$(whoami)" 2>/dev/null || loginctl enable-linger "$(whoami)" 2>/dev/null || true
 systemctl --user daemon-reload 2>/dev/null || true
 systemctl --user enable --now omni.service 2>/dev/null || {
     # If systemd user session is unavailable, start in background

@@ -215,7 +215,7 @@ class ConnectionHealth:
         atomic_write(path, text.encode())
         return True
 
-    def maintain(self):
+    def maintain(self, on_progress=None):
         with self.lock:
             try:
                 gateway = self.probe()
@@ -284,10 +284,10 @@ class ConnectionHealth:
                                 raise
                         row = self.inspect(client, gateway)
                         row['repaired'] = repaired
-                        if not repaired and row.get('status') in ('missing_config', 'invalid_config'):
-                            row['connected'] = False
                         if row['issues']:
                             self.retry_after[client] = self.clock() + 300
+                    if row.get('connected') and not row.get('repaired') and row.get('status') in ('missing_config', 'invalid_config'):
+                        row['connected'] = False
                     if row['status'] == 'configured':
                         self.remember_good(client)
                     rows.append(row)
@@ -295,6 +295,8 @@ class ConnectionHealth:
                     self.retry_after[client] = self.clock() + 300
                     rows.append({'id': client, 'name': CLIENTS[client], 'status': 'check_failed', 'connected': False,
                                  'issues': ['check_failed'], 'restartRequired': False, 'generationVerified': False})
+                if on_progress:
+                    on_progress(rows[:])
             self.last = rows
             return rows
 

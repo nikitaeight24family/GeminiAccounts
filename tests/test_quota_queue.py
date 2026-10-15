@@ -9,7 +9,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from quota_queue import QueueServer, quota_wait, PING
+from quota_queue import (QueueServer, quota_wait, PING, augment_model_catalog,
+                         compact_messages_request, estimate_input_tokens)
 
 
 def account(model='gemini', seconds=20, code=429):
@@ -67,6 +68,27 @@ class QueueTests(unittest.TestCase):
     def post(self, key='client', model='alias'):
         self.client.request('POST', '/v1/messages', json.dumps({'model': model, 'stream': True, 'messages': []}), {'x-api-key': key})
         return self.client.getresponse()
+
+    def test_custom_claude_route_advertises_one_million_context(self):
+        catalog, changed = augment_model_catalog(
+            {'data': [{'id': 'claude-sonnet-4-5-ga-3-8-flash-high', 'object': 'model'}]},
+            {'claude-sonnet-4-5-ga-3-8-flash-high': 'gemini-3.8-flash-high'})
+        self.assertTrue(changed)
+        self.assertEqual(catalog['data'][0]['max_input_tokens'], 1048576)
+
+    def test_oversized_custom_route_compacts_old_messages(self):
+        request = {'model': 'custom', 'messages': [
+            {'role': 'user', 'content': 'old ' * 500000},
+            {'role': 'assistant', 'content': 'old answer ' * 500000},
+            {'role': 'user', 'content': 'Keep this newest request.'},
+        ]}
+        original_tokens = estimate_input_tokens(request)
+        compacted, details = compact_messages_request(request, 'custom', {'custom': 'gemini-3.8-flash-high'})
+        self.assertGreater(original_tokens, 900000)
+        self.assertIsNotNone(details)
+        self.assertEqual(compacted['messages'][-1]['content'], 'Keep this newest request.')
+        self.assertLess(details['final_tokens'], 900000)
+        self.assertIn('Omni compacted', compacted['system'])
     def test_reserve_guard_runs_before_upstream_and_failure_does_not_spend_quota(self):
         self.backend.files = []
         observed = []

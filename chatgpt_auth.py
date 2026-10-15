@@ -364,6 +364,11 @@ class ChatGPTAuth:
                 f'{seconds // 3600}h' if isinstance(seconds, int) and seconds >= 3600 else name)
             windows.append({'label': label, 'remaining': max(0, min(100, 100 - used)),
                             'reset_at': window.get('reset_at')})
+        weekly = next((w for w in windows if w.get('label') == '1w'), None)
+        if weekly and (weekly.get('remaining') is not None and weekly.get('remaining') <= 1):
+            for w in windows:
+                if w.get('label') == '5h':
+                    w['remaining'] = 0
         credits = body.get('rate_limit_reset_credits') or {}
         quota = {'windows': windows, 'allowed': rate.get('allowed'), 'limit_reached': rate.get('limit_reached'),
                  'plan_type': body.get('plan_type'), 'reset_credits': credits.get('available_count'),

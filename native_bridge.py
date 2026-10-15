@@ -773,7 +773,8 @@ class NativeBridge:
             self.pool.submit(self.refresh)
             return {}
         elif action == 'connections':
-            return self.connections.maintain()
+            return self.connections.maintain(
+                on_progress=lambda rows: self.emit({'event': 'connections', 'connections': rows}))
         elif action == 'connect':
             return self.connections.connect(command['client'])
         elif action == 'restart_client':
@@ -948,4 +949,11 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # Electron's frozen backend starts the queue as a child of the same
+    # executable. Keeping this dispatch here prevents it from spawning a
+    # second JSON bridge process and ensures the packaged queue code is used.
+    if sys.argv[1:] == ['--internal-queue']:
+        from quota_queue import main as queue_main
+        queue_main()
+    else:
+        main()

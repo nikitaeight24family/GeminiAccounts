@@ -368,7 +368,7 @@ test('quota window ordering everywhere: 5h above 1w, monthly after weekly, multi
  const openaiValues=[...openaiCard.querySelectorAll('.quota-value')].map(v=>v.textContent.trim());
  assert.match(openaiValues[0],/^5h · 45%$/);
  assert.match(openaiValues[1],/^1w · 85%$/);
- assert.match(openaiValues[2],/^1mo · —$/); // unknown remaining preserved as '—'
+ assert.match(openaiValues[2],/^1m · —$/); // unknown remaining preserved as '—'
 
  // Verify group header highlights: expanded group highlights ONLY the active account, NOT the header
  const geminiHeader=w.document.querySelector('.group-header[data-toggle="gemini"]');
@@ -421,7 +421,7 @@ test('quota window ordering everywhere: 5h above 1w, monthly after weekly, multi
  assert.equal(summaryDots.length,3);
  assert.match(summaryDots[0],/^5h:/);
  assert.match(summaryDots[1],/^1w:/);
- assert.match(summaryDots[2],/^1mo:/);
+ assert.match(summaryDots[2],/^1m:/);
  assert.match(summaryDots[2],/—/); // null average preserved
 
  // Verify expanded summaries: summary lines ordered 5h above 1w above 1mo
@@ -431,6 +431,6 @@ test('quota window ordering everywhere: 5h above 1w, monthly after weekly, multi
  assert.equal(summaryLabels.length,3);
  assert.match(summaryLabels[0],/^5h · pooled remaining/);
  assert.match(summaryLabels[1],/^1w · pooled remaining/);
- assert.match(summaryLabels[2],/^1mo · pooled remaining/);
+ assert.match(summaryLabels[2],/^1m · pooled remaining/);
  }finally{dom.window.close();}
 });

@@ -35,6 +35,26 @@ def extended_context(model):
     return CONTEXT_WINDOWS.get(model, 0) >= 1000000
 
 
+def context_window(model):
+    """Return the input context limit for a client-visible or upstream model.
+
+    Custom Claude-shaped aliases are resolved by the gateway before this is
+    called.  Unknown Claude routes retain Anthropic's conservative 200k limit;
+    Gemini routes use the provider's one-million-token window.
+    """
+    model = strip_context_suffix(model)
+    if not isinstance(model, str):
+        return 0
+    known = CONTEXT_WINDOWS.get(model)
+    if known:
+        return known
+    if model.startswith('gemini-'):
+        return 1048576
+    if model.startswith('claude-'):
+        return 200000
+    return 0
+
+
 def client_model_id(alias, upstream):
     return alias + '[1m]' if extended_context(upstream) else alias
 
