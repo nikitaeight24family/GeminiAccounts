@@ -83,6 +83,19 @@ class ClaudeAuthTests(unittest.TestCase):
             self.assertIsNone(auth.start_full_quota_window(dict(account,name='held'),quota,now=2000))
             self.assertEqual(controller.request.call_count,1)
 
+    def test_probe_continues_for_a_paused_account(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(data_dir=directory)
+            controller.models = Mock(return_value=['claude-haiku-4-5'])
+            controller.request = Mock(return_value={'status_code': 200, 'body': json.dumps({'type':'message','content':[{'type':'text','text':'.'}]})})
+            auth = ClaudeAuth(controller)
+            account = {'name':'paused','auth_index':'index','disabled':True}
+            quota = {'windows':[{'label':'5h','remaining':100},{'label':'1w','remaining':100}]}
+            auth.start_full_quota_window(account, quota, now=1000)
+            self.assertIsNone(auth.start_full_quota_window(account, quota, now=1179))
+            self.assertEqual(auth.start_full_quota_window(account, quota, now=1180),200)
+            controller.request.assert_called_once()
+
     def test_queue_can_use_claude_when_google_is_blocked(self):
         blocked = {'name':'google','provider':'antigravity','cooldowns':[{'scope':'credential','reason':'quota','http_status':429,'retry_at':'2030-01-01T00:00:00Z'}]}
         ready = {'name':'claude','provider':'claude','cooldowns':[]}

@@ -89,6 +89,7 @@ button:focus-visible{outline:2px solid #739aff;outline-offset:2px}
 .client-snippet-actions button{padding:5px 10px!important;font-size:11px!important;border-radius:6px!important;background:var(--header)!important;color:var(--muted)!important;border:1px solid var(--line)!important}
 .client-snippet-actions button:hover{color:var(--text)!important;border-color:var(--accent)!important}
 .client-snippet-code{margin:0;padding:10px 12px;background:#0b0f16;border:1px solid #1c2333;border-radius:6px;font:11px Consolas,monospace;color:#9bbdff;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto}
+.client-snippet-restore{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px;padding-top:8px;border-top:1px solid var(--line);font-size:11px}.client-snippet-restore>span{font-weight:600;color:var(--text)}.client-snippet-restore>small{flex:1;min-width:180px;color:var(--muted);font-size:10px}.client-snippet-restore .client-snippet-actions{margin-left:auto}.client-snippet-restore .client-snippet-actions button{padding:4px 8px!important}
 
 
 /* Settings Header Row & Help Button */
@@ -121,3 +122,29 @@ button:focus-visible{outline:2px solid #739aff;outline-offset:2px}
 .help-steps-list li{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .help-steps-list b{display:block;font-size:12px;color:var(--accent);margin-bottom:5px}
 .help-steps-list p{margin:0;font-size:11px;color:var(--muted);line-height:1.5}
+
+/* Remote server stays compact and exposes the verified route at a glance. */
+.remote-server-card,.remote-mode-card{padding:14px 16px}
+.remote-server-card .settings-card-head-row{margin-bottom:9px}
+.remote-server-card .settings-description,.remote-mode-card .settings-description{font-size:11px;margin-bottom:9px}
+.remote-server-card .ssh-form{gap:9px;margin-top:7px}
+.remote-server-card .ssh-row-2col,.remote-server-card .ssh-row-equal{gap:9px}
+.remote-server-card .ssh-input-group{gap:4px}
+.remote-server-card .ssh-input-group label{font-size:10px;letter-spacing:.45px}
+.remote-server-card .ssh-input-group input{padding:7px 10px!important;font-size:12px!important;border-radius:6px!important}
+.remote-server-card .ssh-file-picker button{padding:0 12px!important;border-radius:6px!important}
+.remote-server-card .ssh-fido-box{padding:8px 10px;margin-top:1px;border-radius:6px}
+.remote-server-card .ssh-fido-box b{font-size:11px}
+.remote-server-card .ssh-fido-box small{font-size:10px}
+.remote-server-card .ssh-actions-bar{gap:8px;padding-top:9px;margin-top:1px}
+.remote-server-card .ssh-actions-bar button{padding:7px 12px!important;font-size:11px!important;border-radius:6px!important}
+.remote-server-card .ssh-status-tag{font-size:11px}
+.remote-route-status{display:flex;align-items:center;gap:8px;min-height:34px;padding:7px 9px;margin-bottom:8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);font-size:11px}
+.remote-route-dot{width:8px;height:8px;flex:none;border-radius:50%;background:var(--muted);box-shadow:0 0 0 3px color-mix(in srgb,var(--muted) 15%,transparent)}
+.remote-route-status.ok{border-color:color-mix(in srgb,var(--green) 45%,var(--line))}.remote-route-status.ok .remote-route-dot{background:var(--green);box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 15%,transparent)}
+.remote-route-status.error{border-color:color-mix(in srgb,#ff6b7a 50%,var(--line))}.remote-route-status.error .remote-route-dot{background:#ff6b7a}
+.remote-route-copy{display:grid;gap:2px;min-width:0}.remote-route-copy b{font-size:11px}.remote-route-copy small{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.remote-mode-card .settings-card-head-row{margin-bottom:7px}.route-check-label{color:var(--muted);font-size:10px;white-space:nowrap;padding-top:3px}
+.remote-mode-status{min-height:17px;margin-top:7px;color:var(--muted);font-size:11px}.remote-mode-status.ok{color:var(--green)}.remote-mode-status.error{color:#ff6b7a}.remote-mode-status.pending{color:#f5c56b}
+.backend-switch-btn:disabled{cursor:wait}
+.help-circle-btn{width:28px!important;height:28px!important;min-width:28px!important;max-width:28px!important;aspect-ratio:1/1!important;flex:0 0 28px!important;padding:0!important;border-radius:999px!important;line-height:1!important;overflow:hidden!important}

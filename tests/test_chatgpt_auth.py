@@ -379,6 +379,19 @@ class ChatGPTAuthTests(unittest.TestCase):
             self.assertIsNone(auth.start_full_quota_window(other, quota, now=2180))
             self.assertEqual(controller.request.call_count, 1)
 
+    def test_chatgpt_probe_continues_for_a_paused_account(self):
+        with tempfile.TemporaryDirectory() as directory:
+            controller = Controller(data_dir=directory)
+            controller.models = Mock(return_value=['gpt-5.6-luna'])
+            controller.request = Mock(return_value={'status_code': 200, 'body': 'event: response.completed\n'})
+            auth = ChatGPTAuth(controller)
+            account = {'name': 'paused', 'auth_index': 'paused', 'disabled': True}
+            quota = {'windows': [{'label': '5h', 'remaining': 100}, {'label': '1w', 'remaining': 100}]}
+            auth.start_full_quota_window(account, quota, now=1000)
+            self.assertIsNone(auth.start_full_quota_window(account, quota, now=1179))
+            self.assertEqual(auth.start_full_quota_window(account, quota, now=1180), 200)
+            controller.request.assert_called_once()
+
     def test_chatgpt_probe_never_generates_on_free_account(self):
         controller = Controller(data_dir=tempfile.mkdtemp())
         controller.request = Mock()

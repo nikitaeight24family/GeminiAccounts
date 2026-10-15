@@ -45,6 +45,18 @@ test('adding an account opens a separate window and keeps the sidebar narrow',as
   assert.equal(w.document.getElementById('settings-view').hidden,true);
  }finally{dom.window.close();}
 });
+test('remote server test refuses an empty host before sending a network command',async()=>{
+ const {dom,w,calls}=setup();try{
+  w.document.querySelector('#settings').click();
+  w.document.querySelector('[data-settings-tab="server"]').click();
+  w.document.querySelector('#ssh-test').click();
+  await new Promise(r=>setImmediate(r));
+  assert.equal(calls.some(call=>call.action==='remote_server_test'),false);
+  assert.match(w.document.querySelector('#ssh-status').textContent,/host|IP/i);
+  const css=fs.readFileSync(path.join(__dirname,'../renderer/styles.css'),'utf8');
+  assert.match(css,/\.help-circle-btn\{[^}]*border-radius:999px/);
+ }finally{dom.window.close();}
+});
 function setupManager(provider,loginStatus,reviewResult,mode=''){
  const html=fs.readFileSync(path.join(__dirname,'../renderer/manager.html'),'utf8');
  const dom=new JSDOM(html,{url:`https://omni.test/manager.html?provider=${provider}&mode=${mode}`,runScripts:'outside-only',pretendToBeVisual:true});

@@ -64,11 +64,12 @@ class QuotaStartTests(unittest.TestCase):
         self.data['models'] = {'claude-sonnet-4-6': {}, 'gemini-3.8-flash-high': {}}
         self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=1000), [])
         self.assertEqual(self.calls, [])
-    def test_excluded_accounts_are_not_probed(self):
+    def test_access_issue_is_not_probed_but_paused_account_is_probed(self):
         self.account['access_issue'] = 'verification'
         self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=1000), [])
         self.account.pop('access_issue'); self.account['disabled'] = True
         self.assertEqual(self.c.start_full_quota_windows(self.account, self.data, now=1000), [])
+        self.assertEqual(len(self.c.start_full_quota_windows(self.account, self.data, now=1180)), 2)
     def test_failed_old_endpoint_probes_do_not_block_working_endpoint(self):
         self.c.quota_starts['a:gemini'] = {'armed': False, 'failures': 3,
             'status': 429, 'attempt_at': 900, 'full_since': 500}

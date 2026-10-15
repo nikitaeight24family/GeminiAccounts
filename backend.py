@@ -602,7 +602,9 @@ class Controller:
 
     def start_full_quota_windows(self, account, quotas, now=None, last_used=None):
         """Send one bounded, metered ping; verify quota consumption independently of HTTP."""
-        if account.get('disabled') or account.get('access_issue'):
+        # `disabled` is the user-facing pause flag.  It excludes the account
+        # from request routing, not from the low-cost quota/session ping.
+        if account.get('access_issue'):
             return []
         now = time.time() if now is None else now
         results = []

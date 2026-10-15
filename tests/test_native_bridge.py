@@ -311,12 +311,12 @@ class NativeBridgeTests(unittest.TestCase):
         self.assertEqual(dto['severity'], 'error')
 
 
-    def test_future_and_disabled_quotas_do_not_trigger_refresh(self):
+    def test_future_quota_does_not_trigger_refresh_but_paused_account_is_pinged(self):
         self.bridge.pool.submit=Mock()
         self.bridge.accounts={'a':({'name':'a','quota':{'windows':[{'reset_at':300}]}},'openai'),
                               'b':({'name':'b','disabled':True,'quota':{'windows':[{'reset_at':100}]}},'openai')}
         self.bridge.refresh_expired_quotas(now=200)
-        self.bridge.pool.submit.assert_not_called()
+        self.bridge.pool.submit.assert_called_once()
 
     def test_quota_refresh_has_cooldown_after_completion(self):
         self.bridge.pool.submit=Mock()
@@ -368,9 +368,17 @@ class NativeBridgeTests(unittest.TestCase):
         self.assertTrue(res['success'])
         self.assertEqual(res['client_key'], 'key_123')
 
-    def test_remote_server_switch_and_save_command(self):
+    @patch('remote_server.probe_remote_gateway')
+    def test_remote_server_switch_and_save_command(self, mock_probe):
+        mock_probe.return_value = {'connected': False, 'error': 'Deploy the backend before selecting the remote route.'}
+        blocked = self.bridge.command({'action': 'remote_server_switch', 'mode': 'remote'})
+        self.assertFalse(blocked['connected'])
+        self.assertEqual(self.controller.preferences.get('backend-mode', 'local'), 'local')
+        self.controller.preferences['remote-server'] = {'host': '1.2.3.4', 'client_key': 'key_123'}
+        mock_probe.return_value = {'connected': True, 'gateway': '1.2.3.4:8317', 'model_count': 3, 'latency_ms': 12}
         res = self.bridge.command({'action': 'remote_server_switch', 'mode': 'remote'})
         self.assertEqual(res['mode'], 'remote')
+        self.assertTrue(res['connected'])
         self.assertEqual(self.controller.preferences['backend-mode'], 'remote')
 
         save_res = self.bridge.command({'action': 'remote_server_save', 'config': {'host': '5.6.7.8', 'port': 2222, 'user': 'admin', 'key_path': '', 'use_fido': True}})

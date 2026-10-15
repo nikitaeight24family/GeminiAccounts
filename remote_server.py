@@ -9,6 +9,8 @@ import shlex
 import shutil
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from backend import AccountError
@@ -18,11 +20,41 @@ def _safe_text(value):
     return str(value or '').strip()
 
 
+def validate_ssh_config(config):
+    """Validate the connection fields before attempting SSH.
+
+    SSH agent authentication is valid, so a password or key is not mandatory.
+    Host, user and port are always required and are checked again in the
+    backend so an empty UI form can never start a network operation.
+    """
+    if not isinstance(config, dict):
+        raise AccountError('Remote server settings are missing.')
+    host = _safe_text(config.get('host'))
+    if not host:
+        raise AccountError('Enter a server host or IP address first.')
+    if any(char.isspace() for char in host):
+        raise AccountError('Server host cannot contain spaces.')
+    user = _safe_text(config.get('user') or 'root')
+    if not user:
+        raise AccountError('Enter an SSH username first.')
+    try:
+        port = int(config.get('port') or 22)
+    except (TypeError, ValueError):
+        raise AccountError('SSH port must be a number between 1 and 65535.') from None
+    if not 1 <= port <= 65535:
+        raise AccountError('SSH port must be a number between 1 and 65535.')
+    key_path = _safe_text(config.get('key_path'))
+    if key_path and not os.path.isfile(key_path):
+        raise AccountError('The selected SSH private key file was not found.')
+    return {**config, 'host': host, 'user': user, 'port': port, 'key_path': key_path}
+
+
 def build_ssh_command(config, remote_cmd=''):
     """Build OpenSSH command line supporting Windows native FIDO keys and system agent."""
-    host = _safe_text(config.get('host'))
-    port = str(config.get('port') or '22').strip()
-    user = _safe_text(config.get('user') or 'root')
+    config = validate_ssh_config(config)
+    host = config['host']
+    port = str(config['port'])
+    user = config['user']
     key_path = _safe_text(config.get('key_path'))
     use_fido = bool(config.get('use_fido'))
 
@@ -61,6 +93,7 @@ def build_ssh_command(config, remote_cmd=''):
 
 def run_ssh_command(config, remote_cmd, stdin_data=None, timeout=120):
     """Execute command on remote server via paramiko or OpenSSH fallback."""
+    config = validate_ssh_config(config)
     password = _safe_text(config.get('password'))
     key_path = _safe_text(config.get('key_path'))
     use_fido = bool(config.get('use_fido'))
@@ -148,6 +181,7 @@ def run_ssh_command(config, remote_cmd, stdin_data=None, timeout=120):
 
 def test_ssh_connection(config):
     """Verify SSH connection and identify remote OS and user."""
+    config = validate_ssh_config(config)
     test_cmd = "uname -s && whoami && (lsb_release -d 2>/dev/null || cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 || true)"
     out = run_ssh_command(config, test_cmd, timeout=25)
     lines = [line.strip().strip('"') for line in out.splitlines() if line.strip()]
@@ -164,6 +198,50 @@ def test_ssh_connection(config):
     }
 
 
+def probe_remote_gateway(server, timeout=5):
+    """Send a harmless authenticated request through the deployed gateway.
+
+    The response is used by the UI to prove that the selected remote route is
+    reachable and serving its model catalog. No model inference is generated.
+    """
+    if not isinstance(server, dict):
+        return {'connected': False, 'error': 'Remote server is not configured.'}
+    host = _safe_text(server.get('host'))
+    client_key = _safe_text(server.get('client_key'))
+    gateway_port = server.get('gateway_port') or 8317
+    if not host or not client_key:
+        return {'connected': False, 'error': 'Deploy the backend before selecting the remote route.'}
+    try:
+        gateway_port = int(gateway_port)
+    except (TypeError, ValueError):
+        return {'connected': False, 'error': 'Remote gateway port is invalid.'}
+    if not 1 <= gateway_port <= 65535:
+        return {'connected': False, 'error': 'Remote gateway port is invalid.'}
+    url = f'http://{host}:{gateway_port}/v1/models'
+    request = urllib.request.Request(url, headers={
+        'Authorization': 'Bearer ' + client_key,
+        'Accept': 'application/json',
+        'User-Agent': 'Omni remote route check'
+    })
+    started = time.perf_counter()
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=timeout) as response:
+            body = json.load(response)
+            models = body.get('data', []) if isinstance(body, dict) else []
+            return {
+                'connected': True,
+                'gateway': f'{host}:{gateway_port}',
+                'status_code': int(getattr(response, 'status', 200)),
+                'model_count': len(models) if isinstance(models, list) else 0,
+                'latency_ms': round((time.perf_counter() - started) * 1000)
+            }
+    except urllib.error.HTTPError as exc:
+        return {'connected': False, 'status_code': exc.code,
+                'error': 'Remote gateway rejected the route key.' if exc.code == 401 else f'Remote gateway returned HTTP {exc.code}.'}
+    except (OSError, ValueError, TypeError) as exc:
+        return {'connected': False, 'error': f'Remote gateway is unreachable: {exc}'}
+
+
 def get_client_snippets(server_ip, client_key):
     """Generate ready-to-run terminal snippets and configurations for all supported clients."""
     server_ip = _safe_text(server_ip) or 'YOUR_SERVER_IP'
@@ -171,53 +249,258 @@ def get_client_snippets(server_ip, client_key):
     base_url = f'http://{server_ip}:8317'
     responses_url = f'{base_url}/v1'
 
-    claude_cli_ps = f'''[IO.File]::WriteAllText("$HOME\\.claude\\settings.json", '{{"env":{{"ANTHROPIC_BASE_URL":"{base_url}","ANTHROPIC_AUTH_TOKEN":"{client_key}","ANTHROPIC_API_KEY":"","CLAUDE_CODE_AUTO_MODE_SERVER":"0","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY":"1","API_TIMEOUT_MS":"604800000","CLAUDE_ENABLE_STREAM_WATCHDOG":"0"}}}}')'''
+    claude_cli_ps = f'''$ErrorActionPreference = "Stop"
+if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {{ throw "Claude Code CLI is not installed or is not on PATH." }}
+$path = Join-Path $HOME ".claude\\settings.json"
+New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+$hadConfig = Test-Path -LiteralPath $path
+$backup = $null
+if ($hadConfig) {{
+  $stamp = Get-Date -Format yyyyMMddHHmmss
+  $backup = "$path.omni-backup-$stamp"
+  $suffix = 1
+  while (Test-Path -LiteralPath $backup) {{ $backup = "$path.omni-backup-$stamp-$suffix"; $suffix++ }}
+  Copy-Item -LiteralPath $path -Destination $backup
+}}
+$data = @{{}}
+if ($hadConfig) {{ try {{ $data = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }} catch {{ $data = @{{}} }} }}
+if (-not $data.PSObject.Properties['env']) {{ $data | Add-Member NoteProperty env ([pscustomobject]@{{}}) }}
+$data.env | Add-Member NoteProperty ANTHROPIC_BASE_URL '{base_url}' -Force
+$data.env | Add-Member NoteProperty ANTHROPIC_AUTH_TOKEN '{client_key}' -Force
+$data.env | Add-Member NoteProperty ANTHROPIC_API_KEY '' -Force
+$data.env | Add-Member NoteProperty CLAUDE_CODE_AUTO_MODE_SERVER '0' -Force
+$data.env | Add-Member NoteProperty CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY '1' -Force
+$data.env | Add-Member NoteProperty API_TIMEOUT_MS '604800000' -Force
+$data.env | Add-Member NoteProperty CLAUDE_ENABLE_STREAM_WATCHDOG '0' -Force
+$tmp = "$path.omni.tmp-$PID"
+$data | ConvertTo-Json -Depth 20 | Set-Content -Encoding utf8 -LiteralPath $tmp
+Move-Item -Force -LiteralPath $tmp -Destination $path
+$check = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+if ($check.env.ANTHROPIC_BASE_URL -ne '{base_url}' -or $check.env.ANTHROPIC_AUTH_TOKEN -ne '{client_key}') {{
+  if ($hadConfig) {{ Copy-Item -LiteralPath $backup -Destination $path -Force }} else {{ Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }}
+  throw "Claude Code route verification failed; the previous settings were restored."
+}}
+Write-Output "Omni Claude Code route active. Config: $path"
+if ($backup) {{ Write-Output "Backup: $backup" }}'''
 
-    claude_cli_bash = f'''mkdir -p ~/.claude && cat << 'EOF' > ~/.claude/settings.json
-{{
-  "env": {{
-    "ANTHROPIC_BASE_URL": "{base_url}",
-    "ANTHROPIC_AUTH_TOKEN": "{client_key}",
+    claude_cli_bash = f'''set -euo pipefail
+command -v claude >/dev/null 2>&1 || {{ echo "Claude Code CLI is not installed or is not on PATH." >&2; exit 127; }}
+command -v python3 >/dev/null 2>&1 || {{ echo "Python 3 is required for the one-paste setup." >&2; exit 127; }}
+CFG="${{CLAUDE_CONFIG_DIR:-$HOME/.claude}}/settings.json"
+mkdir -p "$(dirname "$CFG")"
+BACKUP="${{CFG}}.omni-backup-$(date +%Y%m%d%H%M%S)"
+HAD_CONFIG=0
+if [ -f "$CFG" ]; then
+  suffix=1
+  while [ -e "$BACKUP" ]; do BACKUP="${{CFG}}.omni-backup-$(date +%Y%m%d%H%M%S)-$suffix"; suffix=$((suffix + 1)); done
+  cp -p "$CFG" "$BACKUP"
+  HAD_CONFIG=1
+fi
+restore_config() {{
+  if [ "$HAD_CONFIG" -eq 1 ]; then cp -p "$BACKUP" "$CFG"; else rm -f "$CFG"; fi
+}}
+export OMNI_CLAUDE_URL={shlex.quote(base_url)} OMNI_CLAUDE_TOKEN={shlex.quote(client_key)}
+if ! python3 - "$CFG" <<'PY'
+import json, os, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    data = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {{}}
+except Exception:
+    data = {{}}
+data.setdefault("env", {{}}).update({{
+    "ANTHROPIC_BASE_URL": os.environ["OMNI_CLAUDE_URL"],
+    "ANTHROPIC_AUTH_TOKEN": os.environ["OMNI_CLAUDE_TOKEN"],
     "ANTHROPIC_API_KEY": "",
     "CLAUDE_CODE_AUTO_MODE_SERVER": "0",
     "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
     "API_TIMEOUT_MS": "604800000",
-    "CLAUDE_ENABLE_STREAM_WATCHDOG": "0"
-  }}
+    "CLAUDE_ENABLE_STREAM_WATCHDOG": "0",
+}})
+tmp = path.with_name(path.name + ".omni.tmp")
+tmp.write_text(json.dumps(data, indent=2) + "\\n", encoding="utf-8")
+tmp.replace(path)
+check = json.loads(path.read_text(encoding="utf-8-sig"))
+if check.get("env", {{}}).get("ANTHROPIC_BASE_URL") != os.environ["OMNI_CLAUDE_URL"] or check.get("env", {{}}).get("ANTHROPIC_AUTH_TOKEN") != os.environ["OMNI_CLAUDE_TOKEN"]:
+    raise SystemExit("Claude Code route verification failed")
+PY
+then
+  restore_config
+  echo "Claude Code setup failed; the previous settings were restored." >&2
+  exit 1
+fi
+if [ "$HAD_CONFIG" -eq 1 ]; then printf 'Omni Claude Code route active. Config: %s\\nBackup: %s\\n' "$CFG" "$BACKUP"; else printf 'Omni Claude Code route active. Config: %s\\n' "$CFG"; fi'''
+
+    codex_ps = f'''$ErrorActionPreference = "Stop"
+if (-not (Get-Command codex -ErrorAction SilentlyContinue)) {{ throw "Codex CLI is not installed or is not on PATH." }}
+$path = Join-Path $HOME ".codex\\config.toml"
+New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
+$hadConfig = Test-Path -LiteralPath $path
+$backup = $null
+if ($hadConfig) {{
+  $stamp = Get-Date -Format yyyyMMddHHmmss
+  $backup = "$path.omni-backup-$stamp"
+  $suffix = 1
+  while (Test-Path -LiteralPath $backup) {{ $backup = "$path.omni-backup-$stamp-$suffix"; $suffix++ }}
+  Copy-Item -LiteralPath $path -Destination $backup
 }}
-EOF'''
+$text = if ($hadConfig) {{ Get-Content -LiteralPath $path -Raw }} else {{ "" }}
+$text = [regex]::Replace($text, '(?ms)^\\[model_providers\\.omni_server(?:\\.[^\\]]+)?\\]\\s*.*?(?=^\\[|\\z)', '')
+$text = [regex]::Replace($text, '(?m)^\\s*model_provider\\s*=\\s*"omni_server"\\s*\\r?\\n', '')
+$text = [regex]::Replace($text, '(?m)^\\s*model\\s*=\\s*"gpt-6\\.1-sol"\\s*\\r?\\n', '')
+$lines = @($text -split '\\r?\\n')
+$table = $lines | Select-String -Pattern '^\\s*\\[' | Select-Object -First 1
+$idx = if ($table) {{ $table.LineNumber - 1 }} else {{ $lines.Count }}
+$prefix = @()
+if ($idx -gt 0) {{ $prefix = @($lines[0..($idx - 1)] | Where-Object {{ $_ -notmatch '^\\s*(model|model_provider)\\s*=' }}) }}
+$rest = @()
+if ($idx -lt $lines.Count) {{ $rest = @($lines[$idx..($lines.Count - 1)]) }}
+$block = @(
+  'model = "gpt-6.1-sol"',
+  'model_provider = "omni_server"',
+  '',
+  '[model_providers.omni_server]',
+  'name = "Omni Server"',
+  'base_url = "{responses_url}"',
+  'wire_api = "responses"',
+  'experimental_bearer_token = "{client_key}"',
+  'requires_openai_auth = false',
+  'stream_idle_timeout_ms = 604800000',
+  'request_max_retries = 2',
+  'supports_websockets = false'
+)
+Set-Content -LiteralPath $path -Encoding utf8 -Value (($block + $prefix + $rest) -join "`n")
+$doctor = (& codex doctor 2>&1 | Out-String)
+$valid = $doctor -match 'default model provider\\s+omni_server' -and $doctor -match 'model provider requires OpenAI auth\\s+false'
+if (-not $valid) {{
+  if ($hadConfig) {{ Copy-Item -LiteralPath $backup -Destination $path -Force }} else {{ Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }}
+  $doctor | Write-Error
+  throw "Omni setup verification failed; the previous Codex config was restored."
+}}
+Write-Output "Omni Codex route active. Config: $path"
+if ($backup) {{ Write-Output "Backup: $backup" }}'''
 
-    codex_ps = f'''Add-Content "$HOME\\.codex\\config.toml" @"
+    codex_bash = f'''set -euo pipefail
+command -v codex >/dev/null 2>&1 || {{ echo "Codex CLI is not installed or is not on PATH." >&2; exit 127; }}
+command -v python3 >/dev/null 2>&1 || {{ echo "Python 3 is required for the one-paste setup." >&2; exit 127; }}
+CFG="${{CODEX_HOME:-$HOME/.codex}}/config.toml"
+mkdir -p "$(dirname "$CFG")"
+BACKUP="${{CFG}}.omni-backup-$(date +%Y%m%d%H%M%S)"
+HAD_CONFIG=0
+if [ -f "$CFG" ]; then
+  suffix=1
+  while [ -e "$BACKUP" ]; do BACKUP="${{CFG}}.omni-backup-$(date +%Y%m%d%H%M%S)-$suffix"; suffix=$((suffix + 1)); done
+  cp -p "$CFG" "$BACKUP"
+  HAD_CONFIG=1
+fi
+restore_config() {{
+  if [ "$HAD_CONFIG" -eq 1 ]; then cp -p "$BACKUP" "$CFG"; else rm -f "$CFG"; fi
+}}
+export OMNI_CODEX_URL={shlex.quote(responses_url)} OMNI_CODEX_TOKEN={shlex.quote(client_key)}
+if ! python3 - "$CFG" <<'PY'
+import json, os, re, sys
+from pathlib import Path
 
-model = "gpt-6.1-sol"
-model_provider = "omni_server"
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8-sig") if path.exists() else ""
 
-[model_providers.omni_server]
-name = "Omni Server"
-base_url = "{responses_url}"
-wire_api = "responses"
-experimental_bearer_token = "{client_key}"
-requires_openai_auth = false
-stream_idle_timeout_ms = 604800000
-request_max_retries = 2
-supports_websockets = false
-"@'''
+# Remove the complete Omni table wherever it is located.  Root model keys
+# are removed only before the first TOML table, so unrelated client settings
+# and other providers remain intact.
+text = re.sub(r"(?ms)^\\[model_providers\\.omni_server(?:\\.[^\\]]+)?\\]\\s*.*?(?=^\\[|\\Z)", "", text)
+text = re.sub(r'(?m)^\\s*model_provider\\s*=\\s*"omni_server"\\s*\\r?\\n', "", text)
+text = re.sub(r'(?m)^\\s*model\\s*=\\s*"gpt-6\\.1-sol"\\s*\\r?\\n', "", text)
+lines = text.splitlines()
+first_table = next((i for i, line in enumerate(lines) if line.lstrip().startswith("[")), len(lines))
+prefix = [line for line in lines[:first_table]
+          if not re.match(r"^\\s*(?:model|model_provider)\\s*=", line)]
+rest = lines[first_table:]
+url = os.environ["OMNI_CODEX_URL"]
+token = os.environ["OMNI_CODEX_TOKEN"]
+block = [
+    'model = "gpt-6.1-sol"',
+    'model_provider = "omni_server"',
+    '',
+    '[model_providers.omni_server]',
+    'name = "Omni Server"',
+    'base_url = ' + json.dumps(url),
+    'wire_api = "responses"',
+    'experimental_bearer_token = ' + json.dumps(token),
+    'requires_openai_auth = false',
+    'stream_idle_timeout_ms = 604800000',
+    'request_max_retries = 2',
+    'supports_websockets = false',
+]
+path.write_text("\\n".join(block + prefix + rest).rstrip() + "\\n", encoding="utf-8")
+PY
+then
+  restore_config
+  echo "Codex setup failed; the previous config was restored." >&2
+  exit 1
+fi
 
-    codex_bash = f'''cat << 'EOF' >> ~/.codex/config.toml
+DOCTOR="$(codex doctor 2>&1)" || true
+if ! printf '%s\\n' "$DOCTOR" | grep -Eiq 'default model provider[[:space:]]+omni_server' || \\
+   ! printf '%s\\n' "$DOCTOR" | grep -Eiq 'model provider requires OpenAI auth[[:space:]]+false'; then
+  restore_config
+  printf '%s\\n' "$DOCTOR" >&2
+  echo "Omni setup verification failed; the previous Codex config was restored." >&2
+  exit 1
+fi
+printf 'Omni Codex route active. Config: %s\\nBackup: %s\\n' "$CFG" "$BACKUP"'''
 
-model = "gpt-6.1-sol"
-model_provider = "omni_server"
+    # Desktop always uses the default profile.  CLI keeps CODEX_HOME support
+    # so a user with an isolated CLI profile can target that profile explicitly.
+    codex_desktop_ps = '# Codex Desktop (default profile)\n' + codex_ps
+    codex_desktop_bash = codex_bash.replace(
+        'CFG="${CODEX_HOME:-$HOME/.codex}/config.toml"',
+        'CFG="$HOME/.codex/config.toml"',
+        1,
+    )
+    codex_desktop_bash = '# Codex Desktop (default profile)\n' + codex_desktop_bash
+    codex_cli_ps = '# Codex CLI (CODEX_HOME-aware profile)\n' + codex_ps
+    codex_cli_bash = '# Codex CLI (CODEX_HOME-aware profile)\n' + codex_bash
 
-[model_providers.omni_server]
-name = "Omni Server"
-base_url = "{responses_url}"
-wire_api = "responses"
-experimental_bearer_token = "{client_key}"
-requires_openai_auth = false
-stream_idle_timeout_ms = 604800000
-request_max_retries = 2
-supports_websockets = false
-EOF'''
+    # These commands keep a timestamped backup and remove only Omni's
+    # routing entries, leaving the rest of each client's configuration intact.
+    claude_restore_ps = r'''$path="$HOME\.claude\settings.json"; if(Test-Path $path){Copy-Item $path "$path.omni-backup-$(Get-Date -Format yyyyMMddHHmmss)"; $data=Get-Content $path -Raw | ConvertFrom-Json; if($data.PSObject.Properties['env']){@('ANTHROPIC_BASE_URL','ANTHROPIC_AUTH_TOKEN','ANTHROPIC_API_KEY','CLAUDE_CODE_AUTO_MODE_SERVER','CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY','API_TIMEOUT_MS','CLAUDE_ENABLE_STREAM_WATCHDOG') | ForEach-Object {if($data.env.PSObject.Properties[$_]){$data.env.PSObject.Properties.Remove($_)}}; if(-not $data.env.PSObject.Properties.Count){$data.PSObject.Properties.Remove('env')}}; $data | ConvertTo-Json -Depth 20 | Set-Content -Encoding utf8 $path}'''
+
+    claude_restore_bash = r'''python3 - <<'PY'
+import json, shutil
+from datetime import datetime
+from pathlib import Path
+path = Path.home() / '.claude' / 'settings.json'
+if path.exists():
+    shutil.copy2(path, path.with_name(path.name + '.omni-backup-' + datetime.now().strftime('%Y%m%d%H%M%S')))
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        data = {}
+    env = data.get('env', {})
+    for key in ('ANTHROPIC_BASE_URL','ANTHROPIC_AUTH_TOKEN','ANTHROPIC_API_KEY','CLAUDE_CODE_AUTO_MODE_SERVER','CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY','API_TIMEOUT_MS','CLAUDE_ENABLE_STREAM_WATCHDOG'):
+        env.pop(key, None)
+    if env:
+        data['env'] = env
+    else:
+        data.pop('env', None)
+    path.write_text(json.dumps(data, indent=2) + '\n')
+PY'''
+
+    codex_restore_ps = r'''$path="$HOME\.codex\config.toml"; if(Test-Path $path){Copy-Item $path "$path.omni-backup-$(Get-Date -Format yyyyMMddHHmmss)"; $text=Get-Content $path -Raw; $text=[regex]::Replace($text,'(?ms)^\[model_providers\.omni_server\]\r?\n.*?(?=^\[|\z)',''); $text=[regex]::Replace($text,'(?m)^\s*model_provider\s*=\s*"omni_server"\s*\r?\n',''); $text=[regex]::Replace($text,'(?m)^\s*# Omni managed route\r?\n',''); Set-Content -Encoding utf8 $path $text}'''
+
+    codex_restore_bash = r'''python3 - <<'PY'
+import re, shutil
+from datetime import datetime
+from pathlib import Path
+path = Path.home() / '.codex' / 'config.toml'
+if path.exists():
+    shutil.copy2(path, path.with_name(path.name + '.omni-backup-' + datetime.now().strftime('%Y%m%d%H%M%S')))
+    text = path.read_text()
+    text = re.sub(r'(?ms)^\[model_providers\.omni_server\]\r?\n.*?(?=^\[|\Z)', '', text)
+    text = re.sub(r'(?m)^\s*model_provider\s*=\s*"omni_server"\s*\r?\n', '', text)
+    text = re.sub(r'(?m)^\s*# Omni managed route\r?\n', '', text)
+    path.write_text(text)
+PY'''
 
     claude_desktop_json = f'''{{
   "inferenceGatewayBaseUrl": "{base_url}",
@@ -234,8 +517,16 @@ EOF'''
         'responses_url': responses_url,
         'claude_code_ps': claude_cli_ps,
         'claude_code_bash': claude_cli_bash,
+        'claude_restore_ps': claude_restore_ps,
+        'claude_restore_bash': claude_restore_bash,
         'codex_ps': codex_ps,
         'codex_bash': codex_bash,
+        'codex_desktop_ps': codex_desktop_ps,
+        'codex_desktop_bash': codex_desktop_bash,
+        'codex_cli_ps': codex_cli_ps,
+        'codex_cli_bash': codex_cli_bash,
+        'codex_restore_ps': codex_restore_ps,
+        'codex_restore_bash': codex_restore_bash,
         'claude_desktop_json': claude_desktop_json
     }
 
@@ -265,6 +556,7 @@ def collect_accounts_payload(controller):
 
 def deploy_to_server(config, controller, progress_callback=None):
     """Deploy Omni gateway service and migrate existing accounts to Ubuntu server in one batch."""
+    config = validate_ssh_config(config)
     def log(msg):
         if progress_callback:
             progress_callback(msg)

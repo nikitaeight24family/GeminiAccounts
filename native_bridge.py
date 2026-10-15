@@ -89,6 +89,10 @@ class NativeBridge:
                                           'openai': 'chatgpt-collapsed','openai-free':'chatgpt-free-collapsed','tokenharbor':'tokenharbor-collapsed'}.get(p, p+'-accounts-collapsed'), p!='gemini')
                               for p in SERVICES + ('openai-free',)},
                 'backendMode': prefs.get('backend-mode', 'local'),
+                'remoteBackendStatus': prefs.get('remote-backend-status', {
+                    'mode': prefs.get('backend-mode', 'local'),
+                    'connected': prefs.get('backend-mode', 'local') == 'local'
+                }),
                 'remoteServer': remote_server,
                 'remoteServerConfig': prefs.get('remote-server-config', {}),
                 'remoteSnippets': snippets}
@@ -362,7 +366,9 @@ class NativeBridge:
         with self.state_lock:
             accounts = list(self.accounts.values())
         for account, provider in accounts:
-            if account.get('api') or account.get('disabled') or provider == 'tokenharbor':
+            # Paused accounts stay out of request rotation, but their health
+            # ping must continue so quota windows and session state stay fresh.
+            if account.get('api') or provider == 'tokenharbor':
                 continue
             quota = account.get('quota') or {}
             deadlines = [w.get('reset_at') for w in quota.get('windows', [])]
@@ -384,7 +390,7 @@ class NativeBridge:
                     return
             try:
                 probed = False
-                if not quota.get('error') and not account.get('api') and not account.get('disabled'):
+                if not quota.get('error') and not account.get('api'):
                     if provider == 'gemini':
                         with self.activity_lock:
                             last_used = {}
@@ -596,10 +602,36 @@ class NativeBridge:
             mode = command.get('mode', 'local')
             if mode not in ('local', 'remote'):
                 raise ValueError('Invalid backend mode')
+            if mode == 'remote':
+                from remote_server import probe_remote_gateway
+                server = prefs.get('remote-server') or {}
+                probe = probe_remote_gateway(server)
+                if not probe.get('connected'):
+                    current = prefs.get('backend-mode', 'local')
+                    status = {'mode': current, 'connected': False,
+                              'error': probe.get('error', 'Remote gateway is not reachable.')}
+                    prefs['remote-backend-status'] = status
+                    self.controller.save()
+                    self.emit({'event': 'preferences', 'preferences': self.preferences()})
+                    return status
+                status = {'mode': 'remote', 'connected': True,
+                          'gateway': probe.get('gateway'),
+                          'model_count': probe.get('model_count', 0),
+                          'latency_ms': probe.get('latency_ms'),
+                          'checked_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+                prefs['backend-mode'] = 'remote'
+                prefs['remote-backend-status'] = status
+                self.controller.save()
+                self.emit({'event': 'preferences', 'preferences': self.preferences()})
+                return status
             prefs['backend-mode'] = mode
+            prefs['remote-backend-status'] = {
+                'mode': 'local', 'connected': True,
+                'checked_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+            }
             self.controller.save()
             self.emit({'event': 'preferences', 'preferences': self.preferences()})
-            return {'mode': mode}
+            return prefs['remote-backend-status']
         elif action == 'remote_server_save':
             cfg = command.get('config') or {}
             prefs['remote-server-config'] = {

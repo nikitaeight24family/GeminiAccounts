@@ -268,7 +268,7 @@ class ChatGPTAuth:
         if 'openai' in blocked_families(self.controller.preferences, account['name'], self.quota_limit_groups(quota)):
             return None
         """Start an unused full 5h window after a three-minute grace period."""
-        if account.get('disabled') or not account.get('auth_index') or account.get('unavailable') or account.get('cooldowns'):
+        if not account.get('auth_index') or account.get('unavailable') or account.get('cooldowns'):
             return None
         windows = {w['label']: w for w in quota.get('windows', [])}
         remaining = windows.get('5h', {}).get('remaining')
