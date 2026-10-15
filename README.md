@@ -2,19 +2,19 @@
 <h1 align="center">Omni</h1>
 <p align="center">AI accounts, quotas, models and app connections in one place.</p>
 <p align="center">
-  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.3"><img src="https://img.shields.io/github/v/release/nikitaeight24family/Omni?label=release&color=739aff" alt="Release 1.6.3"></a>
+  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.4"><img src="https://img.shields.io/github/v/release/nikitaeight24family/Omni?label=release&color=739aff" alt="Release 1.6.4"></a>
   <a href="https://github.com/nikitaeight24family/Omni/actions/workflows/build.yml"><img src="https://github.com/nikitaeight24family/Omni/actions/workflows/build.yml/badge.svg" alt="Build and tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-66d7b0" alt="MIT license"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/nikitaeight24family/Omni/releases/download/v1.6.3/Omni-Setup.exe"><b>Download Omni 1.6.3 for Windows</b></a> ·
-  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.3">Release files</a> ·
+  <a href="https://github.com/nikitaeight24family/Omni/releases/download/v1.6.4/Omni-Setup.exe"><b>Download Omni 1.6.4 for Windows</b></a> ·
+  <a href="https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.4">Release files</a> ·
   <a href="CLI.md">CLI guide</a>
 </p>
 
 Omni connects Google Antigravity/Gemini, ChatGPT, Claude, Grok and TokenHarbor accounts, displays quotas and routes requests through a local gateway. Codex, Claude Code, Claude Desktop and the CLI receive the current model catalog from the connected accounts.
 
-Version **1.6.3** is the Electron desktop build for Windows. The Python application and CLI remain in the repository for macOS, Linux, Windows CLI use and compatibility with older installations.
+Version **1.6.4** is the Electron desktop build for Windows. The Python application and CLI remain in the repository for macOS, Linux, Windows CLI use and compatibility with older installations.
 
 ## Omni windows
 
@@ -32,7 +32,7 @@ The separate automatic sign-in window shows one row per account and connected ar
 
 Screenshots use demonstration data. Real passwords, 2FA secrets, tokens and request history are never included in the repository.
 
-## What's new in 1.6.3
+## What's new in 1.6.4
 
 - Fixed premature HTTP 200 stream start in the gateway queue that caused "model at capacity" and reconnect loops in Codex.
 - Added automatic gateway retries on HTTP 502/503/504 for GPT models, gracefully failing over to available accounts.
@@ -50,7 +50,7 @@ Screenshots use demonstration data. Real passwords, 2FA secrets, tokens and requ
 
 ## Windows installation
 
-1. Download [Omni-Setup.exe](https://github.com/nikitaeight24family/Omni/releases/download/v1.6.3/Omni-Setup.exe) from **v1.6.3**.
+1. Download [Omni-Setup.exe](https://github.com/nikitaeight24family/Omni/releases/download/v1.6.4/Omni-Setup.exe) from **v1.6.4**.
 2. Run the installer. Python and administrator access are not required.
 3. Open Omni and add accounts with the `+` button in the relevant provider section.
 
@@ -93,7 +93,7 @@ The model catalog is regularly synchronized with the connected accounts. Old mod
 
 ## CLI and other operating systems
 
-The CLI is available for Windows, macOS and Linux. Download the matching archive from the [v1.6.3 release](https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.3). From source:
+The CLI is available for Windows, macOS and Linux. Download the matching archive from the [v1.6.4 release](https://github.com/nikitaeight24family/Omni/releases/tag/v1.6.4). From source:
 
 ```sh
 python console.py

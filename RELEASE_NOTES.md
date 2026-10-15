@@ -1,4 +1,4 @@
-# Omni 1.6.3 — Electron UI cleanup
+# Omni 1.6.4 — CI and offline setup fixes
 
 - Removed the redundant Connections button from the top bar; Connections remains available inside Settings.
 - Renamed **Accounts & Archive** to **Accounts** while keeping archive export and import in the Accounts settings page.
