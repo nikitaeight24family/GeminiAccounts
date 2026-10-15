@@ -284,6 +284,8 @@ class ConnectionHealth:
                                 raise
                         row = self.inspect(client, gateway)
                         row['repaired'] = repaired
+                        if not repaired and row.get('status') in ('missing_config', 'invalid_config'):
+                            row['connected'] = False
                         if row['issues']:
                             self.retry_after[client] = self.clock() + 300
                     if row['status'] == 'configured':

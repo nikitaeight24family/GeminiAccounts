@@ -132,10 +132,11 @@ class Integrations:
             path = library / (preset_id + '.json')
             preset = self.read_json(path)
             models = preset.get('inferenceModels', [])
-            managed = (preset.get('deploymentDisplayName') == 'Omni' and
+            managed = (preset.get('deploymentDisplayName') in ('Omni', 'Gemini Accounts') and
                        str(path.resolve()) in self.backups())
             if (preset.get('inferenceGatewayBaseUrl', '').rstrip('/') == 'http://127.0.0.1:8317'
-                    and (managed or any(m.get('labelOverride', '').startswith('Gemini') for m in models))):
+                    and (managed or preset.get('inferenceProvider') == 'gateway'
+                         or any(m.get('labelOverride', '').startswith('Gemini') for m in models))):
                 return preset_id
         except (OSError, ValueError, TypeError, AttributeError):
             pass
