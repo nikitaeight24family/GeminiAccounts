@@ -1,6 +1,6 @@
 {
   "name": "omni-desktop",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "private": true,
   "description": "Omni desktop manager",
   "main": "main.js",
