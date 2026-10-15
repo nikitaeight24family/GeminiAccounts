@@ -194,9 +194,12 @@ class Controller:
         except (OSError, ValueError) as exc:
             raise AccountError('Cannot reach the local Gemini connection.') from None
 
-    def upload_auth_file(self, name, payload):
+    def upload_auth_file(self, name, payload, archive=False):
         """Send a validated OAuth record to the loopback gateway without logging its tokens."""
-        if not name.startswith('codex-import-') or not name.endswith('.json') or not isinstance(payload, bytes):
+        valid_name = (name.startswith('codex-import-') and name.endswith('.json'))
+        if archive:
+            valid_name = bool(name) and Path(name).name == name and name.endswith('.json')
+        if not valid_name or not isinstance(payload, bytes) or len(payload) > 2_000_000:
             raise AccountError('Invalid ChatGPT account import.')
         url = self.base + '/v0/management/auth-files?' + urllib.parse.urlencode({'name': name})
         request = urllib.request.Request(url, data=payload, method='POST', headers={

@@ -94,10 +94,20 @@ function pageAutomationScript(credentials, code, mfaSubmitted = false, targetAre
       const targetArea = ${JSON.stringify(targetArea || '')};
       const targetAccountId = ${JSON.stringify(targetAccountId || '')};
       if (targetArea && !window.__omniTargetWorkspaceChosen) {
-        const choices = [...document.querySelectorAll('[role="option"],label,button,[data-workspace],[data-organization]')].filter(visible);
-        const target = choices.find(node => targetAccountId && node.matches('input[type="radio"],input[type="checkbox"]') && String(node.value||'')===String(targetAccountId)) || choices.filter(node => !node.matches('button,[role="button"]')).find(node => {let parent=node,text=node.closest?.('label')?.textContent||'';for(let i=0;i<2&&parent&&!node.closest?.('label');i++,parent=parent.parentElement)text+=' '+(parent.innerText||parent.textContent||'');text+=' '+(node.value||'');text=text.trim();return targetArea.toLowerCase() === 'free'
-          ? /personal|free|личн|персональ|бесплат/i.test(text)
-          : text.toLowerCase().includes(targetArea.toLowerCase());});
+        const choices = [...document.querySelectorAll('input[type="radio"],input[type="checkbox"],[role="option"],label,button,[data-workspace],[data-organization]')].filter(visible);
+        const area = targetArea.toLowerCase().replace(/[_-]/g, ' ');
+        const matchesArea = text => {
+          if (area === 'free' || /free|personal|личн|персональ|бесплат/i.test(area)) return /personal|free|личн|персональ|бесплат/i.test(text);
+          if (area === 'k12' || area === 'edu' || /education|school|student|учеб|образован/i.test(area)) return /edu|education|school|student|учеб|образован|школ/i.test(text);
+          return text.toLowerCase().includes(area);
+        };
+        const targetInput = choices.find(node => targetAccountId && node.matches('input[type="radio"],input[type="checkbox"]') && String(node.value||'')===String(targetAccountId));
+        const target = targetInput || choices.filter(node => !node.matches('button,[role="button"]')).find(node => {
+          let parent=node, text=node.closest?.('label')?.textContent||'';
+          for(let i=0;i<2&&parent&&!node.closest?.('label');i++,parent=parent.parentElement) text+=' '+(parent.innerText||parent.textContent||'');
+          text+=' '+(node.value||'');
+          return matchesArea(text.trim());
+        });
         if (!target) return {status:'target-workspace-unavailable'};
         target.click();window.__omniTargetWorkspaceChosen=true;
         return {status:'selected-target-workspace'};

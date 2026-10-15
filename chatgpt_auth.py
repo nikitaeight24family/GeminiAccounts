@@ -337,7 +337,18 @@ class ChatGPTAuth:
             'auth_index': account['auth_index'], 'method': 'GET',
             'url': 'https://chatgpt.com/backend-api/wham/usage', 'header': headers})
         if result.get('status_code') != 200:
-            return {'windows': [], 'error': 'Quota HTTP ' + str(result.get('status_code') or '?')}
+            detail = ''
+            try:
+                body = json.loads(result.get('body') or '{}')
+                error = body.get('error') if isinstance(body, dict) else None
+                if isinstance(error, dict):
+                    code = error.get('code') or error.get('type')
+                    if isinstance(code, str) and code and len(code) <= 80 and all(ch.isalnum() or ch in '_-' for ch in code):
+                        detail = code
+            except (TypeError, ValueError):
+                pass
+            suffix = ': ' + detail if detail else ''
+            return {'windows': [], 'error': 'Quota HTTP ' + str(result.get('status_code') or '?') + suffix}
         body = json.loads(result.get('body') or '{}')
         rate = body.get('rate_limit') or {}
         windows = []

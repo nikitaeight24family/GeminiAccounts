@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from backend import Controller, AccountError
 from native_bridge import NativeBridge
 
@@ -354,3 +354,28 @@ class NativeBridgeTests(unittest.TestCase):
         self.assertTrue(dto['active'])
         self.assertEqual(dto['model'], 'gpt-6.1-sol')
         self.assertEqual(dto['activity'], 'running')
+
+    @patch('remote_server.test_ssh_connection')
+    def test_remote_server_test_command(self, mock_test):
+        mock_test.return_value = {'connected': True, 'os': 'Ubuntu 24.04', 'user': 'root'}
+        res = self.bridge.command({'action': 'remote_server_test', 'config': {'host': '1.2.3.4'}})
+        self.assertTrue(res['connected'])
+
+    @patch('remote_server.deploy_to_server')
+    def test_remote_server_deploy_command(self, mock_deploy):
+        mock_deploy.return_value = {'success': True, 'server_ip': '1.2.3.4', 'client_key': 'key_123'}
+        res = self.bridge.command({'action': 'remote_server_deploy', 'config': {'host': '1.2.3.4'}})
+        self.assertTrue(res['success'])
+        self.assertEqual(res['client_key'], 'key_123')
+
+    def test_remote_server_switch_and_save_command(self):
+        res = self.bridge.command({'action': 'remote_server_switch', 'mode': 'remote'})
+        self.assertEqual(res['mode'], 'remote')
+        self.assertEqual(self.controller.preferences['backend-mode'], 'remote')
+
+        save_res = self.bridge.command({'action': 'remote_server_save', 'config': {'host': '5.6.7.8', 'port': 2222, 'user': 'admin', 'key_path': '', 'use_fido': True}})
+        self.assertTrue(save_res['saved'])
+        cfg = self.controller.preferences['remote-server-config']
+        self.assertEqual(cfg['host'], '5.6.7.8')
+        self.assertEqual(cfg['port'], 2222)
+        self.assertTrue(cfg['use_fido'])

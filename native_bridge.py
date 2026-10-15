@@ -28,6 +28,7 @@ from telegram_notifications import TelegramBot
 from connection_health import ConnectionHealth
 from activity import Activity
 from isolated_browser import open_isolated
+from account_archive import read_archive, write_archive
 
 SERVICES = ('gemini', 'openai', 'claude', 'grok', 'tokenharbor')
 API_SERVICES = dict(zip(SERVICES, ('Gemini', 'OpenAI', 'Claude', 'Grok', 'TokenHarbor')))
@@ -76,6 +77,9 @@ class NativeBridge:
 
     def preferences(self):
         prefs = self.controller.preferences
+        from remote_server import get_client_snippets
+        remote_server = prefs.get('remote-server') or {}
+        snippets = get_client_snippets(remote_server.get('host', ''), remote_server.get('client_key', '')) if remote_server.get('host') else None
         return {'theme': prefs.get('theme', 'dark'), 'language': prefs.get('language', 'en'),
                 'telegram': {'enabled':bool(prefs.get('telegram-alerts-enabled')), 'chatId':prefs.get('telegram-chat-id',''), 'tokenSaved':self.telegram.token_saved()},
                 'private': prefs.get('hide-account-names', False),
@@ -83,7 +87,11 @@ class NativeBridge:
                 'summaryCollapsed': {p: prefs.get(('google' if p=='gemini' else p)+'-pool-collapsed', True) for p in SERVICES},
                 'collapsed': {p: prefs.get({'gemini': 'google-accounts-collapsed',
                                           'openai': 'chatgpt-collapsed','openai-free':'chatgpt-free-collapsed','tokenharbor':'tokenharbor-collapsed'}.get(p, p+'-accounts-collapsed'), p!='gemini')
-                              for p in SERVICES + ('openai-free',)}}
+                              for p in SERVICES + ('openai-free',)},
+                'backendMode': prefs.get('backend-mode', 'local'),
+                'remoteServer': remote_server,
+                'remoteServerConfig': prefs.get('remote-server-config', {}),
+                'remoteSnippets': snippets}
 
     def account_dto(self, account, provider):
         prefs = self.controller.preferences
@@ -423,7 +431,12 @@ class NativeBridge:
             raw = self.controller.request('/auth-files/download?name='+quote(name))
             from chatgpt_auth import gateway_credential
             credential = gateway_credential(raw)
-            return {'accountId': credential['account_id'], 'email': credential['email'], 'area': credential['plan_type']}
+            area = credential.get('plan_type') or ''
+            if not area:
+                import re
+                match = re.search(r'-(free|k12|edu|plus|team|pro|business)\.json$', name, re.I)
+                area = match.group(1).lower() if match else ''
+            return {'accountId': credential['account_id'], 'email': credential['email'], 'area': area}
         if action == 'recovery_verify':
             name = str(command.get('id') or '')
             rows = self.clients['openai'].accounts()
@@ -456,6 +469,83 @@ class NativeBridge:
                                'detail': detail, 'auth_index': bool(row.get('auth_index')),
                                'models': row.get('models') or row.get('model_ids') or []})
             return result
+        if action == 'archive_inventory':
+            rows = self.controller.request('/auth-files').get('files', [])
+            result = []
+            labels = self.controller.preferences.get('labels', {})
+            priorities = self.controller.preferences.get('account-priorities', {})
+            for row in rows:
+                provider = row.get('provider', row.get('type'))
+                if provider not in ('antigravity', 'codex'):
+                    continue
+                name = str(row.get('name') or '')
+                area = row.get('plan_type') or ''
+                if not area:
+                    import re
+                    match = re.search(r'-(free|k12|edu|plus|team|pro|business)\.json$', name, re.I)
+                    area = match.group(1) if match else ''
+                result.append({'id': name, 'provider': provider, 'email': row.get('email', ''),
+                               'area': area, 'label': labels.get(name, ''),
+                               'priority': priorities.get(name, row.get('priority', 0) or 0),
+                               'disabled': bool(row.get('disabled'))})
+            return result
+        if action == 'archive_export':
+            path = str(command.get('path') or '')
+            selected = {str(value) for value in (command.get('ids') or []) if value}
+            password = command.get('password')
+            if not path or not selected:
+                raise AccountError('Select at least one account to export.')
+            rows = self.controller.request('/auth-files').get('files', [])
+            records = []
+            labels = self.controller.preferences.get('labels', {})
+            priorities = self.controller.preferences.get('account-priorities', {})
+            for row in rows:
+                name = str(row.get('name') or '')
+                provider = row.get('provider', row.get('type'))
+                if name not in selected or provider not in ('antigravity', 'codex'):
+                    continue
+                payload = self.controller.request('/auth-files/download?'+urlencode({'name': name}))
+                records.append({'provider': provider, 'name': name, 'payload': payload,
+                                'metadata': {'label': labels.get(name, ''),
+                                             'priority': priorities.get(name, row.get('priority', 0) or 0),
+                                             'disabled': bool(row.get('disabled'))}})
+            if len(records) != len(selected):
+                raise AccountError('One or more selected accounts are no longer available.')
+            return write_archive(path, records, password, command.get('automatic_credentials'))
+        if action == 'archive_import':
+            data = read_archive(str(command.get('path') or ''), command.get('password'))
+            existing = self.controller.request('/auth-files').get('files', [])
+            existing_by_email = {}
+            for row in existing:
+                provider = row.get('provider', row.get('type'))
+                email = str(row.get('email') or '').casefold()
+                if provider in ('antigravity', 'codex') and email:
+                    existing_by_email.setdefault((provider, email), row)
+            imported, skipped, failed = [], [], []
+            labels = self.controller.preferences.setdefault('labels', {})
+            priorities = self.controller.preferences.setdefault('account-priorities', {})
+            for record in data['records']:
+                provider, name, payload = record['provider'], record['name'], record['payload']
+                email = str(payload.get('email') or '').casefold()
+                old = existing_by_email.get((provider, email))
+                if old:
+                    skipped.append({'email': email, 'reason': 'already-connected'})
+                    continue
+                try:
+                    self.controller.upload_auth_file(name, json.dumps(payload, ensure_ascii=False).encode('utf-8'), archive=True)
+                    meta = record.get('metadata') or {}
+                    if meta.get('label'):
+                        labels[name] = str(meta['label'])[:120]
+                    if isinstance(meta.get('priority'), int):
+                        priorities[name] = max(0, min(9, meta['priority']))
+                    imported.append({'email': email, 'provider': provider, 'name': name})
+                except Exception as exc:
+                    failed.append({'email': email, 'reason': safe_detail(exc)})
+            self.controller.save()
+            if imported:
+                self.pool.submit(self.refresh)
+            return {'imported': imported, 'skipped': skipped, 'failed': failed,
+                    'automatic_credentials': data.get('automatic_credentials', [])}
         if action == 'visibility':
             provider = command['provider']
             if provider not in SERVICES:
@@ -479,6 +569,35 @@ class NativeBridge:
             if provider not in SERVICES:
                 raise ValueError('Unknown service')
             prefs[('google' if provider=='gemini' else provider)+'-pool-collapsed'] = bool(command['value'])
+        elif action == 'remote_server_test':
+            from remote_server import test_ssh_connection
+            return test_ssh_connection(command.get('config') or {})
+        elif action == 'remote_server_deploy':
+            from remote_server import deploy_to_server
+            def on_progress(msg):
+                self.emit({'event': 'remote_deploy_progress', 'message': msg})
+            res = deploy_to_server(command.get('config') or {}, self.controller, progress_callback=on_progress)
+            self.emit({'event': 'preferences', 'preferences': self.preferences()})
+            return res
+        elif action == 'remote_server_switch':
+            mode = command.get('mode', 'local')
+            if mode not in ('local', 'remote'):
+                raise ValueError('Invalid backend mode')
+            prefs['backend-mode'] = mode
+            self.controller.save()
+            self.emit({'event': 'preferences', 'preferences': self.preferences()})
+            return {'mode': mode}
+        elif action == 'remote_server_save':
+            cfg = command.get('config') or {}
+            prefs['remote-server-config'] = {
+                'host': str(cfg.get('host') or '').strip(),
+                'port': int(cfg.get('port') or 22),
+                'user': str(cfg.get('user') or 'root').strip(),
+                'key_path': str(cfg.get('key_path') or '').strip(),
+                'use_fido': bool(cfg.get('use_fido'))
+            }
+            self.controller.save()
+            return {'saved': True}
         elif action == 'telegram_preferences':
             prefs['telegram-alerts-enabled'] = bool(command['enabled'])
             prefs['telegram-chat-id'] = str(command.get('chatId') or '').strip()

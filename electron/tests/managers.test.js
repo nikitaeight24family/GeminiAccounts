@@ -49,7 +49,7 @@ function setupManager(provider,loginStatus,reviewResult,mode=''){
  const html=fs.readFileSync(path.join(__dirname,'../renderer/manager.html'),'utf8');
  const dom=new JSDOM(html,{url:`https://omni.test/manager.html?provider=${provider}&mode=${mode}`,runScripts:'outside-only',pretendToBeVisual:true});
  const w=dom.window,calls=[],listeners=[];Object.defineProperty(w.crypto,'subtle',{value:webcrypto.subtle});w.Date.now=()=>59000;
- w.omni={send:async(action,fields)=>{calls.push({action,fields});if(action==='preferences')return {language:'en'};if(action==='login_pending')return [{state:'pending',url:'https://auth.openai.com',created_at:Date.now()/1000}];if(action==='login')return {state:'test',url:'https://auth.openai.com',expires_at:Date.now()/1000+600};if(action==='login_status')return loginStatus??{status:'wait'};if(action==='login_review')return reviewResult??{status:'checking'};return {};},chatgptAutoLogin:async line=>{calls.push({action:'chatgpt-auto-login',line});return {state:'auto-test',automatic:true,expires_at:Date.now()/1000+600};},chatgptAutoLoginCancel:async state=>{calls.push({action:'chatgpt-auto-login-cancel',state});},onEvent:fn=>listeners.push(fn),copy:async()=>{calls.push({action:'copy'});},open:async()=>{calls.push({action:'open'});},paste:async()=>'',importAuth:async()=>({cancelled:true})};
+ w.omni={send:async(action,fields)=>{calls.push({action,fields});if(action==='preferences')return {language:'en'};if(action==='archive_inventory')return [{id:'google.json',provider:'antigravity',email:'google@example.com',area:'free'},{id:'openai.json',provider:'codex',email:'openai@example.com',area:'plus'}];if(action==='login_pending')return [{state:'pending',url:'https://auth.openai.com',created_at:Date.now()/1000}];if(action==='login')return {state:'test',url:'https://auth.openai.com',expires_at:Date.now()/1000+600};if(action==='login_status')return loginStatus??{status:'wait'};if(action==='login_review')return reviewResult??{status:'checking'};return {};},chatgptAutoLogin:async line=>{calls.push({action:'chatgpt-auto-login',line});return {state:'auto-test',automatic:true,expires_at:Date.now()/1000+600};},chatgptAutoLoginCancel:async state=>{calls.push({action:'chatgpt-auto-login-cancel',state});},archiveExport:async fields=>{calls.push({action:'archive-export',fields});return {accounts:fields.ids.length};},archiveImport:async password=>{calls.push({action:'archive-import',password});return {imported:[],skipped:[],failed:[]};},onEvent:fn=>listeners.push(fn),copy:async()=>{calls.push({action:'copy'});},open:async()=>{calls.push({action:'open'});},paste:async()=>'',importAuth:async()=>({cancelled:true})};
  w.eval(fs.readFileSync(path.join(__dirname,'../renderer/manager.js'),'utf8'));
  return {dom,w,calls,listeners};
 }
@@ -88,6 +88,13 @@ test('automatic window has a multi-file drop zone and no file picker',async()=>{
   Object.defineProperty(event,'dataTransfer',{value:{files:[{name:'one.txt',text:async()=> 'first@example.com | password | SECRET'},{name:'two.txt',text:async()=> 'second@example.com | password | SECRET'}]}});
   drop.dispatchEvent(event);await new Promise(r=>setTimeout(r,10));
   assert.match(w.document.querySelector('textarea').value,/first@example.com[\s\S]*\nsecond@example.com/);
+ }finally{dom.window.close();}
+});
+test('account archive starts with no selections and select-all toggles every account',async()=>{
+ const {dom,w}=setupManager(null,null,null,'archive');try{
+  await new Promise(r=>setTimeout(r,20));
+  const boxes=[...w.document.querySelectorAll('input[data-archive-id]')];assert.equal(boxes.length,2);assert.equal(boxes.some(box=>box.checked),false);
+  const select=w.document.querySelector('.archive-select-all input');select.click();await new Promise(r=>setImmediate(r));assert.equal(boxes.every(box=>box.checked),true);select.click();await new Promise(r=>setImmediate(r));assert.equal(boxes.some(box=>box.checked),false);
  }finally{dom.window.close();}
 });
 test('ChatGPT credentials validate and TOTP matches the RFC 6238 SHA-1 vector',()=>{
