@@ -1191,3 +1191,24 @@
       .auth-methods-row { grid-template-columns: 1fr; }
     }
   
+
+
+.project-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.setting-control .icon-link {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+
+.setting-control .icon-link svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
