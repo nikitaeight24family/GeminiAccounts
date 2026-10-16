@@ -498,13 +498,19 @@ class NativeBridge:
                 if provider not in ('antigravity', 'codex'):
                     continue
                 name = str(row.get('name') or '')
-                area = row.get('plan_type') or ''
+                with self.state_lock:
+                    cached = self.accounts.get(name)
+                    if cached:
+                        row = {**row, **cached[0]}
+                quota = row.get('quota') or {}
+                area = (row.get('plan_type') or row.get('subscription') or row.get('plan')
+                        or row.get('tier') or quota.get('plan_type') or quota.get('subscription') or '')
                 if not area:
                     import re
                     match = re.search(r'-(free|k12|edu|plus|team|pro|business)\.json$', name, re.I)
                     area = match.group(1) if match else ''
                 result.append({'id': name, 'provider': provider, 'email': row.get('email', ''),
-                               'area': area, 'label': labels.get(name, ''),
+                               'area': area, 'subscription': area, 'label': labels.get(name, ''),
                                'priority': priorities.get(name, row.get('priority', 0) or 0),
                                'disabled': bool(row.get('disabled'))})
             return result

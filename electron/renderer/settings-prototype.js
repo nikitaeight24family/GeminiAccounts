@@ -2,7 +2,7 @@
  * This file deliberately contains no provider logic. It adapts the prototype
  * controls to the existing Electron bridge exposed by preload.js. */
 (function () {
-  const providerNames = {gemini:'Antigravity', openai:'OpenAI', claude:'Claude', grok:'Grok', tokenharbor:'TokenHarbor'};
+  const providerNames = {gemini:'Antigravity', openai:'OpenAI', claude:'Claude', grok:'Grok', tokenharbor:'TokenHarbor', antigravity:'Antigravity', codex:'OpenAI'};
   const providerKeys = ['gemini','openai','claude','grok','tokenharbor'];
   const local = {screen:'appearance', archive:[], selected:new Set(), reveal:false, initialized:false, clients:[]};
   const el = id => document.getElementById(id);
@@ -11,6 +11,11 @@
   const mask = value => { const text=String(value||''); const at=text.indexOf('@'); if(at<2)return text; return `${text.slice(0,2)}${'•'.repeat(Math.min(6,Math.max(1,at-2)))}${text.slice(at)}`; };
   const icon = name => ({check:'✓',warn:'!',error:'×',pending:'…',off:'—'}[name]||'');
   const setBadge = (node, kind, text) => { if(!node)return; node.className=`badge badge-${kind||'neutral'}`; const label=node.querySelector('span:last-child')||node; if(label===node)node.textContent=text; else label.textContent=text; };
+  const providerKey = value => { const key=String(value||'').toLowerCase(); return key==='antigravity'?'gemini':key==='codex'?'openai':key; };
+  const providerLabel = value => providerNames[providerKey(value)] || providerNames[String(value||'').toLowerCase()] || String(value||'—');
+  const subscriptionRaw = row => row?.subscription ?? row?.plan_type ?? row?.plan ?? row?.tier ?? row?.area ?? row?.quota?.plan_type ?? '';
+  const subscriptionLabel = row => { const raw=String(subscriptionRaw(row)||'').trim(); if(!raw)return 'Не определена'; const key=raw.toLowerCase().replace(/[_-]+/g,' '); if(key==='free'||key==='free tier')return 'Free'; if(key==='plus')return 'Plus'; if(key==='pro'||key==='ai pro')return 'Pro'; if(key==='team')return 'Team'; if(key.includes('max'))return 'Max'; if(key.includes('api')||key.includes('key'))return 'API Key'; return raw; };
+  const subscriptionMatches = (row, tier) => { if(tier==='all')return true; const raw=String(subscriptionRaw(row)||'').toLowerCase(); if(tier==='Pro / Team')return /plus|pro|team|business|paid/.test(raw); if(tier==='Max')return raw.includes('max'); if(tier==='API Key')return raw.includes('api')||raw.includes('key'); return subscriptionLabel(row)===tier; };
 
   function modal(title, body, actions='') {
     const backdrop=el('modal-backdrop'); if(!backdrop)return;
@@ -60,11 +65,11 @@
   function renderArchive(){
     const body=el('archive-table-body'); if(!body)return;
     const query=(el('archive-search')?.value||'').trim().toLowerCase(); const provider=el('archive-filter-provider')?.value||'all'; const status=el('archive-filter-status')?.value||'all'; const tier=el('archive-filter-tier')?.value||'all';
-    let rows=local.archive.filter(row=>{const name=providerNames[row.provider]||row.provider;const text=`${row.email||''} ${name} ${row.area||''} ${row.label||''}`.toLowerCase();return(!query||text.includes(query))&&(provider==='all'||name===provider)&&(status==='all'||(row.status||'active')===status)&&(tier==='all'||(row.area||'')===tier);});
+    let rows=local.archive.filter(row=>{const name=providerLabel(row.provider);const subscription=subscriptionLabel(row);const text=`${row.email||''} ${name} ${subscription} ${subscriptionRaw(row)} ${row.label||''}`.toLowerCase();return(!query||text.includes(query))&&(provider==='all'||name===provider)&&(status==='all'||(row.status||'active')===status)&&subscriptionMatches(row,tier);});
     const sort=el('archive-sort')?.value||'provider'; rows.sort((a,b)=>sort==='status'?String(a.status||'').localeCompare(String(b.status||'')):String(a.provider||'').localeCompare(String(b.provider||''))||String(a.email||'').localeCompare(String(b.email||'')));
     const selectedCount=rows.filter(r=>local.selected.has(r.id)).length; const counter=el('archive-visible-counter'); if(counter)counter.textContent=`Показано записей: ${rows.length} · Выбрано: ${selectedCount}`;
     const all=el('archive-select-all'); if(all){all.checked=!!rows.length&&rows.every(r=>local.selected.has(r.id));all.indeterminate=selectedCount>0&&selectedCount<rows.length;}
-    body.innerHTML=rows.length?rows.map(row=>{const name=providerNames[row.provider]||row.provider;const state=row.status|| (row.disabled?'expired':'active');const stateText=state==='active'?'Активен':state==='expired'?'Сессия истекла':state==='error'?'Ошибка доступа':'Не проверено';return `<tr><td><input type="checkbox" data-archive-id="${escapeHtml(row.id)}" ${local.selected.has(row.id)?'checked':''}></td><td><div class="table-primary"><strong>${escapeHtml(local.reveal?row.email:mask(row.email||row.id))}</strong><small>${escapeHtml(row.label||'Без пользовательской метки')}</small></div></td><td>${escapeHtml(name)}</td><td>${escapeHtml(row.area||'—')}</td><td><span class="badge badge-${state==='active'?'success':state==='error'?'error':'warn'}"><span>${state==='active'?'✓':state==='error'?'!':'↻'}</span><span>${stateText}</span></span></td><td><button type="button" class="btn btn-sm btn-ghost" data-archive-reveal="${escapeHtml(row.id)}">${local.reveal?'Скрыть':'Показать'}</button></td></tr>`;}).join(''):`<tr><td colspan="6" class="empty-state">Нет аккаунтов по выбранным условиям.</td></tr>`;
+    body.innerHTML=rows.length?rows.map(row=>{const name=providerLabel(row.provider);const subscription=subscriptionLabel(row);const state=row.status|| (row.disabled?'expired':'active');const stateText=state==='active'?'Активен':state==='expired'?'Сессия истекла':state==='error'?'Ошибка доступа':'Не проверено';return `<tr><td><input type="checkbox" data-archive-id="${escapeHtml(row.id)}" ${local.selected.has(row.id)?'checked':''}></td><td><div class="table-primary"><strong>${escapeHtml(local.reveal?row.email:mask(row.email||row.id))}</strong><small>${escapeHtml(row.label||'Без пользовательской метки')}</small></div></td><td>${escapeHtml(name)}</td><td>${escapeHtml(subscription)}</td><td><span class="badge badge-${state==='active'?'success':state==='error'?'error':'warn'}"><span>${state==='active'?'✓':state==='error'?'!':'↻'}</span><span>${stateText}</span></span></td><td><button type="button" class="btn btn-sm btn-ghost" data-archive-reveal="${escapeHtml(row.id)}">${local.reveal?'Скрыть':'Показать'}</button></td></tr>`;}).join(''):`<tr><td colspan="6" class="empty-state">Нет аккаунтов по выбранным условиям.</td></tr>`;
     body.querySelectorAll('[data-archive-id]').forEach(cb=>cb.addEventListener('change',e=>{const id=e.target.dataset.archiveId;if(e.target.checked)local.selected.add(id);else local.selected.delete(id);renderArchive();}));
     body.querySelectorAll('[data-archive-reveal]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation();local.reveal=!local.reveal;renderArchive();}));
   }
@@ -126,7 +131,7 @@
     el('btn-sync-accounts')?.addEventListener('click',()=>send('refresh'));
     el('btn-check-updates')?.addEventListener('click',()=>window.omni.open('https://github.com/nikitaeight24family/Omni/releases/latest'));
     el('archive-search')?.addEventListener('input',renderArchive);['archive-filter-provider','archive-filter-status','archive-filter-tier','archive-sort','archive-group-toggle'].forEach(id=>el(id)?.addEventListener('change',renderArchive));
-    el('archive-select-all')?.addEventListener('change',e=>{const query=(el('archive-search')?.value||'').toLowerCase();local.archive.filter(r=>`${r.email||''} ${r.id||''}`.toLowerCase().includes(query)).forEach(r=>e.target.checked?local.selected.add(r.id):local.selected.delete(r.id));renderArchive();});
+    el('archive-select-all')?.addEventListener('change',e=>{document.querySelectorAll('#archive-table-body [data-archive-id]').forEach(input=>{const id=input.dataset.archiveId;if(e.target.checked)local.selected.add(id);else local.selected.delete(id);});renderArchive();});
     el('btn-toggle-all-emails')?.addEventListener('click',()=>{local.reveal=!local.reveal;el('btn-toggle-all-emails').textContent=local.reveal?'Скрыть адреса':'Показать адреса';renderArchive();});
     el('btn-open-export')?.addEventListener('click',exportArchive);el('btn-open-import')?.addEventListener('click',importArchive);
     el('btn-check-all-clients')?.addEventListener('click',()=>loadConnections(ctx));el('btn-modal-close')?.addEventListener('click',closeModal);el('modal-backdrop')?.addEventListener('click',e=>{if(e.target.id==='modal-backdrop')closeModal();});
