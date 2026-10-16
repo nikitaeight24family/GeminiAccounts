@@ -39,6 +39,16 @@ button:focus-visible{outline:2px solid #739aff;outline-offset:2px}
 .settings-actions{display:flex;gap:8px;margin-top:16px}.settings-card button{padding:8px 13px!important;font-size:12px!important;border-radius:7px!important}
 @media(max-width:760px){#settings-view{padding:14px!important}.settings-card{padding:14px}.settings-nav button{padding:8px!important}.settings-row{gap:10px}}
 
+/* Google AI Studio settings surface. Keep the existing account sidebar intact
+   while giving the expanded settings view its own compact design system. */
+#settings-view.settings-prototype{left:0!important;right:0!important;top:0!important;bottom:0!important;padding:0!important;overflow:auto!important;background:#111318!important;z-index:30}
+#settings-view.settings-prototype>h1{display:none}
+#settings-view.settings-prototype #settings-content{height:100%;min-height:100%;padding:0}
+#settings-view.settings-prototype .app-shell{min-height:100%;height:auto}
+#settings-view.settings-prototype .window-header{height:auto;margin:0;flex:none}
+#settings-view.settings-prototype .global-status-strip{min-height:34px}
+#settings-view.settings-prototype.theme-light{background:#f4f5f8!important}
+
 .settings-card select,.settings-card input:not([type=checkbox]){background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:7px;padding:9px 11px;outline:none;font:inherit}
 .settings-card select:focus,.settings-card input:focus{border-color:#739aff}.settings-card button:not(.switch){background:var(--header)}.settings-card button:hover{filter:brightness(1.12)}
 .settings-account-overview{display:grid;gap:2px}.settings-account-line{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);color:var(--text)}.settings-account-line>span{display:flex;align-items:center;gap:9px}.settings-account-line .provider-icon{width:20px;height:20px}.settings-account-line small{color:var(--muted);font-size:12px}

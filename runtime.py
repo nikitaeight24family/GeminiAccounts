@@ -20,13 +20,13 @@ import yaml
 from backend import AccountError, atomic_write, dpapi
 
 VERSION = '1.6.2'
-UPSTREAM_VERSION = '8.0.16'
+UPSTREAM_VERSION = '8.0.30'
 ARCHIVES = {
-    ('Windows', 'amd64'): ('windows_amd64.zip', 'e0d999703c9af70067b15bf50e6521e76392da604d1543541361e6891c676c43'),
+    ('Windows', 'amd64'): ('windows_amd64.zip', '0b4a7e10f261ceed536ab155a5af0d72699b9ad39bcd23737438ca206fdcff42'),
     ('Windows', 'aarch64'): ('windows_aarch64.zip', '7e2c6864ba63dccd861fe429e9e15c1a5be186fe2efabddaa95cfff629c4213a'),
-    ('Darwin', 'amd64'): ('darwin_amd64.tar.gz', '2c5a7e73f31d784f5732b6d24998286706b0dd60e7c6c1724988d9aeae2a4a0e'),
-    ('Darwin', 'aarch64'): ('darwin_aarch64.tar.gz', 'b2c48e27b62bc94c71387e43be287c742b0336f21e2fe203568233593983d495'),
-    ('Linux', 'amd64'): ('linux_amd64.tar.gz', 'affb5a189184e41b4335549e498df6f4f1c7f15dd0d04a28286becc2dfa78579'),
+    ('Darwin', 'amd64'): ('darwin_amd64.tar.gz', 'e8c616fd609f392444300405c264c2c872edf20db78c8785d91fe4ec5d291b0d'),
+    ('Darwin', 'aarch64'): ('darwin_aarch64.tar.gz', '39492d8dbb6d8cb4e6775629f190b4860ee35a559b2095df0068ecc92de4b680'),
+    ('Linux', 'amd64'): ('linux_amd64.tar.gz', 'fd5a4bcb59b1f55b88b48575940fb0e4f920bfd4a9f96a6e9b755fc4c5b6fecc'),
     ('Linux', 'aarch64'): ('linux_aarch64.tar.gz', 'e84f37c92bf48a057e5c2ff3e2a30851a4e43c64efcf442473ea04a43b9ddebb'),
 }
 

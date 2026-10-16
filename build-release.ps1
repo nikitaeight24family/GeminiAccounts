@@ -15,11 +15,11 @@ if ($LASTEXITCODE -ne 0) {throw 'Queue build failed'}
 & $Python -m PyInstaller --noconfirm --onefile --name GeminiAccounts-CLI --add-data ($catalog+';assets') --collect-all tzdata --distpath dist --workpath (Join-Path $build 'console') --specpath $build console.py
 if ($LASTEXITCODE -ne 0) {throw 'Terminal build failed'}
 Compress-Archive -LiteralPath 'dist/GeminiAccounts-CLI.exe','CLI.md','LICENSE','THIRD_PARTY.md' -DestinationPath 'dist/GeminiAccounts-CLI-windows-x64.zip' -Force
-$archive=Join-Path $build 'CLIProxyAPI_8.0.16_windows_amd64.zip'
+$archive=Join-Path $build 'CLIProxyAPI_8.0.30_windows_amd64.zip'
 if (-not (Test-Path -LiteralPath $archive)) {
-    Invoke-WebRequest 'https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.16/CLIProxyAPI_8.0.16_windows_amd64.zip' -OutFile $archive
+    Invoke-WebRequest 'https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.30/CLIProxyAPI_8.0.30_windows_amd64.zip' -OutFile $archive
 }
-$expected='e0d999703c9af70067b15bf50e6521e76392da604d1543541361e6891c676c43'
+$expected='0b4a7e10f261ceed536ab155a5af0d72699b9ad39bcd23737438ca206fdcff42'
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {throw 'CLIProxyAPI checksum mismatch'}
 $upstream = Join-Path $build 'upstream'
 Expand-Archive -LiteralPath $archive -DestinationPath $upstream -Force

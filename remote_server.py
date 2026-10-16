@@ -585,11 +585,11 @@ sudo ufw allow 8317/tcp comment 'Omni AI Gateway' 2>/dev/null || true
 # Download latest linux-x64 binary if not present
 if [ ! -f "$TARGET_DIR/bin/cli-proxy-api" ]; then
     echo "Fetching Linux gateway binary..."
-    URL="https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.16/CLIProxyAPI_8.0.16_linux_amd64.tar.gz"
+    URL="https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.30/CLIProxyAPI_8.0.30_linux_amd64.tar.gz"
     curl -fsSL "$URL" | tar -xz -C "$TARGET_DIR/bin" cli-proxy-api 2>/dev/null || true
     if [ ! -f "$TARGET_DIR/bin/cli-proxy-api" ]; then
         # Try fallback release zip
-        ZIP_URL="https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.16/CLIProxyAPI_8.0.16_linux_amd64.zip"
+        ZIP_URL="https://github.com/router-for-me/CLIProxyAPI/releases/download/v8.0.30/CLIProxyAPI_8.0.30_linux_amd64.zip"
         curl -fsSL "$ZIP_URL" -o "$TARGET_DIR/bin/cliproxy.zip" && unzip -q -o "$TARGET_DIR/bin/cliproxy.zip" -d "$TARGET_DIR/bin" && rm -f "$TARGET_DIR/bin/cliproxy.zip" || true
     fi
     chmod +x "$TARGET_DIR/bin/cli-proxy-api" 2>/dev/null || true

@@ -1,4 +1,4 @@
-"""Context limits of the bundled Antigravity provider catalog (CLIProxyAPI 8.0.16).
+"""Context limits of the bundled Antigravity provider catalog (CLIProxyAPI 8.0.30).
 
 Claude's supported extended-context switch uses a 1,000,000-token budget,
 conservatively within Gemini's 1,048,576-token input window.
