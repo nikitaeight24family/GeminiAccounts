@@ -221,6 +221,10 @@ async function renderInlineArchive(){
 }
 function setupInlineArchive(){const exportButton=$('inline-archive-export'),importButton=$('inline-archive-import');if(exportButton)exportButton.onclick=async()=>{const ids=[...document.querySelectorAll('[data-inline-archive-id]:checked')].map(box=>box.dataset.inlineArchiveId);if(!ids.length){$('notice').textContent=t('Nothing selected');return;}const password=archiveInlinePrompt(t('Export archive'),true);if(password){const result=await window.omni.archiveExport({ids,password});$('notice').textContent=result?.cancelled?'':`${t('Archive exported')}: ${result?.accounts||ids.length}`;}};if(importButton)importButton.onclick=async()=>{const password=archiveInlinePrompt(t('Import archive'));if(!password)return;const result=await window.omni.archiveImport(password);if(!result?.cancelled){$('notice').textContent=`${t('Imported')}: ${(result.imported||[]).length} · ${t('Skipped')}: ${(result.skipped||[]).length}`;archiveInventoryRows=[];renderInlineArchive();}};renderInlineArchive();}
 function settings(){
+  document.body.classList.add('settings-open');
+  const mainSidebar=document.querySelector('.sidebar');
+  if(mainSidebar)mainSidebar.hidden=true;
+  $('settings-view').classList.add('settings-prototype');
   if(window.renderOmniSettingsPrototype){ window.renderOmniSettingsPrototype({state,t,esc,providerIcon,command}); return; }
   $('settings-view').querySelector('h1').textContent=t('Settings');
   const visible=state.visible||{};const telegram=state.telegram||{};const remoteServer=state.remoteServer||{};
