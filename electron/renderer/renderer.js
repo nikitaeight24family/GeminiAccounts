@@ -106,7 +106,7 @@ function patchNode(current,next){
   }
   while(current.childNodes.length>next.childNodes.length)current.lastChild.remove();
 }
-function patchMarkup(el,html){if(el._markup===html)return false;const next=el.cloneNode(false);next.innerHTML=html;patchNode(el,next);el._markup=html;return true;}
+function patchMarkup(el,html){if(!el)return false;if(el._markup===html)return false;const next=el.cloneNode(false);next.innerHTML=html;patchNode(el,next);el._markup=html;return true;}
 function orderChildren(parent,nodes){nodes.forEach((node,i)=>{if(parent.children[i]!==node)parent.insertBefore(node,parent.children[i]||null);});}
 let renderQueued = false, scrollUntil = 0, scrollRenderTimer;
 // Keep incoming data current, but commit the latest state once scrolling settles.

@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from quota_queue import (QueueServer, quota_wait, PING, augment_model_catalog,
-                         free_offer_ended,
+                         free_offer_ended, is_tokenharbor_route,
                          compact_messages_request, estimate_input_tokens,
                          normalize_tool_history)
 
@@ -91,13 +91,15 @@ class QueueTests(unittest.TestCase):
 
     def test_expired_tokenharbor_request_is_rejected_after_retirement(self):
         model = 'claude-haiku-5-5-tokenharbor-free'
-        self.backend.status = 400
+        self.assertTrue(is_tokenharbor_route(model, 'claude-haiku-5.5:free'))
+        self.gate.aliases[model] = 'claude-haiku-5.5:free'
+        self.backend.status = 503
         self.backend.error_body = b'{"error":{"type":"not_found_error","message":"The free offer \\"Claude Haiku 5.5\\" has ended."}}'
         response = self.post(model=model)
-        self.assertEqual(response.status, 400)
-        response.read()
+        self.assertEqual(response.status, 410)
+        body = json.loads(response.read())
+        self.assertEqual(body['error']['code'], 'model_unavailable')
         self.assertTrue(self.gate.model_retired(model))
-        self.gate.retire_model(model)
         response = self.post(model=model)
         self.assertEqual(response.status, 410)
         body = json.loads(response.read())

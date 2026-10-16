@@ -1008,6 +1008,9 @@
     #screen-remote .form-grid .field-group:nth-child(3) {
       grid-column: auto;
     }
+    #screen-remote .form-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 
     .field-group {
       display: flex;
