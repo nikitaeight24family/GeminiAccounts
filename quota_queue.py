@@ -162,6 +162,13 @@ def free_offer_ended(error):
     return ('free offer' in text and ('ended' in text or 'expired' in text))
 
 
+def is_tokenharbor_route(client_model, upstream_model):
+    """Identify TokenHarbor's Claude Haiku free route on either side of an alias."""
+    values = (str(client_model or '').lower(), str(upstream_model or '').lower())
+    return ('tokenharbor' in values[0] or 'tokenharbor' in values[1]
+            or values[1] == 'claude-haiku-5.5:free')
+
+
 def normalize_sdk_system(request):
     """Drop only the standalone SDK identity line; never edit user messages or tools."""
     def clean(text):
@@ -338,7 +345,6 @@ class QueueServer(ThreadingHTTPServer):
         self.model_catalog = {}
         self.model_catalog_checked = 0
         self.retired_models = set()
-        self.retired_fallbacks = {}
 
     def retire_model(self, model):
         model = str(model or '').strip()
@@ -349,38 +355,6 @@ class QueueServer(ThreadingHTTPServer):
     def model_retired(self, model):
         with self.lock:
             return model in self.retired_models
-
-    def replacement_for_retired(self, model):
-        """Pick a live Claude-shaped route for an ended offer.
-
-        Claude Code can keep the old model in an already-open session even
-        after the gateway catalog has been refreshed.  Keep that request
-        usable while the client reloads its menu by selecting the closest
-        currently advertised route (Haiku first, then another Claude route).
-        """
-        with self.lock:
-            if model in self.retired_fallbacks:
-                return self.retired_fallbacks[model]
-            retired = set(self.retired_models)
-            aliases = set(self.aliases)
-        candidates = sorted(
-            candidate for candidate in aliases
-            if candidate != model and candidate not in retired
-            and candidate.startswith('claude-')
-            and 'tokenharbor' not in candidate.lower()
-        )
-        if not candidates:
-            return None
-        lowered = str(model).lower()
-        family = 'haiku' if 'haiku' in lowered else 'sonnet' if 'sonnet' in lowered else 'opus' if 'opus' in lowered else ''
-        family_candidates = [candidate for candidate in candidates if family and family in candidate.lower()]
-        pool = family_candidates or candidates
-        # Prefer a normal Flash route when several same-family routes exist.
-        pool.sort(key=lambda candidate: (0 if 'flash' in candidate.lower() else 1, candidate))
-        fallback = pool[0]
-        with self.lock:
-            self.retired_fallbacks[model] = fallback
-        return fallback
 
     def filter_retired_models(self, value):
         """Remove aliases retired by an upstream availability response."""
@@ -640,19 +614,11 @@ class Handler(BaseHTTPRequestHandler):
                     'message': 'This internal Codex review model is disabled in Omni.'}})
                 return
             if self.server.model_retired(model):
-                fallback = self.server.replacement_for_retired(model)
-                if fallback:
-                    self.trace('model_retired_fallback', model=model, fallback=fallback,
-                               requested_model=requested_model)
-                    model = fallback
-                    request['model'] = fallback
-                    body = json.dumps(request, ensure_ascii=False).encode()
-                else:
-                    self.trace('model_retired', model=model, requested_model=requested_model)
-                    self.json_reply(410, {'error': {'type': 'invalid_request_error',
-                        'code': 'model_unavailable',
-                        'message': 'This model route is no longer available from its upstream provider. Refresh the model catalog and choose an available model.'}})
-                    return
+                self.trace('model_retired', model=model, requested_model=requested_model)
+                self.json_reply(410, {'error': {'type': 'invalid_request_error',
+                    'code': 'model_unavailable',
+                    'message': 'This TokenHarbor model route is no longer available from TokenHarbor. Refresh the model catalog and choose an available TokenHarbor model.'}})
+                return
             if self.path.split('?')[0] == '/v1/messages':
                 compacted, details = compact_messages_request(request, model, self.server.aliases)
                 if details:
@@ -753,23 +719,21 @@ class Handler(BaseHTTPRequestHandler):
                             self.server.jobs[ident]['auth_index'] = parts[1]
                 self.trace('upstream_headers', attempt=attempt, status=response.status)
                 try:
-                    if response.status in (429, 403, 502, 503, 504) or ('tokenharbor' in routed_model and response.status >= 400):
+                    tokenharbor_route = is_tokenharbor_route(model, routed_model)
+                    if response.status in (429, 403, 502, 503, 504) or (tokenharbor_route and response.status >= 400):
                         error = response.read()
                         self.trace('provider_rejected', status=response.status, reason=failure_reason(response.status, error) or 'Provider rejected request', **provider_error_metadata(error))
-                        if 'tokenharbor' in routed_model:
+                        if tokenharbor_route:
                             if free_offer_ended(error):
                                 self.server.retire_model(model)
                                 self.server.retire_model(routed_model)
-                                fallback = self.server.replacement_for_retired(model)
-                                if fallback and not started:
-                                    model = fallback
-                                    request['model'] = fallback
-                                    body = json.dumps(request, ensure_ascii=False).encode()
-                                    self.trace('model_retired_from_upstream', model=routed_model,
-                                               fallback=fallback, reason='free_offer_ended')
-                                    continue
                                 self.trace('model_retired_from_upstream', model=routed_model,
                                            reason='free_offer_ended')
+                                if not started:
+                                    self.json_reply(410, {'error': {'type': 'invalid_request_error',
+                                        'code': 'model_unavailable',
+                                        'message': 'TokenHarbor has ended the Claude Haiku 5.5 free offer. This route cannot be replaced automatically; refresh the model catalog and choose an available TokenHarbor model.'}})
+                                    return
                             self.deliver(response, error, started, stream)
                             return
                         # For Codex (/v1/responses): swallow all provider transient/capacity/quota errors (429, 403, 502, 503, 504).
