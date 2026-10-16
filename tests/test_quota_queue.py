@@ -10,7 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from quota_queue import (QueueServer, quota_wait, PING, augment_model_catalog,
-                         compact_messages_request, estimate_input_tokens)
+                         free_offer_ended,
+                         compact_messages_request, estimate_input_tokens,
+                         normalize_tool_history)
 
 
 def account(model='gemini', seconds=20, code=429):
@@ -35,7 +37,7 @@ class Mock(BaseHTTPRequestHandler):
         time.sleep(getattr(self.server, 'header_delay', 0))
         data = (b'event: message_start\ndata: {"type":"message_start","message":{"id":"real"}}\n\n'
                 b'event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"OK"}}\n\n'
-                b'event: message_stop\ndata: {"type":"message_stop"}\n\n') if self.server.status == 200 else b'{"error":{"type":"authentication_error","message":"Denied"}}'
+                b'event: message_stop\ndata: {"type":"message_stop"}\n\n') if self.server.status == 200 else getattr(self.server, 'error_body', b'{"error":{"type":"authentication_error","message":"Denied"}}')
         if getattr(self.server, 'json_nonstream', False) and not self.server.last_request.get('stream'):
             data = b'{"type":"message","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"}'
         if self.path == '/v1/responses' and self.server.status == 200:
@@ -76,6 +78,31 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(catalog['data'][0]['max_input_tokens'], 1048576)
 
+    def test_expired_tokenharbor_offer_retires_route_and_filters_catalog(self):
+        self.assertTrue(free_offer_ended(b'{"message":"The free offer has ended"}'))
+        self.assertFalse(free_offer_ended(b'{"message":"temporary upstream error"}'))
+        model = 'claude-haiku-5-5-tokenharbor-free'
+        self.gate.retire_model(model)
+        catalog, changed = self.gate.filter_retired_models({'data': [
+            {'id': model}, {'id': 'claude-sonnet-4-5'}
+        ]})
+        self.assertTrue(changed)
+        self.assertEqual([row['id'] for row in catalog['data']], ['claude-sonnet-4-5'])
+
+    def test_expired_tokenharbor_request_is_rejected_after_retirement(self):
+        model = 'claude-haiku-5-5-tokenharbor-free'
+        self.backend.status = 400
+        self.backend.error_body = b'{"error":{"type":"not_found_error","message":"The free offer \\"Claude Haiku 5.5\\" has ended."}}'
+        response = self.post(model=model)
+        self.assertEqual(response.status, 400)
+        response.read()
+        self.assertTrue(self.gate.model_retired(model))
+        self.gate.retire_model(model)
+        response = self.post(model=model)
+        self.assertEqual(response.status, 410)
+        body = json.loads(response.read())
+        self.assertEqual(body['error']['code'], 'model_unavailable')
+
     def test_oversized_custom_route_compacts_old_messages(self):
         request = {'model': 'custom', 'messages': [
             {'role': 'user', 'content': 'old ' * 500000},
@@ -89,6 +116,45 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(compacted['messages'][-1]['content'], 'Keep this newest request.')
         self.assertLess(details['final_tokens'], 900000)
         self.assertIn('Omni compacted', compacted['system'])
+
+    def test_orphaned_tool_results_are_removed_but_valid_pair_is_preserved(self):
+        request = {'messages': [
+            {'role': 'user', 'content': [
+                {'type': 'tool_result', 'tool_use_id': 'orphan', 'content': 'stale'}
+            ]},
+            {'role': 'assistant', 'content': [
+                {'type': 'tool_use', 'id': 'live', 'name': 'Bash', 'input': {}}
+            ]},
+            {'role': 'user', 'content': [
+                {'type': 'tool_result', 'tool_use_id': 'live', 'content': 'ok'},
+                {'type': 'text', 'text': 'Continue.'},
+            ]},
+        ]}
+        self.assertTrue(normalize_tool_history(request))
+        self.assertEqual(len(request['messages']), 2)
+        self.assertEqual(request['messages'][0]['role'], 'assistant')
+        self.assertEqual([b['type'] for b in request['messages'][1]['content']],
+                         ['tool_result', 'text'])
+
+    def test_compaction_does_not_leave_tool_result_without_its_call(self):
+        request = {'model': 'custom', 'messages': [
+            {'role': 'assistant', 'content': [
+                {'type': 'tool_use', 'id': 'old', 'name': 'Read', 'input': {}}
+            ]},
+            {'role': 'user', 'content': [
+                {'type': 'tool_result', 'tool_use_id': 'old', 'content': 'x' * 500000}
+            ]},
+            {'role': 'user', 'content': [
+                {'type': 'tool_result', 'tool_use_id': 'dropped-call', 'content': 'stale'}
+            ]},
+        ]}
+        compacted, _ = compact_messages_request(request, 'custom',
+                                                 {'custom': 'gemini-3.8-flash-high'})
+        normalize_tool_history(compacted)
+        for message in compacted['messages']:
+            for block in message.get('content', []) if isinstance(message.get('content'), list) else []:
+                if block.get('type') == 'tool_result':
+                    self.assertEqual(block['tool_use_id'], 'old')
     def test_reserve_guard_runs_before_upstream_and_failure_does_not_spend_quota(self):
         self.backend.files = []
         observed = []

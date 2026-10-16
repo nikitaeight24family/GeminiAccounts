@@ -246,6 +246,13 @@ class NativeBridge:
             self.refreshing = True
         try:
             self.controller.prepare()
+            # Reconcile client menus from the live gateway catalog on every
+            # inventory refresh. This also removes retired TokenHarbor routes
+            # from an approved Claude profile without touching credentials.
+            try:
+                self.integrations.reconcile_desktop_routes()
+            except (AccountError, OSError, ValueError):
+                pass
             sources = {'gemini': self.controller.accounts()}
             for provider, client in self.clients.items():
                 try:
@@ -597,6 +604,24 @@ class NativeBridge:
         elif action == 'remote_server_test':
             from remote_server import test_ssh_connection
             return test_ssh_connection(command.get('config') or {})
+        elif action == 'update_check':
+            from updater import check_update
+            release = check_update()
+            return {'available': bool(release), 'release': release,
+                    'current_version': __import__('runtime').VERSION}
+        elif action == 'update_install':
+            # The single update action downloads a verified release installer.
+            # The installer replaces both the desktop app and the bundled
+            # gateway binaries, then starts Omni again without another prompt.
+            from updater import check_update, download_update, launch_update
+            release = check_update()
+            if not release:
+                return {'started': False, 'available': False,
+                        'current_version': __import__('runtime').VERSION}
+            installer = download_update(self.controller, release)
+            launch_update(self.controller, installer)
+            return {'started': True, 'available': True,
+                    'version': release.get('version'), 'installer': str(installer)}
         elif action == 'remote_server_deploy':
             from remote_server import deploy_to_server
             def on_progress(msg):

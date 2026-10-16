@@ -1,7 +1,44 @@
 const state = { accounts: new Map(), collapsed: {}, summaryCollapsed: {}, hidden: true, visible: {}, language:'en',theme:'dark',backendMode:'local',remoteBackendStatus:{mode:'local',connected:true},remoteServer:{},remoteServerConfig:{},remoteSnippets:null,providers: ['openai','openai-free','gemini','claude','grok','tokenharbor'] };
+let updateRelease = null;
+let updateCheckTimer = null;
+function updateVersion(value){const match=String(value||'').replace(/^v/i,'').match(/^(\d+)\.(\d+)\.(\d+)/);return match?match.slice(1).map(Number):[0,0,0];}
+function updateVersionText(value){return String(value||'').replace(/^v/i,'');}
+async function checkForUpdates(){
+  if(!window.omni?.updateCheck)return;
+  try{
+    const result=await window.omni.updateCheck();
+    updateRelease=result?.available?result.release:null;
+    const button=$('update');
+    if(button){
+      button.hidden=!updateRelease;
+      if(updateRelease)button.title=`Обновить Omni и сервер до ${updateVersionText(updateRelease.version||updateRelease.tag_name)}`;
+    }
+    const version=updateRelease&&updateVersionText(updateRelease.version||updateRelease.tag_name);
+    const badge=document.getElementById('app-update-badge-text');
+    const stamp=document.getElementById('app-last-update-time');
+    if(stamp)stamp.textContent=`Последняя проверка: ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+    if(badge)badge.textContent=version?`Доступно обновление ${version}`:'Установлена последняя версия';
+    if(version)$('notice').textContent=`Доступно обновление Omni ${version}`;
+  }catch{ /* Offline update checks stay silent. */ }
+}
+function bindUpdateButton(){
+  const button=$('update');if(!button||button.dataset.bound)return;button.dataset.bound='1';
+  button.onclick=async()=>{
+    if(button.classList.contains('is-busy'))return;
+    button.classList.add('is-busy');button.disabled=true;button.title='Обновление Omni и сервера…';
+    try{
+      const result=await window.omni.updateInstall();
+      if(result?.started){$('notice').textContent='Обновление загружено. Omni и сервер перезапускаются…';}
+      else {button.hidden=true;$('notice').textContent='Установлена последняя версия Omni';}
+    }catch(error){button.classList.remove('is-busy');button.disabled=false;button.title='Обновить Omni и сервер';$('notice').textContent=error?.message||'Не удалось установить обновление';}
+  };
+  checkForUpdates();
+  clearInterval(updateCheckTimer);updateCheckTimer=setInterval(checkForUpdates,6*60*60*1000);
+}
 let omniLogoClicks=0, omniLogoClickTimer=null, omniEasterActive=false;
 const names = {gemini:'Antigravity',openai:'ChatGPT','openai-free':'ChatGPT Free',claude:'Claude',grok:'Grok',tokenharbor:'TokenHarbor'};
 const $ = id => document.getElementById(id);
+bindUpdateButton();
 const esc = value => String(value ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const translations={'Separate browser':'Отдельный браузер','Settings':'Настройки','Theme':'Тема','Language':'Язык','Dark':'Тёмная','Light':'Светлая','Refresh accounts':'Обновить аккаунты','Available':'Доступен','Paused':'Пауза','Limit exhausted':'Лимит исчерпан','Sign in again':'Войти заново','Account blocked':'Аккаунт заблокирован','Quota unavailable':'Квота недоступна','Loading quota':'Загрузка квоты','Updating…':'Обновление…','Recent response':'Недавний ответ','Verification required':'Нужна проверка','Access denied':'Доступ запрещён','Pause':'Приостановить','Resume':'Продолжить','Remove account':'Удалить аккаунт','Lower priority':'Уменьшить приоритет','Raise priority':'Увеличить приоритет','Reserve':'Граница остатка','Quota empty · rest stop':'Квота пуста · отстойник','Connected':'Подключено','Plan unknown':'Подписка неизвестна','Close':'Закрыть','Sign in':'Войти','API key':'API-ключ','Copy link':'Копировать ссылку','Open browser':'Открыть браузер','Paste':'Вставить','Complete sign-in':'Завершить вход','Add account':'Добавить аккаунт','Usage reset':'Сбросить квоту','Double-click to rename':'Двойной щелчок для переименования'};
 Object.assign(translations,{'Appearance':'Внешний вид','Accounts and services':'Аккаунты и сервисы','Accounts':'Аккаунты','Archive':'Архив','Services':'Сервисы','Notifications':'Уведомления','Connections':'Подключения','Make Omni comfortable to use.':'Настройте Omni под себя.','Window and account card colors':'Цвета окна и карточек аккаунтов','Interface language':'Язык интерфейса','Latest release':'Последняя версия','Visible services':'Видимые сервисы','Hidden services remain connected.':'Скрытые сервисы остаются подключёнными.','Manage connected accounts and portable archives.':'Управляйте подключёнными аккаунтами и переносимыми архивами.','Move selected accounts between computers.':'Переносите выбранные аккаунты между компьютерами.','Get notified when an account needs attention.':'Уведомления об аккаунтах, которым нужно внимание.','Account alerts':'Уведомления об аккаунтах','Only meaningful account status changes':'Только существенные изменения состояния','Bot token':'Токен бота','Token saved':'Токен сохранён','No token saved':'Токен не сохранён','Paste bot token':'Вставьте токен бота','Save':'Сохранить','Chat ID':'ID чата','Find chat':'Найти чат','Send test notification':'Отправить тестовое уведомление','Connect':'Подключить','Choose how to connect':'Выберите способ подключения','Sign in with Google':'Войти через Google','MoreLogin / another browser':'MoreLogin / другой браузер','Sign in with ChatGPT':'Войти через ChatGPT','Sign in with Claude':'Войти через Claude','Sign in with Grok':'Войти через Grok','Import auth.json':'Импорт auth.json','Resume sign-in':'Продолжить вход','Free model':'Бесплатная модель','Account name':'Название аккаунта','Account added':'Аккаунт добавлен','API billing is separate from subscriptions.':'API оплачивается отдельно от подписки.','Cancel sign-in':'Отменить вход','Sign-in cancelled':'Вход отменён','Callback URL / code':'Ссылка обратного вызова / код','Code accepted':'Код принят','Checking connections…':'Проверка подключений…','Configuration and model catalog verified':'Настройки и каталог моделей проверены','Not connected':'Не подключено','Application detected':'Приложение обнаружено','Application not detected':'Приложение не обнаружено','Restart application…':'Перезапустить приложение…','Restart':'Перезапустить','Running tasks may be interrupted. Save your work first.':'Текущие задачи могут прерваться. Сначала сохраните работу.','Catalog verification does not send a message to the model.':'Проверка каталога не отправляет сообщение модели.','Connected applications are checked and repaired automatically. Restarting always requires your permission.':'Подключения проверяются и восстанавливаются автоматически. Перезапуск — только с вашего разрешения.','Restart the application to load updated settings. Save your work first.':'Перезапустите приложение для применения настроек. Сначала сохраните работу.','Connection restored automatically':'Подключение восстановлено автоматически','A configured model is unavailable':'Одна из выбранных моделей недоступна','Choose an available model in the application:':'Выберите доступную модель в приложении. Сейчас недоступны:'});
@@ -165,6 +202,7 @@ function layoutForecasts(){
 }
 function quotaColor(value){return value==null?'var(--muted)':value>30?'var(--green)':value>10?'#f5c56b':'#ff8d8d';}
 function updateCard(el,a){
+  if(!el||!a)return;
   if(el.querySelector('.editor')||el.querySelector('.dragging'))return;
   const signature=JSON.stringify([state.hidden,state.language,state.theme,a]);
   if(el._markup!=null&&el._accountSignature===signature)return;
@@ -190,7 +228,7 @@ function command(action, fields){return window.omni.send(action,fields).catch(e=
 let startupSnapshotPending=true, firstInventoryPending=true, bufferedAccountEvents=[];
 function applyAccountEvent(e,paint=true){if(e.event==='account')state.accounts.set(e.account.id,e.account);if(e.event==='accounts'){const ids=new Set(e.ids);for(const id of state.accounts.keys())if(!ids.has(id))state.accounts.delete(id);}if(paint)queueRender();}
 function acceptAccountEvent(e){if(firstInventoryPending){bufferedAccountEvents.push(e);if(e.event!=='accounts')return;for(const buffered of bufferedAccountEvents)applyAccountEvent(buffered,false);bufferedAccountEvents=[];firstInventoryPending=false;queueRender();return;}applyAccountEvent(e);}
-window.omni.onEvent(e=>{if(e.event==='account'||e.event==='accounts'){if(startupSnapshotPending)bufferedAccountEvents.push(e);else acceptAccountEvent(e);} if(e.event==='preferences')applyPreferences(e.preferences); if(e.event==='ready')$('notice').textContent='● '+t('Connected'); if(e.event==='error'||e.event==='notice')$('notice').textContent=e.message; if(e.event==='remote_deploy_progress'){const m=$('ssh-deploy-msg'),b=$('ssh-deploy-progress');if(m&&b){b.style.display='block';m.textContent='● '+e.message;}}});
+window.omni.onEvent(e=>{if(e.event==='ready'){bindUpdateButton();checkForUpdates();} if(e.event==='account'||e.event==='accounts'){if(startupSnapshotPending)bufferedAccountEvents.push(e);else acceptAccountEvent(e);} if(e.event==='preferences')applyPreferences(e.preferences); if(e.event==='ready')$('notice').textContent='● '+t('Connected'); if(e.event==='error'||e.event==='notice')$('notice').textContent=e.message; if(e.event==='remote_deploy_progress'){const m=$('ssh-deploy-msg'),b=$('ssh-deploy-progress');if(m&&b){b.style.display='block';m.textContent='● '+e.message;}}});
 function applyPreferences(p){if(!p)return;state.language=p.language||'en';state.theme=p.theme||'dark';state.telegram=p.telegram||{};state.summaryCollapsed=p.summaryCollapsed||{};state.hidden=!!p.private;state.visible=p.visible||state.visible;state.backendMode=p.backendMode||'local';state.remoteBackendStatus=p.remoteBackendStatus||{mode:state.backendMode,connected:state.backendMode==='local'};state.remoteServer=p.remoteServer||{};state.remoteServerConfig=p.remoteServerConfig||{};state.remoteSnippets=p.remoteSnippets||null;localStorage.setItem('private',state.hidden?'1':'0');for(const [k,v] of Object.entries(p.collapsed||{}))state.collapsed[k]=v;document.documentElement.dataset.theme=p.theme||'dark';$('privacy').innerHTML=`<img src="assets/eye-${state.hidden?'closed':'open'}.png" alt="">`;$('pin').innerHTML='<img src="assets/pin.png" alt="">';render();}
 document.querySelector('.sidebar').addEventListener('click',e=>{const toggle=e.target.closest('[data-toggle]');if(toggle){const p=toggle.dataset.toggle;state.collapsed[p]=!state.collapsed[p];command('collapse',{provider:p,value:state.collapsed[p]});render();return}const b=e.target.closest('[data-action]');if(!b)return;const action=b.dataset.action;if(action==='priority'){const a=state.accounts.get(b.dataset.id);if(!a)return;const previous=Number(a.priority)||0;const next=Math.max(0,Math.min(999,previous+(Number(b.dataset.delta)||0)));if(next===previous)return;a.priority=next;render();command('priority',{id:b.dataset.id,delta:next-previous}).then(result=>{if(result===null){a.priority=previous;render();}});return;}if(action==='remove'&&!confirm(t('Remove account')+'?'))return;command(action,{id:b.dataset.id});});
 document.querySelector('.sidebar').addEventListener('dblclick',e=>{const name=e.target.closest('[data-rename]');if(!name||name.querySelector('input'))return;const id=name.dataset.rename,a=state.accounts.get(id),input=document.createElement('input');input.className='editor';input.value=a.customLabel||a.label||'';name.replaceChildren(input);input.focus();input.select();let saved=false;const finish=cancel=>{if(saved)return;saved=true;if(!cancel)command('rename',{id,label:input.value.trim()});if(input.isConnected)input.remove();const card=cardNodes.get(id);if(card){card._markup=null;updateCard(card,state.accounts.get(id)||a);}};input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();finish(false);}if(event.key==='Escape'){event.preventDefault();finish(true);}};input.onblur=()=>finish(false);});
@@ -247,7 +285,7 @@ function settings(){
     <section class="settings-page" data-settings-page="appearance">
       <div class="settings-section-head"><span class="settings-eyebrow">${t('Personalization')}</span><h2>${t('Appearance')}</h2><p>${t('Choose how Omni looks and how quickly changes appear.')}</p></div>
       <div class="settings-card settings-list-card"><label class="settings-row"><span><b>${t('Theme')}</b><small>${t('Window and account card colors')}</small></span><select id="theme"><option value="dark">${t('Dark')}</option><option value="light">${t('Light')}</option></select></label><label class="settings-row"><span><b>${t('Language')}</b><small>${t('Applies immediately')}</small></span><select id="language"><option value="en">English</option><option value="ru">Русский</option></select></label></div>
-      <div class="settings-card app-info-card"><div><span class="settings-eyebrow">${t('Application')}</span><h3>Omni</h3><small>${t('Current version')} · ${window.omni?.version||'—'}</small></div><div class="settings-actions"><button id="refresh">${t('Sync accounts')}</button><button id="github">${t('Check for updates')}</button></div></div></section>
+      <div class="settings-card app-info-card"><div><span class="settings-eyebrow">${t('Application')}</span><h3>Omni</h3><small>${t('Current version')} · ${window.omni?.version||'—'}</small></div><div class="settings-actions"><button id="refresh">${t('Sync accounts')}</button></div></div></section>
     <section class="settings-page" data-settings-page="accounts" hidden>
       <div class="settings-section-head"><span class="settings-eyebrow">${t('Accounts and providers')}</span><h2>${t('Accounts')}</h2><p>${t('Choose which providers stay visible in the main view.')}</p></div>
       <div class="settings-card settings-list-card settings-service-switches">${[['gemini','Antigravity'],['openai','OpenAI'],['claude','Claude'],['grok','Grok'],['tokenharbor','TokenHarbor']].map(([p,n])=>`<label class="settings-provider-row"><span class="settings-provider">${providerIcon(p)}<span><b>${n}</b><small>${counts[p]?counts[p]+' '+t('accounts'):t('No accounts connected')}</small></span></span><span class="settings-provider-state">${visible[p]!==false?t('Visible'):t('Hidden')}<input class="switch" type="checkbox" data-service="${p}" ${visible[p]!==false?'checked':''}></span></label>`).join('')}</div>
@@ -421,7 +459,6 @@ function settings(){
   $('tg-find').onclick=()=>command('telegram_find');
   $('tg-test').onclick=()=>command('telegram_test');
   $('refresh').onclick=()=>command('refresh');
-  $('github').onclick=()=>window.omni.open('https://github.com/nikitaeight24family/Omni/releases/latest');
   setupInlineArchive();
 }
 command('snapshot').then(result=>{if(result){applyPreferences(result.preferences);for(const a of result.accounts||[])state.accounts.set(a.id,a);firstInventoryPending=!result.inventoryComplete;}const events=bufferedAccountEvents;bufferedAccountEvents=[];startupSnapshotPending=false;for(const e of events)acceptAccountEvent(e);queueRender();});

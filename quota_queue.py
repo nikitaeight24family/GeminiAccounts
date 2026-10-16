@@ -154,6 +154,14 @@ def augment_model_catalog(value, aliases):
     return value, changed
 
 
+def free_offer_ended(error):
+    """Recognize a permanently retired limited-time free-model offer."""
+    if isinstance(error, bytes):
+        error = error.decode('utf-8', errors='replace')
+    text = str(error or '').lower()
+    return ('free offer' in text and ('ended' in text or 'expired' in text))
+
+
 def normalize_sdk_system(request):
     """Drop only the standalone SDK identity line; never edit user messages or tools."""
     def clean(text):
@@ -186,6 +194,76 @@ def normalize_sdk_system(request):
             else:
                 request.pop('system')
     return changed
+
+
+def normalize_tool_history(request):
+    """Remove orphaned Anthropic tool results before gateway conversion.
+
+    Claude Code can resume a transcript after compaction or a reconnect with a
+    ``tool_result`` whose preceding ``tool_use`` was already discarded.  The
+    Gemini adapter maps those blocks to ``functionResponse`` and rejects the
+    whole request when no matching ``functionCall`` exists.  Keep valid tool
+    exchanges untouched and remove only results that cannot be paired with the
+    immediately preceding assistant tool call.
+    """
+    messages = request.get('messages')
+    if not isinstance(messages, list):
+        return False
+
+    cleaned = []
+    pending = set()
+    changed = False
+    for message in messages:
+        if not isinstance(message, dict):
+            cleaned.append(message)
+            pending.clear()
+            continue
+        role = message.get('role')
+        content = message.get('content')
+        if role == 'assistant':
+            pending = {
+                str(block.get('id')).strip()
+                for block in content or []
+                if isinstance(content, list) and isinstance(block, dict)
+                and block.get('type') == 'tool_use' and block.get('id')
+            }
+            cleaned.append(message)
+            continue
+        if role != 'user' or not isinstance(content, list):
+            cleaned.append(message)
+            pending.clear()
+            continue
+
+        blocks = []
+        message_changed = False
+        for block in content:
+            if isinstance(block, dict) and block.get('type') == 'tool_result':
+                tool_id = str(block.get('tool_use_id') or '').strip()
+                if not tool_id or tool_id not in pending:
+                    # This is precisely the block that becomes an invalid
+                    # Gemini functionResponse.  Do not send it upstream.
+                    message_changed = True
+                    continue
+                pending.discard(tool_id)
+            blocks.append(block)
+        if message_changed:
+            changed = True
+            if blocks:
+                cleaned.append({**message, 'content': blocks})
+            # An all-tool-result message is omitted instead of forwarding an
+            # empty Anthropic message, which some clients reject themselves.
+        else:
+            cleaned.append(message)
+        pending.clear()
+
+    if not changed:
+        return False
+    if not cleaned:
+        # Keep the Anthropic request structurally valid when the transcript
+        # consisted solely of orphaned tool results.
+        cleaned = [{'role': 'user', 'content': '[Omni repaired an orphaned tool result.]'}]
+    request['messages'] = cleaned
+    return True
 
 
 def deadline(item):
@@ -259,6 +337,64 @@ class QueueServer(ThreadingHTTPServer):
         self.aliases_checked = 0
         self.model_catalog = {}
         self.model_catalog_checked = 0
+        self.retired_models = set()
+        self.retired_fallbacks = {}
+
+    def retire_model(self, model):
+        model = str(model or '').strip()
+        if model:
+            with self.lock:
+                self.retired_models.add(model)
+
+    def model_retired(self, model):
+        with self.lock:
+            return model in self.retired_models
+
+    def replacement_for_retired(self, model):
+        """Pick a live Claude-shaped route for an ended offer.
+
+        Claude Code can keep the old model in an already-open session even
+        after the gateway catalog has been refreshed.  Keep that request
+        usable while the client reloads its menu by selecting the closest
+        currently advertised route (Haiku first, then another Claude route).
+        """
+        with self.lock:
+            if model in self.retired_fallbacks:
+                return self.retired_fallbacks[model]
+            retired = set(self.retired_models)
+            aliases = set(self.aliases)
+        candidates = sorted(
+            candidate for candidate in aliases
+            if candidate != model and candidate not in retired
+            and candidate.startswith('claude-')
+            and 'tokenharbor' not in candidate.lower()
+        )
+        if not candidates:
+            return None
+        lowered = str(model).lower()
+        family = 'haiku' if 'haiku' in lowered else 'sonnet' if 'sonnet' in lowered else 'opus' if 'opus' in lowered else ''
+        family_candidates = [candidate for candidate in candidates if family and family in candidate.lower()]
+        pool = family_candidates or candidates
+        # Prefer a normal Flash route when several same-family routes exist.
+        pool.sort(key=lambda candidate: (0 if 'flash' in candidate.lower() else 1, candidate))
+        fallback = pool[0]
+        with self.lock:
+            self.retired_fallbacks[model] = fallback
+        return fallback
+
+    def filter_retired_models(self, value):
+        """Remove aliases retired by an upstream availability response."""
+        if not isinstance(value, dict) or not isinstance(value.get('data'), list):
+            return value, False
+        with self.lock:
+            retired = set(self.retired_models)
+        if not retired:
+            return value, False
+        rows = [item for item in value['data']
+                if not isinstance(item, dict) or item.get('id') not in retired]
+        if len(rows) == len(value['data']):
+            return value, False
+        return dict(value, data=rows), True
 
     def refresh_model_catalog(self, accounts):
         """Refresh per-account GPT catalogs without naming a specific model."""
@@ -485,6 +621,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.path.split('?')[0] == '/v1/messages' and normalize_sdk_system(request):
                 self.trace('sdk_identity_removed')
                 body = json.dumps(request, ensure_ascii=False).encode()
+            if self.path.split('?')[0] == '/v1/messages' and normalize_tool_history(request):
+                self.trace('tool_history_normalized')
+                body = json.dumps(request, ensure_ascii=False).encode()
             requested_model = model
             request_texts = getattr(self.server, 'request_texts', None)
             if request_texts:
@@ -500,6 +639,20 @@ class Handler(BaseHTTPRequestHandler):
                     'code': 'model_disabled',
                     'message': 'This internal Codex review model is disabled in Omni.'}})
                 return
+            if self.server.model_retired(model):
+                fallback = self.server.replacement_for_retired(model)
+                if fallback:
+                    self.trace('model_retired_fallback', model=model, fallback=fallback,
+                               requested_model=requested_model)
+                    model = fallback
+                    request['model'] = fallback
+                    body = json.dumps(request, ensure_ascii=False).encode()
+                else:
+                    self.trace('model_retired', model=model, requested_model=requested_model)
+                    self.json_reply(410, {'error': {'type': 'invalid_request_error',
+                        'code': 'model_unavailable',
+                        'message': 'This model route is no longer available from its upstream provider. Refresh the model catalog and choose an available model.'}})
+                    return
             if self.path.split('?')[0] == '/v1/messages':
                 compacted, details = compact_messages_request(request, model, self.server.aliases)
                 if details:
@@ -507,6 +660,12 @@ class Handler(BaseHTTPRequestHandler):
                     body = json.dumps(request, ensure_ascii=False).encode()
                     self.trace('context_compacted', model=model,
                                upstream_model=self.server.aliases.get(model, model), **details)
+                # Compaction can discard the assistant tool call while keeping
+                # its newest result.  Run the pairing check again after the
+                # slice so the adapter never receives an orphaned response.
+                if normalize_tool_history(request):
+                    body = json.dumps(request, ensure_ascii=False).encode()
+                    self.trace('tool_history_normalized_after_compaction')
         except (ValueError, KeyError, TypeError):
             self.forward(body)
             return
@@ -594,10 +753,23 @@ class Handler(BaseHTTPRequestHandler):
                             self.server.jobs[ident]['auth_index'] = parts[1]
                 self.trace('upstream_headers', attempt=attempt, status=response.status)
                 try:
-                    if response.status in (429, 403, 502, 503, 504):
+                    if response.status in (429, 403, 502, 503, 504) or ('tokenharbor' in routed_model and response.status >= 400):
                         error = response.read()
                         self.trace('provider_rejected', status=response.status, reason=failure_reason(response.status, error) or 'Provider rejected request', **provider_error_metadata(error))
                         if 'tokenharbor' in routed_model:
+                            if free_offer_ended(error):
+                                self.server.retire_model(model)
+                                self.server.retire_model(routed_model)
+                                fallback = self.server.replacement_for_retired(model)
+                                if fallback and not started:
+                                    model = fallback
+                                    request['model'] = fallback
+                                    body = json.dumps(request, ensure_ascii=False).encode()
+                                    self.trace('model_retired_from_upstream', model=routed_model,
+                                               fallback=fallback, reason='free_offer_ended')
+                                    continue
+                                self.trace('model_retired_from_upstream', model=routed_model,
+                                           reason='free_offer_ended')
                             self.deliver(response, error, started, stream)
                             return
                         # For Codex (/v1/responses): swallow all provider transient/capacity/quota errors (429, 403, 502, 503, 504).
@@ -812,6 +984,9 @@ class Handler(BaseHTTPRequestHandler):
             if response.status == 200:
                 try:
                     value = json.loads(data)
+                    value, retired = self.server.filter_retired_models(value)
+                    if retired:
+                        self.trace('retired_models_filtered')
                     value, changed = augment_model_catalog(value, self.server.aliases)
                 except (ValueError, TypeError):
                     changed = False

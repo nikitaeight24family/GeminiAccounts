@@ -307,6 +307,46 @@
       overflow-y: auto;
     }
 
+    /* Settings navigation is a single horizontal strip. */
+    #settings-view.settings-prototype .workspace {
+      display: block;
+    }
+    #settings-view.settings-prototype .sidebar-nav {
+      width: 100%;
+      height: auto;
+      min-height: 48px;
+      position: sticky;
+      top: 0;
+      z-index: 8;
+      flex-direction: row;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-right: 0;
+      border-bottom: 1px solid var(--border-subtle);
+      overflow: hidden;
+    }
+    #settings-view.settings-prototype .nav-list {
+      flex: 1;
+      min-width: 0;
+      flex-direction: row;
+      align-items: center;
+      gap: 4px;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+    #settings-view.settings-prototype .nav-list li {
+      flex: 0 0 auto;
+    }
+    #settings-view.settings-prototype .nav-btn {
+      width: auto;
+      min-height: 34px;
+      white-space: nowrap;
+    }
+    #settings-view.settings-prototype .sidebar-nav > .t-meta {
+      display: none;
+    }
+
     .nav-list {
       list-style: none;
       display: flex;
@@ -789,6 +829,15 @@
       border-bottom: none;
     }
 
+    /* Step numbers and manual route application were removed from the final flow. */
+    #settings-view.settings-prototype .step-num,
+    #settings-view.settings-prototype .remote-step-number {
+      display: none !important;
+    }
+    #settings-view.settings-prototype #btn-apply-route {
+      display: none !important;
+    }
+
     .archive-group-row td {
       padding: 7px 12px;
       background: var(--bg-surface-raised);
@@ -912,6 +961,10 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: var(--space-3);
+    }
+
+    #screen-remote .form-grid .field-group:nth-child(3) {
+      grid-column: 2;
     }
 
     .field-group {
@@ -1085,6 +1138,9 @@
       }
       .main-stage {
         padding: var(--space-3);
+      }
+      #screen-remote .form-grid .field-group:nth-child(3) {
+        grid-column: auto;
       }
     }
   

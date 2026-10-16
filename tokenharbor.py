@@ -137,13 +137,18 @@ class TokenHarbor:
     def sync_desktop_model(self):
         """Restore a connected TokenHarbor model in an approved Claude profile."""
         with self.integrations.lock:
-            if not self.connected():
-                return False
             path = self.approved_desktop_preset()
             if path is None:
                 return False
             preset = self.integrations.read_json(path)
             models = preset.setdefault('inferenceModels', [])
+            if not self.connected():
+                filtered = [model for model in models if model.get('name') != CLIENT_MODEL]
+                if len(filtered) == len(models):
+                    return False
+                preset['inferenceModels'] = filtered
+                self.integrations.write_json(path, preset)
+                return True
             if any(model.get('name') == CLIENT_MODEL for model in models):
                 return False
             models.append(self.desktop_model())

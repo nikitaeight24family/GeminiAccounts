@@ -382,6 +382,17 @@ ipcMain.handle('bridge-send', async (event, action, fields) => {
   }
   return send(action, fields);
 });
+ipcMain.handle('update-check', async () => send('update_check', {}));
+ipcMain.handle('update-install', async () => {
+  const result = await send('update_install', {});
+  if (result?.started) {
+    // The verified installer replaces the desktop app and bundled server,
+    // then starts the new build. Close this process immediately so files are
+    // not locked while the installer runs.
+    setTimeout(() => app.quit(), 250);
+  }
+  return result;
+});
 ipcMain.handle('chatgpt-auto-login', beginChatGPTAutoLogin);
 app.whenReady().then(()=>{if(!demo){const timer=setInterval(repairExpiredAccounts,60000);timer.unref();setTimeout(repairExpiredAccounts,15000);}});
 ipcMain.handle('chatgpt-auto-login-cancel',(_,state)=>cancelChatGPTAutoLogin(state));
