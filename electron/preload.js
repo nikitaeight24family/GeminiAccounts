@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('omni', {
+  version: '1.6.5',
   send: (action, fields) => ipcRenderer.invoke('bridge-send', action, fields || {}),
   chatgptAutoLogin: credentials => ipcRenderer.invoke('chatgpt-auto-login', credentials),
   chatgptAutoLoginCancel: state => ipcRenderer.invoke('chatgpt-auto-login-cancel', state),
