@@ -777,8 +777,34 @@
       overflow-wrap: anywhere;
     }
 
+    #screen-connections .table-actions {
+      min-width: 0;
+    }
+
+    #screen-connections .table-actions .btn {
+      max-width: 100%;
+    }
+
     .data-table tr:last-child td {
       border-bottom: none;
+    }
+
+    .archive-group-row td {
+      padding: 7px 12px;
+      background: var(--bg-surface-raised);
+      color: var(--text-secondary);
+      font-size: var(--text-meta);
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .archive-group-row td strong {
+      color: var(--text-primary);
+      margin-right: 8px;
+    }
+
+    .btn:disabled {
+      opacity: .5;
+      cursor: not-allowed;
     }
 
     .data-table tbody tr.clickable-row {
@@ -833,6 +859,7 @@
     .wizard-step.locked-step {
       opacity: 0.58;
       background-color: var(--bg-app);
+      pointer-events: none;
     }
 
     .wizard-step-header {

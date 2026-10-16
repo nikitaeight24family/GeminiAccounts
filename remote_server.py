@@ -34,7 +34,7 @@ def validate_ssh_config(config):
         raise AccountError('Enter a server host or IP address first.')
     if any(char.isspace() for char in host):
         raise AccountError('Server host cannot contain spaces.')
-    user = _safe_text(config.get('user') or 'root')
+    user = _safe_text(config.get('user') or 'omni_operator')
     if not user:
         raise AccountError('Enter an SSH username first.')
     try:
@@ -136,7 +136,7 @@ def run_ssh_command(config, remote_cmd, stdin_data=None, timeout=120):
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     host = _safe_text(config.get('host'))
     port = int(config.get('port') or 22)
-    user = _safe_text(config.get('user') or 'root')
+    user = _safe_text(config.get('user') or 'omni_operator')
 
     pkey = None
     if key_path and os.path.exists(key_path):
@@ -728,7 +728,7 @@ echo "OMNI_DEPLOY_OK:$CLIENT_KEY"
     server_pref = {
         'host': server_ip,
         'port': config.get('port', 22),
-        'user': config.get('user', 'root'),
+        'user': config.get('user', 'omni_operator'),
         'key_path': config.get('key_path', ''),
         'use_fido': bool(config.get('use_fido')),
         'client_key': client_key,

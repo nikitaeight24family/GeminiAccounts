@@ -578,7 +578,7 @@ class NativeBridge:
             prefs.setdefault('visible-services', {})[provider] = bool(command['value'])
         elif action in ('theme', 'language', 'private'):
             value = command['value']
-            if action == 'theme' and value not in ('dark', 'light'):
+            if action == 'theme' and value not in ('dark', 'light', 'system'):
                 raise ValueError('Unknown theme')
             if action == 'language' and value not in ('en', 'ru'):
                 raise ValueError('Unknown language')
@@ -643,7 +643,7 @@ class NativeBridge:
             prefs['remote-server-config'] = {
                 'host': str(cfg.get('host') or '').strip(),
                 'port': int(cfg.get('port') or 22),
-                'user': str(cfg.get('user') or 'root').strip(),
+                'user': str(cfg.get('user') or 'omni_operator').strip(),
                 'key_path': str(cfg.get('key_path') or '').strip(),
                 'use_fido': bool(cfg.get('use_fido'))
             }
