@@ -197,7 +197,7 @@ document.querySelector('.sidebar').addEventListener('dblclick',e=>{const name=e.
 $('privacy').onclick=()=>{state.hidden=!state.hidden;localStorage.setItem('private',state.hidden?'1':'0');render();command('private',{value:state.hidden});};
 $('pin').onclick=()=>window.omni.pin().then(v=>{$('pin').classList.toggle('active',v);$('notice').textContent=v?'Pinned above other windows':'Window pin disabled';});
  $('summaries').addEventListener('click',e=>{const toggle=e.target.closest('[data-summary]');if(toggle){const p=toggle.dataset.summary;state.summaryCollapsed[p]=state.summaryCollapsed[p]===false;command('summary_collapse',{provider:p,value:state.summaryCollapsed[p]});renderSummary();return;}const add=e.target.closest('[data-add]');if(add){$('settings-view').hidden=true;document.body.classList.remove('settings-open');document.querySelector('.sidebar').hidden=false;window.omni.panel(false);window.omni.accountManager(add.dataset.add).catch(error=>{$('notice').textContent=error.message;});}});
-$('settings').onclick=()=>{connectionsVisible=false;const open=$('settings-view').hidden;$('settings-view').hidden=!open;document.body.classList.toggle('settings-open',open);document.querySelector('.sidebar').hidden=open;window.omni.panel(open);if(open)settings();};
+$('settings').onclick=()=>{connectionsVisible=false;const open=$('settings-view').hidden;$('settings-view').hidden=!open;document.body.classList.toggle('settings-open',open);document.querySelector('.sidebar').hidden=false;window.omni.panel(open);if(open)settings();};
 function archiveInlinePrompt(title, confirm=false){
  const value=window.prompt(title+'\n'+t('At least 8 characters.')); if(value===null||value.length<8)return '';
  if(confirm){const again=window.prompt(t('Confirm password'));if(again!==value)return '';}
@@ -223,7 +223,7 @@ function setupInlineArchive(){const exportButton=$('inline-archive-export'),impo
 function settings(){
   document.body.classList.add('settings-open');
   const mainSidebar=document.querySelector('.sidebar');
-  if(mainSidebar)mainSidebar.hidden=true;
+  if(mainSidebar)mainSidebar.hidden=false;
   $('settings-view').classList.add('settings-prototype');
   if(window.renderOmniSettingsPrototype){ window.renderOmniSettingsPrototype({state,t,esc,providerIcon,command}); return; }
   $('settings-view').querySelector('h1').textContent=t('Settings');
@@ -474,7 +474,7 @@ function renderConnections(){
  host.querySelectorAll('[data-restart]').forEach(button=>button.onclick=async()=>{const row=connectionRows.find(r=>r.id===button.dataset.restart);if(!row||!confirm(t('Restart')+' '+row.name+'? '+t('Running tasks may be interrupted. Save your work first.')))return;button.disabled=true;try{const result=await command('restart_client',{client:row.id,confirmed:true});if(result?.message)$('notice').textContent=t(result.message);const rows=await command('connections');if(Array.isArray(rows))connectionRows=rows;renderConnections();}finally{if(button.isConnected)button.disabled=false;}});
 }
 async function openConnectionsPanel(){
-  connectionsVisible=true;$('settings-view').hidden=false;document.body.classList.add('settings-open');document.querySelector('.sidebar').hidden=true;window.omni.panel(true);
+  connectionsVisible=true;$('settings-view').hidden=false;document.body.classList.add('settings-open');document.querySelector('.sidebar').hidden=false;window.omni.panel(true);
   if(!document.querySelector('[data-settings-page="connections"]'))settings();
   document.querySelectorAll('[data-settings-tab]').forEach(b=>b.classList.remove('selected'));
   document.querySelector('[data-settings-connections]')?.classList.add('selected');

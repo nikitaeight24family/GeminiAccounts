@@ -41,14 +41,14 @@ button:focus-visible{outline:2px solid #739aff;outline-offset:2px}
 
 /* Google AI Studio settings surface. Keep the existing account sidebar intact
    while giving the expanded settings view its own compact design system. */
-#settings-view.settings-prototype{left:0!important;right:0!important;top:0!important;bottom:0!important;padding:0!important;overflow-y:auto!important;overflow-x:hidden!important;background:#111318!important;z-index:30;scrollbar-width:none}
+#settings-view.settings-prototype{left:280px!important;right:0!important;top:0!important;bottom:0!important;padding:0!important;overflow-y:auto!important;overflow-x:hidden!important;background:#111318!important;z-index:30;scrollbar-width:none}
 #settings-view.settings-prototype::-webkit-scrollbar,#settings-view.settings-prototype *::-webkit-scrollbar{display:none;width:0;height:0}
 #settings-view.settings-prototype,#settings-view.settings-prototype *{scrollbar-width:none}
 #settings-view.settings-prototype .main-stage{overflow-x:hidden;min-width:0}
 #settings-view.settings-prototype .table-wrap{overflow-x:hidden}
 #settings-view.settings-prototype .code-box{overflow-x:hidden;white-space:pre-wrap;overflow-wrap:anywhere}
 body.settings-open{overflow:hidden}
-body.settings-open>.sidebar{display:none!important}
+body.settings-open>.sidebar{display:flex!important}
 #settings-view.settings-prototype>h1{display:none!important}
 #settings-view.settings-prototype #settings-content{height:100%;min-height:100%;padding:0}
 #settings-view.settings-prototype .app-shell{min-height:100%;height:auto}
