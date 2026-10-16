@@ -277,9 +277,15 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.github_release_button = self.button(body_header, '', self.open_github_release)
         self.github_release_button.configure(image=self.github_icon, width=39, height=39, fg_color='transparent')
         self.github_release_button.pack(side='right', padx=(0, 10))
-        self.telegram_button = self.button(body_header, '✈', self.open_telegram)
-        self.telegram_button.configure(width=39, height=39, fg_color='transparent', text_color='#2AABEE',
-                                       hover_color='#263452', font=('Segoe UI Symbol', 18))
+        telegram_icon = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+        telegram_draw = ImageDraw.Draw(telegram_icon)
+        telegram_draw.ellipse((2, 2, 62, 62), fill='#2AABEE')
+        telegram_draw.polygon([(15, 31), (50, 17), (43, 48), (31, 39), (24, 47), (25, 35)], fill='white')
+        telegram_draw.polygon([(25, 35), (42, 23), (31, 39)], fill='#b8e8fb')
+        self.telegram_icon = ctk.CTkImage(light_image=telegram_icon, dark_image=telegram_icon, size=(22, 22))
+        self.telegram_button = self.button(body_header, '', self.open_telegram)
+        self.telegram_button.configure(image=self.telegram_icon, width=39, height=39, fg_color='transparent',
+                                       hover_color='#263452')
         self.telegram_button.pack(side='right', padx=(0, 8))
         ctk.CTkLabel(self.body, text='Switch accounts while continuing your Claude sessions.', text_color=MUTED, font=('Segoe UI', 14)).pack(anchor='w', pady=(4, 24))
         self.mode_frame = ctk.CTkFrame(self.body, fg_color=CARD, corner_radius=14)
