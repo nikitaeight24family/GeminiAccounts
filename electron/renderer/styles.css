@@ -148,3 +148,40 @@ button:focus-visible{outline:2px solid #739aff;outline-offset:2px}
 .remote-mode-status{min-height:17px;margin-top:7px;color:var(--muted);font-size:11px}.remote-mode-status.ok{color:var(--green)}.remote-mode-status.error{color:#ff6b7a}.remote-mode-status.pending{color:#f5c56b}
 .backend-switch-btn:disabled{cursor:wait}
 .help-circle-btn{width:28px!important;height:28px!important;min-width:28px!important;max-width:28px!important;aspect-ratio:1/1!important;flex:0 0 28px!important;padding:0!important;border-radius:999px!important;line-height:1!important;overflow:hidden!important}
+
+/* Remote server: keep the configuration readable without wasting the page. */
+#settings-view{padding:14px!important}
+#settings-view>h1{margin-bottom:12px;font-size:19px}
+.settings-nav{max-width:760px;margin-bottom:12px;padding:3px;gap:3px}
+.settings-nav button{padding:6px 10px!important;font-size:11px!important;border-radius:6px!important}
+.settings-pages{max-width:760px}
+.settings-card{padding:12px 14px;margin-bottom:10px;border-radius:9px}
+.remote-server-card,.remote-mode-card{padding:11px 13px}
+.remote-server-card .settings-card-head-row{margin-bottom:7px}
+.remote-server-card .settings-card-head-row h2,.remote-mode-card h2{font-size:14px}
+.remote-server-card .settings-description,.remote-mode-card .settings-description{font-size:10px;line-height:1.3;margin-bottom:6px}
+.remote-route-status{min-height:28px;padding:5px 8px;margin-bottom:7px;border-radius:6px;font-size:10px}
+.remote-route-dot{width:7px;height:7px}
+.remote-route-copy{gap:1px}.remote-route-copy b{font-size:10px}.remote-route-copy small{font-size:9px}
+.remote-server-card .ssh-form{gap:7px;margin-top:5px}
+.remote-server-card .ssh-row-2col,.remote-server-card .ssh-row-equal{gap:7px}
+.remote-server-card .ssh-row-2col{grid-template-columns:minmax(0,1fr) 105px}
+.remote-server-card .ssh-input-group{gap:3px}
+.remote-server-card .ssh-input-group label{font-size:9px;letter-spacing:.3px}
+.remote-server-card .ssh-input-group label small{font-size:8px;margin-left:4px}
+.remote-server-card .ssh-input-group input{height:29px;padding:5px 8px!important;font-size:11px!important;border-radius:5px!important}
+.remote-server-card .ssh-file-picker{gap:6px}.remote-server-card .ssh-file-picker button{height:29px;padding:0 10px!important;font-size:10px!important;border-radius:5px!important}
+.remote-server-card .ssh-fido-box{min-height:34px;padding:6px 8px;margin-top:0;border-radius:5px}
+.remote-server-card .ssh-fido-box b{font-size:10px;margin-bottom:1px}.remote-server-card .ssh-fido-box small{font-size:9px}
+.remote-server-card .ssh-actions-bar{gap:6px;padding-top:7px;margin-top:0}
+.remote-server-card .ssh-actions-bar button{height:29px;padding:5px 10px!important;font-size:10px!important;border-radius:5px!important}
+.remote-server-card .ssh-status-tag{font-size:10px}
+.remote-mode-card .settings-card-head-row{margin-bottom:5px}.route-check-label{font-size:9px;padding-top:2px}
+.segmented-switch{padding:3px;border-radius:7px;gap:3px;margin-top:7px}
+.segmented-switch button{min-height:31px;padding:6px 10px!important;border-radius:5px!important;font-size:10px!important}
+.remote-mode-status{min-height:14px;margin-top:5px;font-size:10px}
+.client-snippet-row{padding:9px 10px;margin-bottom:9px}.client-snippet-code{padding:7px 9px;font-size:9px;max-height:100px}
+.client-snippet-restore{gap:6px;margin-top:6px;padding-top:6px;font-size:10px}.client-snippet-restore>small{font-size:9px}
+.client-snippet-restore .client-snippet-actions button{padding:3px 6px!important;font-size:9px!important}
+.help-circle-btn{width:24px!important;height:24px!important;min-width:24px!important;max-width:24px!important;flex-basis:24px!important;font-size:11px!important}
+@media(max-width:650px){.remote-server-card .ssh-row-2col,.remote-server-card .ssh-row-equal{grid-template-columns:1fr}.settings-pages{max-width:none}}
