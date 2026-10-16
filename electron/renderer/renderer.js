@@ -285,7 +285,7 @@ function settings(){
     <section class="settings-page" data-settings-page="appearance">
       <div class="settings-section-head"><span class="settings-eyebrow">${t('Personalization')}</span><h2>${t('Appearance')}</h2><p>${t('Choose how Omni looks and how quickly changes appear.')}</p></div>
       <div class="settings-card settings-list-card"><label class="settings-row"><span><b>${t('Theme')}</b><small>${t('Window and account card colors')}</small></span><select id="theme"><option value="dark">${t('Dark')}</option><option value="light">${t('Light')}</option></select></label><label class="settings-row"><span><b>${t('Language')}</b><small>${t('Applies immediately')}</small></span><select id="language"><option value="en">English</option><option value="ru">Русский</option></select></label></div>
-      <div class="settings-card app-info-card"><div><span class="settings-eyebrow">${t('Application')}</span><h3>Omni</h3><small>${t('Current version')} · ${window.omni?.version||'—'}</small></div><div class="settings-actions"><button id="refresh">${t('Sync accounts')}</button></div></div></section>
+      <div class="settings-card app-info-card"><div><span class="settings-eyebrow">${t('Application')}</span><h3>Omni</h3><small>${t('Current version')} · ${window.omni?.version||'—'}</small></div><div class="settings-actions"><button id="refresh">${t('Sync accounts')}</button><button id="open-github" class="icon-link" aria-label="GitHub" title="GitHub">GitHub ↗</button><button id="open-telegram" class="icon-link" aria-label="Telegram" title="Telegram"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none"><circle cx="12" cy="12" r="10" fill="#2AABEE"/><path d="m6.8 11.7 9.75-3.76c.45-.16.84.11.69.8l-1.66 7.83c-.12.56-.45.7-.91.44l-2.65-1.95-1.28 1.24c-.14.14-.26.26-.54.26l.19-2.7 4.92-4.45c.21-.19-.05-.3-.33-.12l-6.08 3.83-2.62-.82c-.57-.18-.58-.57.12-.84Z" fill="white"/></svg></button></div></div></section>
     <section class="settings-page" data-settings-page="accounts" hidden>
       <div class="settings-section-head"><span class="settings-eyebrow">${t('Accounts and providers')}</span><h2>${t('Accounts')}</h2><p>${t('Choose which providers stay visible in the main view.')}</p></div>
       <div class="settings-card settings-list-card settings-service-switches">${[['gemini','Antigravity'],['openai','OpenAI'],['claude','Claude'],['grok','Grok'],['tokenharbor','TokenHarbor']].map(([p,n])=>`<label class="settings-provider-row"><span class="settings-provider">${providerIcon(p)}<span><b>${n}</b><small>${counts[p]?counts[p]+' '+t('accounts'):t('No accounts connected')}</small></span></span><span class="settings-provider-state">${visible[p]!==false?t('Visible'):t('Hidden')}<input class="switch" type="checkbox" data-service="${p}" ${visible[p]!==false?'checked':''}></span></label>`).join('')}</div>
@@ -423,6 +423,8 @@ function settings(){
   };
   $('theme').value=state.theme;
   $('language').value=state.language;
+  $('open-github')?.addEventListener('click',()=>window.omni.open('https://github.com/nikitaeight24family/Omni/releases/latest'));
+  $('open-telegram')?.addEventListener('click',()=>window.omni.open('https://t.me/truevibers'));
   document.querySelectorAll('[data-service]').forEach(input=>input.onchange=e=>command('visibility',{provider:e.target.dataset.service,value:e.target.checked}));
   $('theme').onchange=e=>command('theme',{value:e.target.value});
   $('language').onchange=e=>command('language',{value:e.target.value});

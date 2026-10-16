@@ -1,3 +1,11 @@
+# Omni 1.6.6 — Settings and remote server workflow
+
+- Rebuilt Settings as a compact, localized workflow with clear state, diagnostics, archive controls and Telegram setup.
+- Fixed remote route gating: an unverified server cannot be selected, while an installed server reports its existing access key.
+- Fixed SSH form layout to a 2×2 grid and protected displayed host and login values.
+- Stabilized the renderer when dynamic account elements disappear during refresh.
+- Kept automatic update checks aligned with the installed release version.
+
 # Omni 1.6.5 — CI-verified desktop release
 
 - Removed the redundant Connections button from the top bar; Connections remains available inside Settings.

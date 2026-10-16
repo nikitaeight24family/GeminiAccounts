@@ -1,7 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('omni', {
-  version: '1.6.5',
+  version: '1.6.6',
   send: (action, fields) => ipcRenderer.invoke('bridge-send', action, fields || {}),
   updateCheck: () => ipcRenderer.invoke('update-check'),
   updateInstall: () => ipcRenderer.invoke('update-install'),

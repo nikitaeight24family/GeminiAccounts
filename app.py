@@ -277,6 +277,10 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
         self.github_release_button = self.button(body_header, '', self.open_github_release)
         self.github_release_button.configure(image=self.github_icon, width=39, height=39, fg_color='transparent')
         self.github_release_button.pack(side='right', padx=(0, 10))
+        self.telegram_button = self.button(body_header, '✈', self.open_telegram)
+        self.telegram_button.configure(width=39, height=39, fg_color='transparent', text_color='#2AABEE',
+                                       hover_color='#263452', font=('Segoe UI Symbol', 18))
+        self.telegram_button.pack(side='right', padx=(0, 8))
         ctk.CTkLabel(self.body, text='Switch accounts while continuing your Claude sessions.', text_color=MUTED, font=('Segoe UI', 14)).pack(anchor='w', pady=(4, 24))
         self.mode_frame = ctk.CTkFrame(self.body, fg_color=CARD, corner_radius=14)
         self.mode_frame.pack(fill='x', pady=(0, 18))
@@ -404,6 +408,9 @@ class App(ProviderSupport, ClaudeSupport, ctk.CTk):
     def open_github_release(self):
         from updater import REPO
         webbrowser.open('https://github.com/' + REPO + '/releases/latest')
+
+    def open_telegram(self):
+        webbrowser.open('https://t.me/truevibers')
 
     def open_display_settings(self):
         if getattr(self, 'restore_details_job', None):

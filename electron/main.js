@@ -435,7 +435,7 @@ ipcMain.handle('archive-import', async (event, fields = {}) => {
   return imported;
 });
 ipcMain.handle('open-connections-window',()=>openConnectionsWindow());
-ipcMain.handle('open-external', (_, url) => {const target=new URL(url);if(target.protocol!=='https:'||!['github.com','accounts.google.com','auth.openai.com','claude.ai','grok.com','x.ai','accounts.x.ai','auth.x.ai'].includes(target.hostname))throw new Error('Unsupported link');return shell.openExternal(target.href);});
+ipcMain.handle('open-external', (_, url) => {const target=new URL(url);if(target.protocol!=='https:'||!['github.com','t.me','accounts.google.com','auth.openai.com','claude.ai','grok.com','x.ai','accounts.x.ai','auth.x.ai'].includes(target.hostname))throw new Error('Unsupported link');return shell.openExternal(target.href);});
 ipcMain.handle('window-pin',()=>{windowRef.setAlwaysOnTop(!windowRef.isAlwaysOnTop());saveWindow();return windowRef.isAlwaysOnTop();});
 ipcMain.handle('window-panel',(event,expanded)=>{const target=BrowserWindow.fromWebContents(event.sender)||windowRef;const [x,y]=target.getPosition();const [,height]=target.getSize();if(target===windowRef)target.setBounds({x,y,width:expanded?1120:280,height});return expanded;});
 ipcMain.handle('import-auth',async(event)=>{const owner=BrowserWindow.fromWebContents(event.sender)||windowRef;const result=await dialog.showOpenDialog(owner,{title:'Import ChatGPT auth.json',properties:['openFile'],filters:[{name:'JSON',extensions:['json']}]});if(result.canceled)return {cancelled:true};return send('import',{path:result.filePaths[0]});});

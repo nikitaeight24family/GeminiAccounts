@@ -92,7 +92,12 @@ public sealed class MainWindow : Window
         languageChoice.SelectedIndex=0; languageChoice.SelectionChanged+=async (_,_)=>{
             if(!applying) await Action("language",new {value=languageChoice.SelectedIndex==1 ? "ru":"en"});
         }; settings.Children.Add(languageChoice);
-        settings.Children.Add(Button("GitHub ↗",(_,_)=>Open("https://github.com/nikitaeight24family/Omni/releases/latest")));
+        var projectLinks = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        projectLinks.Children.Add(Button("GitHub ↗",(_,_)=>Open("https://github.com/nikitaeight24family/Omni/releases/latest")));
+        var telegramLink = Button("✈",(_,_)=>Open("https://t.me/truevibers"));
+        telegramLink.ToolTip = "Telegram";
+        projectLinks.Children.Add(telegramLink);
+        settings.Children.Add(projectLinks);
         Loaded+=(_,_)=>{
             if(demo) LoadDemo(); else {bridge!.Start(); timer.Start();}
             if(Environment.GetCommandLineArgs().Contains("--self-test")) Dispatcher.BeginInvoke(SelfTest,DispatcherPriority.ApplicationIdle);

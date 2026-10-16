@@ -37,6 +37,7 @@ button:focus-visible{outline:2px solid #739aff;outline-offset:2px}
 .settings-row .switch:checked{background:#527cd5!important;border-color:#527cd5!important}.settings-row .switch:checked:before{transform:translateX(15px);background:white}
 .settings-field{display:flex;justify-content:space-between;font-size:12px;margin:16px 0 7px}.settings-field .settings-description{margin:0}.settings-input-action{display:flex;gap:8px}.settings-input-action input{flex:1;min-width:0;margin:0!important;font-size:13px!important}.settings-input-action button{white-space:nowrap}
 .settings-actions{display:flex;gap:8px;margin-top:16px}.settings-card button{padding:8px 13px!important;font-size:12px!important;border-radius:7px!important}
+.settings-actions .icon-link{display:grid;place-items:center;min-width:34px;padding:7px!important}.settings-actions .icon-link svg{width:17px;height:17px;display:block}
 @media(max-width:760px){#settings-view{padding:14px!important}.settings-card{padding:14px}.settings-nav button{padding:8px!important}.settings-row{gap:10px}}
 
 /* Google AI Studio settings surface. Keep the existing account sidebar intact
