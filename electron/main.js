@@ -140,7 +140,10 @@ function startBridge() {
     args = [];
   } else {
     const script = path.join(root, 'native_bridge.py');
-    command = process.platform === 'win32' ? 'python' : 'python3';
+    const venvPython = process.platform === 'win32'
+      ? path.join(root, '.venv', 'Scripts', 'python.exe')
+      : path.join(root, '.venv', 'bin', 'python');
+    command = fs.existsSync(venvPython) ? venvPython : (process.platform === 'win32' ? 'python' : 'python3');
     args = [script];
   }
   bridge = spawn(command, args, { cwd: root, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });

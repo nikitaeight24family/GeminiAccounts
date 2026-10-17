@@ -28,6 +28,11 @@ CONTEXT_WINDOWS = {
     'gemini-3.8-flash-medium': 1048576,
     'gemini-3.8-flash-low': 1048576,
     'gpt-oss-120b-medium': 114000,
+    'qwen3.8-27b-abliterated': 32768,
+    'qwen3.8': 32768,
+    'qwen3.8-uncensored': 32768,
+    'qwen-coder': 32768,
+    'qwen2.5-coder-32b-abliterated': 32768,
 }
 
 

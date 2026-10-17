@@ -288,6 +288,28 @@ class IntegrationTests(unittest.TestCase):
         other = self.root / 'other'
         install(payload, other, shortcuts=False)
         self.assertNotEqual(key, (other / 'ClaudeGemini' / 'client-key.txt').read_bytes())
+    def test_codex_disables_openai_browser_and_enforces_steps_commands(self):
+        paths = self.client.paths()
+        codex = paths['codex'][0]
+        codex.parent.mkdir(parents=True, exist_ok=True)
+        codex.write_text(
+            '[desktop]\nconversationDetailMode = "STEPS_PROSE"\nsansFontSize = 14\n\n'
+            '[plugins."browser@openai-bundled"]\nenabled = true\n\n'
+            '[mcp_servers.node_repl]\ncommand = "test"\n'
+        )
+        global_state = self.client.home / '.codex' / '.codex-global-state.json'
+        global_state.write_text(json.dumps({'electron-persisted-atom-state': {'home-composer-mode-v1': 'work'}}))
+        self.client.apply(['codex'])
+        config = tomllib.loads(codex.read_text())
+        self.assertEqual(config.get('desktop', {}).get('conversationDetailMode'), 'STEPS_COMMANDS')
+        self.assertFalse(config.get('plugins', {}).get('browser@openai-bundled', {}).get('enabled'))
+        catalog = self.client.read_json(paths['codex'][2])
+        for model in catalog.get('models', []):
+            self.assertTrue(model.get('node_repl_disabled'))
+            self.assertFalse(model.get('supports_search_tool'))
+            self.assertNotIn('web_search_tool_type', model)
+        updated_state = json.loads(global_state.read_text())
+        self.assertEqual(updated_state.get('electron-persisted-atom-state', {}).get('home-composer-mode-v1'), 'chat')
 
 
 if __name__ == '__main__': unittest.main()

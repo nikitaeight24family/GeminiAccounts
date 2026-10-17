@@ -10,8 +10,12 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
-import tkinter as tk
-from tkinter import messagebox
+try:
+    import tkinter as tk
+    from tkinter import messagebox
+except ImportError:
+    tk = None
+    messagebox = None
 import bcrypt
 import yaml
 from backend import dpapi, atomic_write, Controller

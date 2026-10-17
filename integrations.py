@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import tomllib
 from pathlib import Path
@@ -332,11 +333,49 @@ class Integrations:
         defaults = 'model = ' + json.dumps(model) + '\nmodel_provider = "gemini_accounts"\n'
         if self.write_codex_catalog(catalog_path, previous_catalog, live_models=models):
             defaults += 'model_catalog_json = ' + json.dumps(str(catalog_path.resolve())) + '\n'
+
+        # Ensure desktop settings don't trigger Work browser mode which requires OpenAI account
+        root = re.sub(r'(?m)^\s*conversationDetailMode\s*=.*\n?', '', root)
+        desktop_section = re.search(r'(?m)^\[desktop\](?:\n.*?)(?=(?:^\[|\Z))', tables, re.S)
+        if desktop_section:
+            sec_text = desktop_section.group()
+            if re.search(r'(?m)^\s*conversationDetailMode\s*=', sec_text):
+                new_sec = re.sub(r'(?m)^\s*conversationDetailMode\s*=.*$', 'conversationDetailMode = "STEPS_COMMANDS"', sec_text)
+            else:
+                new_sec = sec_text.rstrip() + '\nconversationDetailMode = "STEPS_COMMANDS"\n'
+            tables = tables[:desktop_section.start()] + new_sec + tables[desktop_section.end():]
+        else:
+            tables = '\n[desktop]\nconversationDetailMode = "STEPS_COMMANDS"\n' + tables
+
+        # Disable OpenAI bundled browser which requires OpenAI cloud credentials
+        plugin_section = re.search(r'(?m)^\[plugins\."browser@openai-bundled"\](?:\n.*?)(?=(?:^\[|\Z))', tables, re.S)
+        if plugin_section:
+            sec_text = plugin_section.group()
+            if re.search(r'(?m)^\s*enabled\s*=', sec_text):
+                new_sec = re.sub(r'(?m)^\s*enabled\s*=.*$', 'enabled = false', sec_text)
+            else:
+                new_sec = sec_text.rstrip() + '\nenabled = false\n'
+            tables = tables[:plugin_section.start()] + new_sec + tables[plugin_section.end():]
+        else:
+            tables += '\n[plugins."browser@openai-bundled"]\nenabled = false\n'
+
         updated = defaults + root + '\n' + tables.rstrip() + '\n\n' + BEGIN + '\n' + self.provider_toml(key) + END + '\n'
         tomllib.loads(updated)
         path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(path, updated.encode())
         atomic_write(profile, (defaults + '\n' + self.provider_toml(key)).encode())
+
+        # Reset any persisted "work" mode in global state so Codex stays in chat/code mode
+        global_state_path = self.home / '.codex' / '.codex-global-state.json'
+        if global_state_path.exists():
+            try:
+                gdata = self.read_json(global_state_path)
+                atoms = gdata.get('electron-persisted-atom-state')
+                if isinstance(atoms, dict) and atoms.get('home-composer-mode-v1') == 'work':
+                    atoms['home-composer-mode-v1'] = 'chat'
+                    self.write_json(global_state_path, gdata)
+            except Exception:
+                pass
 
     def write_codex_catalog(self, target, previous_catalog=None, live_models=None):
         """Extend Codex's local catalog while keeping its existing model rows."""
@@ -414,6 +453,15 @@ class Integrations:
                     entry['supported_reasoning_levels'] = [{'effort': effort, 'description': effort.title() + ' reasoning'}]
             models.append(entry)
         models.sort(key=lambda m: m.get('priority', 50))
+        for entry in models:
+            entry['node_repl_disabled'] = True
+            entry['supports_search_tool'] = False
+            entry.pop('web_search_tool_type', None)
+        for t in catalog.get('_omni_template', []):
+            if isinstance(t, dict):
+                t['node_repl_disabled'] = True
+                t['supports_search_tool'] = False
+                t.pop('web_search_tool_type', None)
         if not target.exists() or self.read_json(target) != catalog:
             self.write_json(target, catalog)
         return True
@@ -569,9 +617,62 @@ class Integrations:
             return restored
 
     @staticmethod
+    def _restart_desktop_macos(clients):
+        import time
+        targets = {
+            'codex': ['ChatGPT', 'Codex'],
+            'claude_desktop': ['Claude'],
+        }
+        for client in clients:
+            names = targets.get(client)
+            if not names:
+                continue
+            matched_app = None
+            matched_bundle = None
+            for name in names:
+                res = subprocess.run(['pgrep', '-x', name], capture_output=True, text=True)
+                if res.returncode == 0:
+                    pids = res.stdout.strip().split()
+                    if pids:
+                        matched_app = name
+                        comm = subprocess.run(['ps', '-p', pids[0], '-o', 'comm='], capture_output=True, text=True).stdout.strip()
+                        if '.app/' in comm:
+                            matched_bundle = comm.split('.app/')[0] + '.app'
+                        break
+            if not matched_app:
+                for name in names:
+                    candidate = Path(f'/Applications/{name}.app')
+                    if candidate.exists():
+                        subprocess.Popen(['open', str(candidate)])
+                        break
+                continue
+
+            subprocess.run(['osascript', '-e', f'tell application "{matched_app}" to quit'], capture_output=True)
+            exited = False
+            for _ in range(50):
+                time.sleep(0.1)
+                res = subprocess.run(['pgrep', '-x', matched_app], capture_output=True)
+                if res.returncode != 0:
+                    exited = True
+                    break
+            if not exited:
+                subprocess.run(['pkill', '-TERM', '-x', matched_app], capture_output=True)
+                time.sleep(0.5)
+                res = subprocess.run(['pgrep', '-x', matched_app], capture_output=True)
+                if res.returncode == 0:
+                    subprocess.run(['pkill', '-KILL', '-x', matched_app], capture_output=True)
+                    time.sleep(0.5)
+
+            target_path = matched_bundle or f'/Applications/{matched_app}.app'
+            subprocess.Popen(['open', target_path])
+
+    @staticmethod
     def restart_desktop(clients):
         """Restart an identified client with its original launch arguments and graceful close."""
         if os.name != 'nt':
+            if sys.platform == 'darwin':
+                Integrations._restart_desktop_macos(clients)
+                return
             raise AccountError('Restart desktop clients manually on this platform.')
         env = os.environ.copy()
         env['GEMINI_ACCOUNTS_RESTART_CLIENTS'] = json.dumps(clients)

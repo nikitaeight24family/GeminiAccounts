@@ -584,7 +584,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.forward(body)
             return
         if not any(secrets.compare_digest(token.encode(), key.encode()) for token in tokens for key in self.server.client_keys):
-            self.trace('authentication_rejected', status=401)
+            self.trace('authentication_rejected', status=401, tokens=[t[:12] + '...' if len(t) > 12 else t for t in tokens])
             self.json_reply(401, {'error': {'type': 'authentication_error', 'message': 'Invalid API key'}})
             return
         try:
@@ -606,6 +606,16 @@ class Handler(BaseHTTPRequestHandler):
             if normalized != model:
                 model = normalized
                 request['model'] = model
+                body = json.dumps(request, ensure_ascii=False).encode()
+            # Normalize reasoning effort for models like Qwen 3.8 that support (xhigh, medium, low) but not 'high'
+            changed_reasoning = False
+            if request.get('reasoning') and isinstance(request['reasoning'], dict) and request['reasoning'].get('effort') == 'high':
+                request['reasoning']['effort'] = 'medium'
+                changed_reasoning = True
+            if request.get('reasoning_effort') == 'high':
+                request['reasoning_effort'] = 'medium'
+                changed_reasoning = True
+            if changed_reasoning:
                 body = json.dumps(request, ensure_ascii=False).encode()
             if is_disabled_model(model):
                 self.trace('model_disabled', model=model, requested_model=requested_model)
