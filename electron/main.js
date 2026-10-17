@@ -128,6 +128,7 @@ function scheduleSaveWindow(){clearTimeout(saveWindowTimer);saveWindowTimer=setT
 
 function sourceRoot() {
   if (process.env.OMNI_SOURCE_ROOT) return process.env.OMNI_SOURCE_ROOT;
+  if (app.isPackaged) return process.resourcesPath;
   return path.resolve(__dirname, '..');
 }
 
@@ -197,15 +198,21 @@ function send(action, fields = {}) {
 function createWindow() {
   try{windowSettings=JSON.parse(fs.readFileSync(settingsPath(),'utf8'));}catch{}
   const saved = windowSettings.height >= 600 && windowSettings.height <= 1600 ? windowSettings : {};
-  const appIcon = path.join(__dirname, '..', 'assets', 'omni.icns');
+  const {pinned, width, ...savedBounds} = saved;
   const pngIcon = path.join(__dirname, 'renderer', 'assets', 'omni.png');
-  const icon = fs.existsSync(appIcon) ? appIcon : pngIcon;
+  const winIcon = path.join(sourceRoot(), 'app.ico');
+  const icon = process.platform === 'win32'
+    ? (fs.existsSync(winIcon) ? winIcon : pngIcon)
+    : (process.platform === 'darwin' ? undefined : pngIcon);
   windowRef = new BrowserWindow({ width: 280, height: 1040,...savedBounds, minWidth: 280, minHeight: 680,
-    title: 'Omni', backgroundColor: '#10141d', show: false, icon,
+    title: 'Omni', backgroundColor: '#10141d', show: false, ...(icon ? {icon} : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: !selfTest } });
   windowRef.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   windowRef.setAlwaysOnTop(!!windowSettings.pinned);
   windowRef.once('ready-to-show', () => {if(!selfTest)windowRef.show();});
+  windowRef.webContents.once('did-finish-load', () => {
+    if (!selfTest && windowRef && !windowRef.isVisible()) windowRef.show();
+  });
   windowRef.on('move',scheduleSaveWindow);
   windowRef.on('resize',scheduleSaveWindow);
   windowRef.on('close',saveWindow);
@@ -371,11 +378,9 @@ function cancelChatGPTAutoLogin(state) { closeAutoLogin(state, null, null); retu
 app.whenReady().then(() => {
   if (!demo && !app.hasSingleInstanceLock()) return;
   if (process.platform === 'darwin' && app.dock) {
-    const iconPath = path.join(__dirname, '..', 'assets', 'omni.icns');
     const pngPath = path.join(__dirname, 'renderer', 'assets', 'omni.png');
     try {
-      if (fs.existsSync(iconPath)) app.dock.setIcon(iconPath);
-      else if (fs.existsSync(pngPath)) app.dock.setIcon(pngPath);
+      if (fs.existsSync(pngPath)) app.dock.setIcon(pngPath);
     } catch {}
   }
   Menu.setApplicationMenu(null);

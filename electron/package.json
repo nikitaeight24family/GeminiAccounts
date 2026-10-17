@@ -27,23 +27,29 @@
       "preload.js",
       "renderer/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "../dist/Omni-Backend.exe",
-        "to": "Omni-Backend.exe"
-      }
-    ],
     "mac": {
       "target": "dir",
       "icon": "../assets/omni.icns",
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "extraResources": [
+        {
+          "from": "../dist/Omni-Backend",
+          "to": "Omni-Backend"
+        }
+      ]
     },
     "win": {
       "target": [
         "nsis",
         "portable"
       ],
-      "icon": "../app.ico"
+      "icon": "../app.ico",
+      "extraResources": [
+        {
+          "from": "../dist/Omni-Backend.exe",
+          "to": "Omni-Backend.exe"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
