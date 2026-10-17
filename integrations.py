@@ -25,7 +25,12 @@ class Integrations:
     def __init__(self, controller, home=None, local=None):
         self.controller = controller
         self.home = Path(home or Path.home())
-        self.local = Path(local or os.environ.get('LOCALAPPDATA', storage_root()))
+        if local is not None:
+            self.local = Path(local)
+        elif sys.platform == 'darwin':
+            self.local = self.home / 'Library' / 'Application Support'
+        else:
+            self.local = Path(os.environ.get('LOCALAPPDATA', storage_root()))
         self.windows_desktop = os.name == 'nt' or local is not None
         self.backup_path = controller.data_dir / 'client-config-backups.dpapi'
         self.lock = threading.RLock()
@@ -98,16 +103,26 @@ class Integrations:
         unresolved = routes - known.keys()
         if unresolved:
             raise AccountError('Connected Claude models are missing from the gateway catalog. Reconnect Claude Desktop from the application.')
-        live = self.controller.request('/oauth-model-alias').get('oauth-model-alias') or {}
-        aliases = {entry.get('alias'): entry.get('name') for entry in live.get('antigravity', [])}
-        if all(aliases.get(route) == known[route] for route in routes):
-            return menu_changed
-        self.configure_desktop_routes([known[route] for route in sorted(routes)], replace=False)
+        try:
+            live = self.controller.request('/oauth-model-alias').get('oauth-model-alias') or {}
+            aliases = {entry.get('alias'): entry.get('name') for entry in live.get('antigravity', [])}
+            if all(aliases.get(route) == known[route] for route in routes):
+                return menu_changed
+            self.configure_desktop_routes([known[route] for route in sorted(routes)], replace=False)
+        except (AccountError, OSError, KeyError, ValueError):
+            pass
         return True
 
     def detected(self):
+        claude_desktop_detected = (
+            any((self.local / p).exists() for p in ('AnthropicClaude', 'Claude-3p', 'Claude')) or
+            (sys.platform == 'darwin' and (
+                Path('/Applications/Claude.app').exists() or
+                (self.home / 'Applications' / 'Claude.app').exists()
+            ))
+        )
         return {
-            'claude_desktop': self.windows_desktop and any((self.local / p).exists() for p in ('AnthropicClaude', 'Claude-3p', 'Claude')),
+            'claude_desktop': bool(claude_desktop_detected),
             'claude_cli': bool(shutil.which('claude') or (self.home / '.claude').exists()),
             'codex': bool(shutil.which('codex') or (self.home / '.codex').exists()),
         }
@@ -210,8 +225,8 @@ class Integrations:
         clients = list(dict.fromkeys(clients))
         if not clients or any(client not in self.paths() for client in clients):
             raise AccountError('Choose applications to connect.')
-        if 'claude_desktop' in clients and not self.windows_desktop:
-            raise AccountError('Automatic Claude Desktop setup is available on Windows. Use Claude Code CLI on this platform.')
+        if 'claude_desktop' in clients and not (self.windows_desktop or sys.platform == 'darwin'):
+            raise AccountError('Automatic Claude Desktop setup is available on Windows and macOS. Use Claude Code CLI on this platform.')
         key = (self.controller.proxy_dir / 'client-key.txt').read_text('utf-8-sig').strip()
         if not key:
             raise AccountError('Local connection key not found.')
@@ -520,7 +535,10 @@ class Integrations:
                     env.pop(key, None)
         else:
             gemini = sorted(m for m in models if m.startswith('gemini-') and m != 'gemini-selected')
-            self.configure_desktop_routes(gemini)
+            try:
+                self.configure_desktop_routes(gemini)
+            except (AccountError, OSError, KeyError, ValueError):
+                pass
             # Claude Desktop validates every inferenceModels entry as an
             # Anthropic route.  The shared gateway catalog also contains
             # Codex/OpenAI and internal routes; those belong in Codex or the
