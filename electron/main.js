@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, shell, Menu, dialog, safeStorage } = require('electron');
+app.setName('Omni');
 const {CredentialStore} = require('./credential_store');
 function credentialStore(){return new CredentialStore(path.join(app.getPath('userData'),'automatic-sign-in.bin'),safeStorage);}
 const { spawn } = require('child_process');
@@ -196,9 +197,11 @@ function send(action, fields = {}) {
 function createWindow() {
   try{windowSettings=JSON.parse(fs.readFileSync(settingsPath(),'utf8'));}catch{}
   const saved = windowSettings.height >= 600 && windowSettings.height <= 1600 ? windowSettings : {};
-  const {pinned, width, ...savedBounds}=saved;
+  const appIcon = path.join(__dirname, '..', 'assets', 'omni.icns');
+  const pngIcon = path.join(__dirname, 'renderer', 'assets', 'omni.png');
+  const icon = fs.existsSync(appIcon) ? appIcon : pngIcon;
   windowRef = new BrowserWindow({ width: 280, height: 1040,...savedBounds, minWidth: 280, minHeight: 680,
-    title: 'Omni', backgroundColor: '#10141d', show: false,
+    title: 'Omni', backgroundColor: '#10141d', show: false, icon,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: !selfTest } });
   windowRef.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   windowRef.setAlwaysOnTop(!!windowSettings.pinned);
@@ -365,7 +368,21 @@ async function beginChatGPTAutoLogin(event, line, target = null) {
 
 function cancelChatGPTAutoLogin(state) { closeAutoLogin(state, null, null); return true; }
 
-app.whenReady().then(() => { if(!demo&&!app.hasSingleInstanceLock())return; Menu.setApplicationMenu(null); if(!demo)startBridge(); createWindow(); if(demo)windowRef.webContents.once('did-finish-load',()=>runDemo()); });
+app.whenReady().then(() => {
+  if (!demo && !app.hasSingleInstanceLock()) return;
+  if (process.platform === 'darwin' && app.dock) {
+    const iconPath = path.join(__dirname, '..', 'assets', 'omni.icns');
+    const pngPath = path.join(__dirname, 'renderer', 'assets', 'omni.png');
+    try {
+      if (fs.existsSync(iconPath)) app.dock.setIcon(iconPath);
+      else if (fs.existsSync(pngPath)) app.dock.setIcon(pngPath);
+    } catch {}
+  }
+  Menu.setApplicationMenu(null);
+  if (!demo) startBridge();
+  createWindow();
+  if (demo) windowRef.webContents.once('did-finish-load', () => runDemo());
+});
 app.on('before-quit',()=>{quitting=true;clearTimeout(bridgeRetryTimer);for(const state of [...autoLoginWindows.keys()])closeAutoLogin(state,null,null);});
 app.on('window-all-closed', () => {quitting=true;clearTimeout(bridgeRetryTimer); clearTimeout(saveWindowTimer); if (bridge) {const child=bridge;bridge.stdin.end();if(process.platform==='win32')spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{windowsHide:true});else child.kill();} if (process.platform !== 'darwin') app.quit(); });
 ipcMain.handle('bridge-send', async (event, action, fields) => {

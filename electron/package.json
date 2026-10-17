@@ -33,6 +33,11 @@
         "to": "Omni-Backend.exe"
       }
     ],
+    "mac": {
+      "target": "dir",
+      "icon": "../assets/omni.icns",
+      "category": "public.app-category.developer-tools"
+    },
     "win": {
       "target": [
         "nsis",
